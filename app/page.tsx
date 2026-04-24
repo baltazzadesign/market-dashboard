@@ -446,50 +446,117 @@ export default function Home() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let mounted = true;
+
+    const normalizeMarketResponse = (res: any): MarketResponse => {
+      const foreign = Number(res.foreign ?? res.foreignFlow ?? 0);
+      const inst = Number(res.inst ?? res.instFlow ?? 0);
+      const indiv = Number(res.indiv ?? res.indivFlow ?? 0);
+
+      const normalized: MarketResponse = {
+        up: Number(res.up ?? 0),
+        down: Number(res.down ?? 0),
+        diff: Number(res.diff ?? 0),
+        accel: Number(res.accel ?? 0),
+        flat: Number(res.flat ?? 0),
+        upRatio: Number(res.upRatio ?? 0),
+        downRatio: Number(res.downRatio ?? 0),
+        kospi: Number(res.kospi ?? 0),
+        kosdaq: Number(res.kosdaq ?? 0),
+        kospiUp: Number(res.kospiUp ?? 0),
+        kospiDown: Number(res.kospiDown ?? 0),
+        kosdaqUp: Number(res.kosdaqUp ?? 0),
+        kosdaqDown: Number(res.kosdaqDown ?? 0),
+        foreign,
+        inst,
+        indiv,
+        marketTone: res.marketTone ?? "중립",
+        marketScore: Number(res.marketScore ?? 0),
+        marketState: res.marketState ?? "NEUTRAL",
+        signal: res.signal ?? "",
+        alert: res.alert ?? "",
+        baseAlert: res.baseAlert ?? "",
+        topSignal: res.topSignal ?? res.signals?.[0] ?? null,
+        signals: Array.isArray(res.signals) ? res.signals : [],
+        flowPower: Number(res.flowPower ?? foreign + inst),
+        prevFlowPower: Number(res.prevFlowPower ?? 0),
+        flowTrend: Number(res.flowTrend ?? 0),
+        flowMomentum: Number(res.flowMomentum ?? res.flowPower ?? foreign + inst),
+        flowSource: res.flowSource ?? "",
+      };
+
+      normalized.signal = buildMarketSignal(normalized);
+      return normalized;
+    };
+
+    const toSnapshot = (res: any): Snapshot => {
+      const normalized = normalizeMarketResponse(res);
+
+      return {
+        time: String(
+          res.time ??
+            new Date().toLocaleTimeString("ko-KR", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })
+        ),
+        up: normalized.up,
+        down: normalized.down,
+        diff: normalized.diff,
+        accel: normalized.accel,
+        flat: normalized.flat,
+        upRatio: normalized.upRatio,
+        downRatio: normalized.downRatio,
+        kospi: normalized.kospi,
+        kosdaq: normalized.kosdaq,
+        foreign: getFlowValue(normalized, "foreign"),
+        inst: getFlowValue(normalized, "inst"),
+        indiv: getFlowValue(normalized, "indiv"),
+        marketTone: normalized.marketTone ?? "중립",
+        marketState: normalized.marketState ?? "NEUTRAL",
+        marketScore: Number(normalized.marketScore ?? 0),
+        signal: normalized.signal ?? "중립",
+        flowPower: Number(normalized.flowPower ?? 0),
+        flowTrend: Number(normalized.flowTrend ?? 0),
+        flowMomentum: Number(normalized.flowMomentum ?? 0),
+      };
+    };
+
+    const loadSavedRows = async () => {
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/market/daily?date=${today}`, {
+          cache: "no-store",
+        });
+        const result = await response.json();
+
+        if (!mounted || !result?.ok || !Array.isArray(result.rows)) return;
+
+        const restoredHistory = result.rows.map(toSnapshot).slice(-120);
+        setHistory(restoredHistory);
+
+        const latest = result.latest ?? result.rows[result.rows.length - 1];
+        if (latest) {
+          setData(normalizeMarketResponse(latest));
+        }
+      } catch {
+        // 저장된 기록이 아직 없어도 실시간 조회는 계속 진행합니다.
+      }
+    };
+
     const fetchData = () => {
-      fetch("/api/market/live")
+      fetch("/api/market/live", { cache: "no-store" })
         .then((res) => res.json())
         .then((res: MarketResponse) => {
+          if (!mounted) return;
+
           if (res.error) {
             setError(`${res.error} / ${res.detail ?? ""}`);
             return;
           }
 
-          const foreign = getFlowValue(res, "foreign");
-          const inst = getFlowValue(res, "inst");
-          const indiv = getFlowValue(res, "indiv");
-          const normalized: MarketResponse = {
-            up: Number(res.up ?? 0),
-            down: Number(res.down ?? 0),
-            diff: Number(res.diff ?? 0),
-            accel: Number(res.accel ?? 0),
-            flat: Number(res.flat ?? 0),
-            upRatio: Number(res.upRatio ?? 0),
-            downRatio: Number(res.downRatio ?? 0),
-            kospi: Number(res.kospi ?? 0),
-            kosdaq: Number(res.kosdaq ?? 0),
-            kospiUp: Number(res.kospiUp ?? 0),
-            kospiDown: Number(res.kospiDown ?? 0),
-            kosdaqUp: Number(res.kosdaqUp ?? 0),
-            kosdaqDown: Number(res.kosdaqDown ?? 0),
-            foreign,
-            inst,
-            indiv,
-            marketTone: res.marketTone ?? "중립",
-            marketScore: Number(res.marketScore ?? 0),
-            marketState: res.marketState ?? "NEUTRAL",
-            signal: res.signal ?? "",
-            alert: res.alert ?? "",
-            baseAlert: res.baseAlert ?? "",
-            topSignal: res.topSignal ?? res.signals?.[0] ?? null,
-            signals: Array.isArray(res.signals) ? res.signals : [],
-            flowPower: Number(res.flowPower ?? foreign + inst),
-            prevFlowPower: Number(res.prevFlowPower ?? 0),
-            flowTrend: Number(res.flowTrend ?? 0),
-            flowMomentum: Number(res.flowMomentum ?? 0),
-            flowSource: res.flowSource ?? "",
-          };
-          normalized.signal = buildMarketSignal(normalized);
+          const normalized = normalizeMarketResponse(res);
 
           setError("");
           setData(normalized);
@@ -501,43 +568,46 @@ export default function Home() {
             hour12: false,
           });
 
+          const nextSnapshot: Snapshot = {
+            time,
+            up: normalized.up,
+            down: normalized.down,
+            diff: normalized.diff,
+            accel: normalized.accel,
+            flat: normalized.flat,
+            upRatio: normalized.upRatio,
+            downRatio: normalized.downRatio,
+            kospi: normalized.kospi,
+            kosdaq: normalized.kosdaq,
+            foreign: getFlowValue(normalized, "foreign"),
+            inst: getFlowValue(normalized, "inst"),
+            indiv: getFlowValue(normalized, "indiv"),
+            marketTone: normalized.marketTone ?? "중립",
+            marketState: normalized.marketState ?? "NEUTRAL",
+            marketScore: Number(normalized.marketScore ?? 0),
+            signal: normalized.signal ?? "중립",
+            flowPower: Number(normalized.flowPower ?? 0),
+            flowTrend: Number(normalized.flowTrend ?? 0),
+            flowMomentum: Number(normalized.flowMomentum ?? 0),
+          };
+
           setHistory((prev) => {
-            const next = [
-              ...prev,
-              {
-                time,
-                up: normalized.up,
-                down: normalized.down,
-                diff: normalized.diff,
-                accel: normalized.accel,
-                flat: normalized.flat,
-                upRatio: normalized.upRatio,
-                downRatio: normalized.downRatio,
-                kospi: normalized.kospi,
-                kosdaq: normalized.kosdaq,
-                foreign,
-                inst,
-                indiv,
-                marketTone: normalized.marketTone ?? "중립",
-                marketState: normalized.marketState ?? "NEUTRAL",
-                marketScore: Number(normalized.marketScore ?? 0),
-                signal: normalized.signal ?? "중립",
-                flowPower: Number(normalized.flowPower ?? 0),
-                flowTrend: Number(normalized.flowTrend ?? 0),
-                flowMomentum: Number(normalized.flowMomentum ?? 0),
-              },
-            ];
-            return next.slice(-120);
+            const filtered = prev.filter((item) => item.time !== nextSnapshot.time);
+            return [...filtered, nextSnapshot].slice(-120);
           });
         })
         .catch(() => {
-          setError("데이터 불러오기 실패");
+          if (mounted) setError("데이터 불러오기 실패");
         });
     };
 
-    fetchData();
+    loadSavedRows().finally(fetchData);
     const interval = setInterval(fetchData, 60000);
-    return () => clearInterval(interval);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const cardStyle: CSSProperties = {
