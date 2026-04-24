@@ -106,17 +106,9 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
 
 async function saveLogToSupabase(row: SupabaseLogPayload) {
   try {
-    // 같은 날짜 + 같은 분 데이터가 있으면 중복 저장하지 않음
-    const checkPath =
-      `/rest/v1/logs?select=id&createdat=eq.${encodeURIComponent(row.createdat)}` +
-      `&time=eq.${encodeURIComponent(row.time)}&limit=1`;
-
-    const existing = (await supabaseRequest(checkPath)) as any[] | null;
-
-    if (Array.isArray(existing) && existing.length > 0) {
-      return;
-    }
-
+    // Vercel 서버리스에서는 메모리 상태가 초기화될 수 있으므로
+    // DB 중복 체크에 의존하지 않고 호출 시점의 1분 스냅샷을 그대로 저장합니다.
+    // created_at 컬럼은 Supabase 기본값 now()로 자동 저장됩니다.
     await supabaseRequest("/rest/v1/logs", {
       method: "POST",
       headers: {
@@ -914,7 +906,7 @@ export async function GET() {
       hour12: false,
     });
 
-    const minuteKey = timeStr;
+    const minuteKey = `${getKstDateString(now)} ${timeStr}`;
 
     if (lastSavedMinute !== minuteKey) {
       lastSavedMinute = minuteKey;
