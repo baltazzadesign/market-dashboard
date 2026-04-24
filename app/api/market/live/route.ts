@@ -61,10 +61,12 @@ function getSupabaseConfig() {
     return null;
   }
 
-  return {
-    url: url.replace(/\/$/, ""),
-    key,
-  };
+return {
+  url: url
+    .replace(/\/$/, "")
+    .replace(/\/rest\/v1$/, ""),
+  key,
+};
 }
 
 function getKstDateString(date = new Date()) {
