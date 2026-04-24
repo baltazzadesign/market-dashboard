@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import MarketScoreChart from "@/components/MarketScoreChart";
 
 type ApiSignal = {
   type: string;
@@ -867,6 +868,10 @@ export default function Home() {
           <div style={{ ...valueStyle, color: flowColor(Number(data.indiv ?? 0)) }}>{formatFlow(Number(data.indiv ?? 0))}</div>
           <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>{getFlowText(Number(data.indiv ?? 0))}</div>
         </div>
+      </div>
+
+      <div style={{ marginTop: 20, marginBottom: 20 }}>
+        <MarketScoreChart logs={history} />
       </div>
 
       <div style={sectionStyle}>

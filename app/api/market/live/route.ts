@@ -902,11 +902,12 @@ export async function GET() {
 
     const now = new Date();
 
-    const timeStr = now.toLocaleTimeString("ko-KR", {
+    const timeStr = new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
-    });
+    }).format(now);
 
     const minuteKey = `${getKstDateString(now)} ${timeStr}`;
 
