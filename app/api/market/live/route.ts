@@ -1,3 +1,12 @@
+function getKstTime() {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
+}
+
 let cachedToken: string | null = null;
 let cachedTokenExpireAt = 0;
 let lastSavedMinute = "";

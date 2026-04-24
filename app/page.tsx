@@ -94,6 +94,44 @@ function formatFlow(value: number) {
   return `${sign}${Number(value ?? 0).toLocaleString()}`;
 }
 
+
+function getKstTodayString() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function getKstMinuteString() {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
+}
+
+function parseMinuteValue(time?: string) {
+  const match = String(time ?? "").match(/(\d{1,2}):(\d{2})/);
+  if (!match) return -1;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function getSessionLabel(time?: string) {
+  const minute = parseMinuteValue(time);
+  if (minute >= 8 * 60 + 50 && minute < 9 * 60) return "NXT 프리";
+  if (minute >= 9 * 60 && minute <= 15 * 60 + 30) return "정규장";
+  return "장외/점검";
+}
+
+function getSessionColor(label: string) {
+  if (label.includes("NXT")) return "#38BDF8";
+  if (label.includes("정규")) return "#22C55E";
+  return "#94A3B8";
+}
+
 function getFlowText(value: number) {
   if (value > 0) return "순매수";
   if (value < 0) return "순매도";
@@ -496,11 +534,7 @@ export default function Home() {
       return {
         time: String(
           res.time ??
-            new Date().toLocaleTimeString("ko-KR", {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            })
+            getKstMinuteString()
         ),
         up: normalized.up,
         down: normalized.down,
@@ -526,7 +560,7 @@ export default function Home() {
 
     const loadSavedRows = async () => {
       try {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = getKstTodayString();
         const response = await fetch(`/api/market/daily?date=${today}`, {
           cache: "no-store",
         });
@@ -562,12 +596,7 @@ export default function Home() {
           setError("");
           setData(normalized);
 
-          const now = new Date();
-          const time = now.toLocaleTimeString("ko-KR", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          });
+          const time = String((res as any).time ?? getKstMinuteString());
 
           const nextSnapshot: Snapshot = {
             time,
@@ -651,6 +680,21 @@ export default function Home() {
   const flowPower = Number(data.flowPower ?? (Number(data.foreign ?? 0) + Number(data.inst ?? 0)));
   const flowTrend = Number(data.flowTrend ?? 0);
   const flowMomentum = Number(data.flowMomentum ?? 0);
+  const latestSession = history.length ? getSessionLabel(history[history.length - 1].time) : getSessionLabel(getKstMinuteString());
+  const nxtCount = history.filter((x) => getSessionLabel(x.time).includes("NXT")).length;
+  const regularCount = history.filter((x) => getSessionLabel(x.time).includes("정규")).length;
+  const afterCount = history.length - nxtCount - regularCount;
+  const stickyChartStyle: CSSProperties = {
+    marginTop: "24px",
+    background: "#111827",
+    padding: "20px",
+    borderRadius: "14px",
+    border: "1px solid #1F2937",
+    position: "sticky",
+    top: "92px",
+    zIndex: 8,
+    boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+  };
 
   return (
     <div style={{ background: "#020617", minHeight: "100vh", padding: "40px", color: "white" }}>
@@ -778,6 +822,36 @@ export default function Home() {
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
           gap: "12px",
+          marginBottom: "24px",
+        }}
+      >
+        <div style={cardStyle}>
+          <div style={labelStyle}>현재 세션</div>
+          <div style={{ ...valueStyle, color: getSessionColor(latestSession) }}>{latestSession}</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>KST 기준 자동 구분</div>
+        </div>
+        <div style={cardStyle}>
+          <div style={labelStyle}>NXT 기록</div>
+          <div style={{ ...valueStyle, color: "#38BDF8" }}>{nxtCount.toLocaleString()}</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>08:50~09:00</div>
+        </div>
+        <div style={cardStyle}>
+          <div style={labelStyle}>정규장 기록</div>
+          <div style={{ ...valueStyle, color: "#22C55E" }}>{regularCount.toLocaleString()}</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>09:00~15:30</div>
+        </div>
+        <div style={cardStyle}>
+          <div style={labelStyle}>장외/점검 기록</div>
+          <div style={{ ...valueStyle, color: "#94A3B8" }}>{afterCount.toLocaleString()}</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>테스트/수동 호출 포함</div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: "12px",
         }}
       >
         <div style={cardStyle}>
@@ -870,8 +944,40 @@ export default function Home() {
         </div>
       </div>
 
-      <div style={{ marginTop: 20, marginBottom: 20 }}>
-        <MarketScoreChart logs={history} />
+      <div style={stickyChartStyle}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
+          <div>
+            <h3 style={{ margin: 0, marginBottom: 4 }}>📌 STICKY 핵심 차트</h3>
+            <div style={{ color: "#94A3B8", fontSize: 13 }}>스크롤해도 따라오는 시장점수 · 지수 · 수급 요약</div>
+          </div>
+          <div style={{ color: getSessionColor(latestSession), fontWeight: 900 }}>{latestSession}</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr", gap: 16 }}>
+          <MarketScoreChart logs={history} />
+          <div style={{ display: "grid", gap: 16 }}>
+            <div>
+              <div style={{ color: "#94A3B8", marginBottom: 8, fontWeight: 800 }}>KOSPI / KOSDAQ 분리 추이</div>
+              <MiniMultiLineChart
+                height={190}
+                series={[
+                  { name: "KOSPI", data: history.map((x) => x.kospi), color: "#FACC15" },
+                  { name: "KOSDAQ", data: history.map((x) => x.kosdaq), color: "#A78BFA" },
+                ]}
+              />
+            </div>
+            <div>
+              <div style={{ color: "#94A3B8", marginBottom: 8, fontWeight: 800 }}>외국인 / 기관 / 개인 수급</div>
+              <MiniMultiLineChart
+                height={190}
+                series={[
+                  { name: "외국인", data: history.map((x) => x.foreign), color: "#38BDF8" },
+                  { name: "기관", data: history.map((x) => x.inst), color: "#F97316" },
+                  { name: "개인", data: history.map((x) => x.indiv), color: "#10B981" },
+                ]}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       <div style={sectionStyle}>
