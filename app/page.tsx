@@ -601,7 +601,10 @@ export default function Home() {
         });
     };
 
-    loadSavedRows().finally(fetchData);
+    // 저장된 Supabase 누적 기록을 먼저 복원하고, 실시간 데이터는 별도로 추가합니다.
+    // finally(fetchData)로 묶으면 복원 직후 live 데이터가 덮어써져 새로고침 시 누적 차트가 사라질 수 있습니다.
+    loadSavedRows();
+    fetchData();
     const interval = setInterval(fetchData, 60000);
 
     return () => {
