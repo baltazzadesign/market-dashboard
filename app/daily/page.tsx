@@ -69,6 +69,101 @@ function isTodayDate(date: string) {
   return !date || date === getTodayDate();
 }
 
+function getRowsCacheKey(dateValue: string) {
+  return `market-dashboard-rows-${dateValue || getTodayDate()}`;
+}
+
+function readRowsCache(dateValue: string): Row[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(getRowsCacheKey(dateValue));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRowsCache(dateValue: string, rows: Row[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      getRowsCacheKey(dateValue),
+      JSON.stringify(rows.slice(-420))
+    );
+  } catch {
+    // localStorage 용량/권한 문제는 화면 동작을 막지 않음
+  }
+}
+
+function rowSortValue(row: Row) {
+  const time = formatTime(row.time);
+  const [hh = "0", mm = "0"] = time.split(":");
+  return Number(hh) * 60 + Number(mm);
+}
+
+function mergeRowsByTime(baseRows: Row[], incomingRows: Row[]) {
+  const map = new Map<string, Row>();
+
+  [...baseRows, ...incomingRows].forEach((row) => {
+    const key = `${formatTime(row.time) || row.id}`;
+    map.set(key, {
+      ...(map.get(key) ?? {}),
+      ...row,
+      time: formatTime(row.time),
+    });
+  });
+
+  return Array.from(map.values())
+    .sort((a, b) => rowSortValue(a) - rowSortValue(b))
+    .slice(-420);
+}
+
+function liveJsonToRow(json: any): Row {
+  const now = new Date();
+
+  const time =
+    json.time ??
+    now.toLocaleTimeString("ko-KR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
+  const foreign = Number(json.foreignFlow ?? json.foreign ?? 0);
+  const inst = Number(json.instFlow ?? json.inst ?? 0);
+  const indiv = Number(json.indivFlow ?? json.indiv ?? 0);
+  const flowPower = Number(json.flowPower ?? foreign + inst);
+
+  return {
+    id: Number(json.id ?? now.getTime()),
+    time: formatTime(time),
+    up: Number(json.up ?? 0),
+    down: Number(json.down ?? 0),
+    flat: Number(json.flat ?? 0),
+    diff: Number(json.diff ?? 0),
+    accel: Number(json.accel ?? 0),
+    upRatio: Number(json.upRatio ?? 0),
+    downRatio: Number(json.downRatio ?? 0),
+    kospi: Number(json.kospi ?? 0),
+    kosdaq: Number(json.kosdaq ?? 0),
+    foreign,
+    inst,
+    indiv,
+    foreignFlow: foreign,
+    instFlow: inst,
+    indivFlow: indiv,
+    flowPower,
+    flowTrend: Number(json.flowTrend ?? 0),
+    flowMomentum: Number(json.flowMomentum ?? flowPower),
+    marketState: json.marketState ?? "",
+    signals: json.signals ?? [],
+  };
+}
+
 type SignalItem = {
   time: string;
   type: string;
@@ -531,36 +626,94 @@ export default function DailyPage() {
   const [selectedDate, setSelectedDate] = useState("");
 
   async function loadData(dateValue = selectedDate) {
-    const dateQuery = dateValue ? `?date=${dateValue}` : "";
+    const dateKey = dateValue || getTodayDate();
+    const dateQuery = `?date=${dateKey}`;
 
-    // 오늘/실시간 화면일 때만 live를 호출해서 1분 기록을 갱신합니다.
-    // 과거 날짜 조회 중에는 새 기록을 만들지 않고 DB에 저장된 데이터만 가져옵니다.
-    if (isTodayDate(dateValue)) {
-      await fetch("/api/market/live", { cache: "no-store" });
+    // 1) 새로고침 직후에도 화면이 비지 않도록 브라우저 캐시를 먼저 표시
+    const cachedRows = readRowsCache(dateKey);
+    if (cachedRows.length > 0) {
+      setRows(cachedRows);
     }
 
-    const res = await fetch(`/api/market/daily${dateQuery}`, { cache: "no-store" });
-    const json = await res.json();
+    try {
+      // 2) Supabase에 저장된 해당 날짜 기록을 먼저 불러와서 차트 복원
+      const dailyRes = await fetch(`/api/market/daily${dateQuery}`, {
+        cache: "no-store",
+      });
+      const dailyJson = await dailyRes.json();
 
-    if (json.ok) {
-      setRows(json.rows ?? []);
+      let nextRows: Row[] = [];
+
+      if (dailyJson.ok) {
+        nextRows = (dailyJson.rows ?? []).map((row: Row) => ({
+          ...row,
+          time: formatTime(row.time),
+        }));
+
+        setRows(nextRows);
+        writeRowsCache(dateKey, nextRows);
+      }
+
+      // 3) 오늘 화면일 때만 LIVE API를 호출해서 최신 1분 데이터를 저장/반영
+      if (isTodayDate(dateValue)) {
+        const liveRes = await fetch("/api/market/live", { cache: "no-store" });
+        const liveJson = await liveRes.json();
+
+        if (liveRes.ok && !liveJson.error) {
+          const liveRow = liveJsonToRow(liveJson);
+          nextRows = mergeRowsByTime(nextRows.length > 0 ? nextRows : cachedRows, [liveRow]);
+
+          setRows(nextRows);
+          writeRowsCache(dateKey, nextRows);
+
+          // Supabase 저장 직후 서버 기록도 한 번 더 가져와서 새로고침 유지 기준을 맞춤
+          const refreshedRes = await fetch(`/api/market/daily${dateQuery}`, {
+            cache: "no-store",
+          });
+          const refreshedJson = await refreshedRes.json();
+
+          if (refreshedJson.ok) {
+            const refreshedRows = (refreshedJson.rows ?? []).map((row: Row) => ({
+              ...row,
+              time: formatTime(row.time),
+            }));
+
+            const mergedRows = mergeRowsByTime(nextRows, refreshedRows);
+            setRows(mergedRows);
+            writeRowsCache(dateKey, mergedRows);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("데일리 데이터 로드 실패:", error);
+
+      if (cachedRows.length > 0) {
+        setRows(cachedRows);
+      }
     }
 
-    const alertRes = await fetch("/api/alerts", { cache: "no-store" });
-    const alertJson = await alertRes.json();
+    // 4) alerts API가 아직 SQLite 기반이면 실패할 수 있으므로 화면 전체를 막지 않음
+    try {
+      const alertRes = await fetch("/api/alerts", { cache: "no-store" });
+      const alertJson = await alertRes.json();
 
-    if (alertJson.ok) {
-      setDbAlerts(
-        (alertJson.alerts ?? []).map((alert: AlertItem) => ({
-          ...alert,
-          time: formatTime(alert.time),
-          color: getAlertColor(alert.level, alert.color),
-        }))
-      );
-      setSummary(alertJson.summary ?? null);
-      setDbSignals(
-        (alertJson.signals ?? []).map((signal: any) => normalizeDbSignal(signal))
-      );
+      if (alertJson.ok) {
+        setDbAlerts(
+          (alertJson.alerts ?? []).map((alert: AlertItem) => ({
+            ...alert,
+            time: formatTime(alert.time),
+            color: getAlertColor(alert.level, alert.color),
+          }))
+        );
+        setSummary(alertJson.summary ?? null);
+        setDbSignals(
+          (alertJson.signals ?? []).map((signal: any) => normalizeDbSignal(signal))
+        );
+      }
+    } catch {
+      setDbAlerts([]);
+      setSummary(null);
+      setDbSignals([]);
     }
   }
 
