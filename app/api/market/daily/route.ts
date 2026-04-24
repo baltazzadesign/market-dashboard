@@ -76,6 +76,13 @@ function normalizeRow(row: any) {
   };
 }
 
+function getDateRange(date: string) {
+  return {
+    start: `${date}T00:00:00+09:00`,
+    end: `${date}T23:59:59+09:00`,
+  };
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -84,8 +91,12 @@ export async function GET(req: Request) {
     let rows: any[] = [];
 
     if (date) {
+      const { start, end } = getDateRange(date);
+
       rows = await supabaseRequest(
-        `/rest/v1/logs?select=*&createdat=eq.${encodeURIComponent(date)}&order=id.asc&limit=420`
+        `/rest/v1/logs?select=*&created_at=gte.${encodeURIComponent(
+          start
+        )}&created_at=lte.${encodeURIComponent(end)}&order=id.asc&limit=420`
       );
     } else {
       const latestRows = await supabaseRequest(
@@ -95,7 +106,7 @@ export async function GET(req: Request) {
       rows = Array.isArray(latestRows) ? latestRows.reverse() : [];
     }
 
-    const data = rows.map(normalizeRow);
+    const data = Array.isArray(rows) ? rows.map(normalizeRow) : [];
 
     return Response.json({
       ok: true,
