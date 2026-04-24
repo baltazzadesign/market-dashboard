@@ -28,6 +28,109 @@ type MarketSignal = {
   category: SignalCategory;
 };
 
+type SupabaseLogPayload = {
+  createdat: string;
+  time: string;
+  up: number;
+  down: number;
+  flat: number;
+  diff: number;
+  accel: number;
+  upratio: number;
+  downratio: number;
+  kospi: number;
+  kosdaq: number;
+  foreignflow: number;
+  instflow: number;
+  indivflow: number;
+  flowpower: number;
+  flowtrend: number;
+  flowmomentum: number;
+  alert: string;
+  markettone: string;
+  marketscore: number;
+  marketstate: string;
+  signals: MarketSignal[];
+};
+
+function getSupabaseConfig() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    return null;
+  }
+
+  return {
+    url: url.replace(/\/$/, ""),
+    key,
+  };
+}
+
+function getKstDateString(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+async function supabaseRequest(path: string, init: RequestInit = {}) {
+  const config = getSupabaseConfig();
+
+  if (!config) {
+    console.warn("SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY 없음");
+    return null;
+  }
+
+  const res = await fetch(`${config.url}${path}`, {
+    ...init,
+    headers: {
+      apikey: config.key,
+      authorization: `Bearer ${config.key}`,
+      ...(init.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase 요청 실패 ${res.status}: ${text}`);
+  }
+
+  if (res.status === 204) return null;
+
+  return res.json();
+}
+
+async function saveLogToSupabase(row: SupabaseLogPayload) {
+  try {
+    // 같은 날짜 + 같은 분 데이터가 있으면 중복 저장하지 않음
+    const checkPath =
+      `/rest/v1/logs?select=id&createdat=eq.${encodeURIComponent(row.createdat)}` +
+      `&time=eq.${encodeURIComponent(row.time)}&limit=1`;
+
+    const existing = (await supabaseRequest(checkPath)) as any[] | null;
+
+    if (Array.isArray(existing) && existing.length > 0) {
+      return;
+    }
+
+    await supabaseRequest("/rest/v1/logs", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify(row),
+    });
+  } catch (error) {
+    console.warn("Supabase 로그 저장 실패:", error);
+  }
+}
+
+
 async function getAccessToken() {
   const appkey = process.env.KIS_APPKEY;
   const appsecret = process.env.KIS_APPSECRET;
@@ -825,6 +928,31 @@ export async function GET() {
 
       memoryPrevDiff = diff;
       memoryPrevFlowPower = flowPower;
+
+      await saveLogToSupabase({
+        createdat: getKstDateString(now),
+        time: timeStr,
+        up,
+        down,
+        flat,
+        diff,
+        accel,
+        upratio: upRatio,
+        downratio: downRatio,
+        kospi,
+        kosdaq,
+        foreignflow: foreign,
+        instflow: inst,
+        indivflow: indiv,
+        flowpower: flowPower,
+        flowtrend: flowTrend,
+        flowmomentum: flowMomentum,
+        alert,
+        markettone: marketTone,
+        marketscore: marketScore,
+        marketstate: marketState,
+        signals,
+      });
 
       console.log("✅ LIVE 계산됨:", timeStr, "수급:", flowData.source, {
         foreign,
