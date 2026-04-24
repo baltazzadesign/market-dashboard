@@ -1,8 +1,9 @@
-import db from "@/lib/db";
-
 let cachedToken: string | null = null;
 let cachedTokenExpireAt = 0;
 let lastSavedMinute = "";
+let memoryPrevDiff = 0;
+let memoryPrevFlowPower = 0;
+let memoryRecentRows: Array<{ diff: number; foreignFlow: number; instFlow: number }> = [];
 
 const KIS_BASE = process.env.KIS_BASE ?? "https://openapi.koreainvestment.com:9443";
 const CUSTTYPE = process.env.KIS_CUSTTYPE ?? "P";
@@ -26,33 +27,6 @@ type MarketSignal = {
   priority: number;
   category: SignalCategory;
 };
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS alert_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    time TEXT,
-    level TEXT,
-    message TEXT,
-    diff INTEGER,
-    accel INTEGER,
-    marketScore INTEGER,
-    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS signal_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    time TEXT,
-    type TEXT,
-    message TEXT,
-    diff INTEGER,
-    prevDiff INTEGER,
-    accel INTEGER,
-    marketScore INTEGER,
-    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
 
 async function getAccessToken() {
   const appkey = process.env.KIS_APPKEY;
@@ -473,21 +447,6 @@ function buildMarketScore(diff: number, upRatio: number, downRatio: number) {
   return Math.round(scoreByDiff + scoreByRatio);
 }
 
-function shouldSaveAlert(message: string) {
-  const recent = db
-    .prepare(`
-      SELECT id
-      FROM alert_logs
-      WHERE message = ?
-        AND datetime(createdAt) >= datetime('now', '-10 minutes')
-      ORDER BY id DESC
-      LIMIT 1
-    `)
-    .get(message);
-
-  return !recent;
-}
-
 function createSignal(
   type: string,
   message: string,
@@ -782,21 +741,6 @@ function buildFinalAlertLevel(alert: string, signals: MarketSignal[]) {
   return buildAlertLevel(alert);
 }
 
-function shouldSaveSignal(type: string) {
-  const recent = db
-    .prepare(`
-      SELECT id
-      FROM signal_logs
-      WHERE type = ?
-        AND datetime(createdAt) >= datetime('now', '-10 minutes')
-      ORDER BY id DESC
-      LIMIT 1
-    `)
-    .get(type);
-
-  return !recent;
-}
-
 export async function GET() {
   try {
     const [kospiData, kosdaqData, flowData] = await Promise.all([
@@ -815,20 +759,10 @@ export async function GET() {
     const upRatio = total > 0 ? up / total : 0;
     const downRatio = total > 0 ? down / total : 0;
 
-    const lastRow = db
-      .prepare("SELECT diff, foreignFlow, instFlow FROM logs ORDER BY id DESC LIMIT 1")
-      .get() as any;
-    const recentRows = db
-      .prepare(`
-        SELECT diff, foreignFlow, instFlow
-        FROM logs
-        ORDER BY id DESC
-        LIMIT 3
-      `)
-      .all() as any[];
+    const recentRows = memoryRecentRows.slice(-3);
 
-    const prevDiff = lastRow ? Number(lastRow.diff ?? 0) : 0;
-    const accel = lastRow ? diff - Number(lastRow.diff ?? 0) : 0;
+    const prevDiff = memoryPrevDiff;
+    const accel = diff - prevDiff;
 
     const kospi = kospiData.price;
     const kosdaq = kosdaqData.price;
@@ -838,9 +772,7 @@ export async function GET() {
     const indiv = flowData.indiv;
 
     const flowPower = foreign + inst;
-    const prevFlowPower = lastRow
-      ? Number(lastRow.foreignFlow ?? 0) + Number(lastRow.instFlow ?? 0)
-      : 0;
+    const prevFlowPower = memoryPrevFlowPower;
     const flowTrend = flowPower - prevFlowPower;
     const flowMomentum = Math.round(prevFlowPower * 0.7 + flowPower * 0.3);
 
@@ -884,85 +816,17 @@ export async function GET() {
     if (lastSavedMinute !== minuteKey) {
       lastSavedMinute = minuteKey;
 
-      db.prepare(`
-  INSERT INTO logs (
-    createdAt,
-    time,
-    up,
-    down,
-    flat,
-    diff,
-    accel,
-    upRatio,
-    downRatio,
-    kospi,
-    kosdaq,
-    foreignFlow,
-    instFlow,
-    indivFlow,
-    alert,
-    marketTone,
-    marketScore
-  )
-  VALUES (
-    date('now'),
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-  )
-`).run(
-  timeStr,
-  up,
-  down,
-  flat,
-  diff,
-  accel,
-  upRatio,
-  downRatio,
-  kospi,
-  kosdaq,
-  foreign,
-  inst,
-  indiv,
-  alert,
-  marketTone,
-  marketScore
-);
-
-      if (alert !== "중립" && shouldSaveAlert(alert)) {
-        db.prepare(`
-          INSERT INTO alert_logs (
-            time, level, message, diff, accel, marketScore
-          )
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).run(
-          timeStr,
-          buildFinalAlertLevel(alert, signals),
-          alert,
-          diff,
-          accel,
-          marketScore
-        );
-      }
-
-      signals.forEach((signal) => {
-        if (shouldSaveSignal(signal.type)) {
-          db.prepare(`
-            INSERT INTO signal_logs (
-              time, type, message, diff, prevDiff, accel, marketScore
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            timeStr,
-            signal.type,
-            signal.message,
-            diff,
-            prevDiff,
-            accel,
-            marketScore
-          );
-        }
+      memoryRecentRows.push({
+        diff,
+        foreignFlow: foreign,
+        instFlow: inst,
       });
+      memoryRecentRows = memoryRecentRows.slice(-10);
 
-      console.log("✅ DB 저장됨:", timeStr, "수급:", flowData.source, {
+      memoryPrevDiff = diff;
+      memoryPrevFlowPower = flowPower;
+
+      console.log("✅ LIVE 계산됨:", timeStr, "수급:", flowData.source, {
         foreign,
         inst,
         indiv,
