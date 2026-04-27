@@ -32,6 +32,10 @@ type Row = {
   flowPower?: number;
   flowTrend?: number;
   flowMomentum?: number;
+  flowSource?: string;
+  flowsource?: string;
+  flowStatus?: string;
+  flowstatus?: string;
   marketState?: string;
   signals?: any[];
 };
@@ -111,6 +115,15 @@ function timeToMinute(time: string) {
 function clampChartValue(value: any, limit = 120000) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;
+  if (n > limit) return limit;
+  if (n < -limit) return -limit;
+  return n;
+}
+
+function clampChartNullable(value: any, limit = 120000) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
   if (n > limit) return limit;
   if (n < -limit) return -limit;
   return n;
@@ -242,6 +255,24 @@ function getFlowPower(row?: Row) {
   if (!row) return 0;
   if (typeof row.flowPower === "number") return row.flowPower;
   return Number(row.foreignFlow ?? 0) + Number(row.instFlow ?? 0);
+}
+
+function getFlowSource(row?: Row | any) {
+  return String(
+    row?.flowSource ??
+      row?.flowsource ??
+      row?.flowStatus ??
+      row?.flowstatus ??
+      ""
+  ).toUpperCase();
+}
+
+function isLiveFlowRow(row?: Row | any) {
+  const source = getFlowSource(row);
+  // 예전 데이터처럼 source가 없는 행은 기존 표시를 유지하고,
+  // route.ts에서 LIVE/EMPTY/FILTERED/ERROR가 들어온 최신 행만 필터링합니다.
+  if (!source) return true;
+  return source === "LIVE";
 }
 
 function getFlowTrend(row?: Row, prev?: Row) {
@@ -610,6 +641,7 @@ export default function DailyPage() {
 
   const chartRows = rows.map((r, index) => {
     const prev = index > 0 ? rows[index - 1] : undefined;
+    const liveFlow = isLiveFlowRow(r);
 
     return {
       ...r,
@@ -617,25 +649,30 @@ export default function DailyPage() {
       upRatioPct: Number(r.upRatio) * 100,
       downRatioPct: Number(r.downRatio) * 100,
       score: marketScore(r),
-      foreignFlowValue: Number(r.foreignFlow ?? 0),
-      instFlowValue: Number(r.instFlow ?? 0),
-      indivFlowValue: Number(r.indivFlow ?? 0),
-      flowPowerValue: getFlowPower(r),
-      flowTrendValue: getFlowTrend(r, prev),
-      flowMomentumValue: Number(r.flowMomentum ?? getFlowPower(r)),
-      foreignInstFlowValue: Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0),
+
+      // 수급 차트는 LIVE 수급만 표시합니다.
+      // EMPTY/FILTERED/ERROR/FALLBACK 행은 null로 두어 차트가 억지로 이어지지 않게 합니다.
+      foreignFlowValue: liveFlow ? Number(r.foreignFlow ?? 0) : null,
+      instFlowValue: liveFlow ? Number(r.instFlow ?? 0) : null,
+      indivFlowValue: liveFlow ? Number(r.indivFlow ?? 0) : null,
+      flowPowerValue: liveFlow ? getFlowPower(r) : null,
+      flowTrendValue: liveFlow ? getFlowTrend(r, prev) : null,
+      flowMomentumValue: liveFlow ? Number(r.flowMomentum ?? getFlowPower(r)) : null,
+      foreignInstFlowValue: liveFlow
+        ? Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0)
+        : null,
     };
   });
 
   const visibleChartRows = getSessionChartRows(chartRows).map((row) => ({
     ...row,
-    foreignFlowValue: clampChartValue(row.foreignFlowValue),
-    instFlowValue: clampChartValue(row.instFlowValue),
-    indivFlowValue: clampChartValue(row.indivFlowValue),
-    flowPowerValue: clampChartValue(row.flowPowerValue),
-    flowTrendValue: clampChartValue(row.flowTrendValue),
-    flowMomentumValue: clampChartValue(row.flowMomentumValue),
-    foreignInstFlowValue: clampChartValue(row.foreignInstFlowValue),
+    foreignFlowValue: clampChartNullable(row.foreignFlowValue),
+    instFlowValue: clampChartNullable(row.instFlowValue),
+    indivFlowValue: clampChartNullable(row.indivFlowValue),
+    flowPowerValue: clampChartNullable(row.flowPowerValue),
+    flowTrendValue: clampChartNullable(row.flowTrendValue),
+    flowMomentumValue: clampChartNullable(row.flowMomentumValue),
+    foreignInstFlowValue: clampChartNullable(row.foreignInstFlowValue),
   }));
 
   const last = rows[rows.length - 1];
