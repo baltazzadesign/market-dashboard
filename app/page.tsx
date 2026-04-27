@@ -483,6 +483,7 @@ export default function Home() {
 
   const [history, setHistory] = useState<Snapshot[]>([]);
   const [error, setError] = useState("");
+  const [isStickyChartCollapsed, setIsStickyChartCollapsed] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -687,13 +688,16 @@ export default function Home() {
   const stickyChartStyle: CSSProperties = {
     marginTop: "24px",
     background: "#111827",
-    padding: "20px",
+    padding: isStickyChartCollapsed ? "12px 16px" : "20px",
     borderRadius: "14px",
     border: "1px solid #1F2937",
     position: "sticky",
     top: "92px",
     zIndex: 8,
     boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+    maxHeight: isStickyChartCollapsed ? "64px" : "calc(100vh - 120px)",
+    overflow: "hidden",
+    transition: "max-height 0.25s ease, padding 0.25s ease",
   };
 
   return (
@@ -950,9 +954,29 @@ export default function Home() {
             <h3 style={{ margin: 0, marginBottom: 4 }}>📌 STICKY 핵심 차트</h3>
             <div style={{ color: "#94A3B8", fontSize: 13 }}>스크롤해도 따라오는 시장점수 · 지수 · 수급 요약</div>
           </div>
-          <div style={{ color: getSessionColor(latestSession), fontWeight: 900 }}>{latestSession}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div style={{ color: getSessionColor(latestSession), fontWeight: 900 }}>{latestSession}</div>
+            <button
+              type="button"
+              onClick={() => setIsStickyChartCollapsed((prev) => !prev)}
+              style={{
+                cursor: "pointer",
+                border: "1px solid #38BDF866",
+                background: isStickyChartCollapsed ? "#0EA5E9" : "#0F172A",
+                color: isStickyChartCollapsed ? "#FFFFFF" : "#38BDF8",
+                borderRadius: 999,
+                padding: "8px 12px",
+                fontSize: 12,
+                fontWeight: 900,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {isStickyChartCollapsed ? "펼치기" : "접기"}
+            </button>
+          </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr", gap: 16 }}>
+        {!isStickyChartCollapsed && (
+          <div style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr", gap: 16 }}>
           <MarketScoreChart logs={history} />
           <div style={{ display: "grid", gap: 16 }}>
             <div>
@@ -977,7 +1001,8 @@ export default function Home() {
               />
             </div>
           </div>
-        </div>
+          </div>
+        )}
       </div>
 
       <div style={sectionStyle}>
