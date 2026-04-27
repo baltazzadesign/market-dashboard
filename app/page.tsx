@@ -138,7 +138,10 @@ function getFlowText(value: number) {
   return "보합";
 }
 
-function getStateText(state?: string) {
+function translateStatusToken(token?: string) {
+  const raw = String(token ?? "").trim();
+  if (!raw) return "";
+
   const map: Record<string, string> = {
     STRONG_TREND_UP: "강한 상승 추세",
     STRONG_TREND_DOWN: "강한 하락 추세",
@@ -148,13 +151,105 @@ function getStateText(state?: string) {
     ACCUMULATION: "매집 의심",
     REAL_DIVERGENCE: "실전 다이버전스",
     NEUTRAL: "중립",
+    BULL: "상승 우위",
+    BULLISH: "상승 우위",
+    BEAR: "하락 우위",
+    BEARISH: "하락 우위",
+    FLOW_LIVE: "수급 정상",
+    FLOW_FALLBACK: "수급 보정 중",
+    FLOW_EMPTY: "수급 대기",
+    BREADTH_LIVE: "종목수 정상",
+    BREADTH_FALLBACK: "종목수 보정 중",
+    BREADTH_EMPTY: "종목수 대기",
+    DATA_OK: "데이터 정상",
+    DATA_STALE: "데이터 지연",
+    MARKET_OPEN: "장중",
+    MARKET_CLOSED: "장마감",
+    NXT: "NXT장",
+    REGULAR: "정규장",
+    OPENING: "장초반",
+    MIDDAY: "장중반",
+    CLOSING: "장후반",
+    TRENDING: "추세 진행",
+    CHOPPY: "혼조",
+    DIVERGENCE: "다이버전스",
+    OVERHEAT: "과열",
+    BUY: "매수",
+    SELL: "매도",
+    UP: "상승",
+    DOWN: "하락",
+    LIVE: "정상",
+    FALLBACK: "보정 중",
   };
-  return map[state ?? ""] ?? state ?? "중립";
+
+  return map[raw] ?? raw.replace(/_/g, " ");
+}
+
+function getStateText(state?: string) {
+  const raw = String(state ?? "").trim();
+  if (!raw) return "중립";
+  return raw
+    .split("|")
+    .map((part) => translateStatusToken(part))
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function getStateDescription(state?: string) {
+  const raw = String(state ?? "");
+  if (raw.includes("BREADTH_FALLBACK")) return "일부 종목수 데이터가 누락되어 직전 정상값으로 보정 중입니다";
+  if (raw.includes("FLOW_FALLBACK")) return "수급 데이터가 일시적으로 누락되어 이전 값으로 보정 중입니다";
+  if (raw.includes("BREADTH_LIVE") && raw.includes("FLOW_LIVE")) return "종목수와 수급 데이터가 정상 수신 중입니다";
+  if (raw.includes("BULL") || raw.includes("UP")) return "상승 종목이 우세한 흐름입니다";
+  if (raw.includes("BEAR") || raw.includes("DOWN")) return "하락 종목이 우세한 흐름입니다";
+  return "시장 방향성이 뚜렷하지 않아 중립으로 판단 중입니다";
+}
+
+function formatSignalType(type?: string) {
+  const raw = String(type ?? "").trim();
+  if (!raw) return "신호 없음";
+
+  const map: Record<string, string> = {
+    FLOW_STRONG_BUY: "수급 강한 매수",
+    FLOW_STRONG_SELL: "수급 강한 매도",
+    FLOW_DIVERGENCE: "수급 다이버전스",
+    BREADTH_FALLBACK: "종목수 보정",
+    FLOW_FALLBACK: "수급 보정",
+    STRONG_TREND_UP: "강한 상승 추세",
+    STRONG_TREND_DOWN: "강한 하락 추세",
+    REAL_DIVERGENCE: "실전 다이버전스",
+    OVERHEAT: "과열 주의",
+    ACCUMULATION: "매집 의심",
+    DISTRIBUTION: "분배 의심",
+  };
+
+  if (map[raw]) return map[raw];
+  return raw
+    .split("|")
+    .map((part) => translateStatusToken(part))
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatSignalLevel(level?: string) {
+  const raw = String(level ?? "").trim();
+  if (!raw) return "-";
+  const map: Record<string, string> = {
+    INFO: "정보",
+    WARN: "주의",
+    WARNING: "주의",
+    DANGER: "위험",
+    HIGH: "높음",
+    MID: "보통",
+    MEDIUM: "보통",
+    LOW: "낮음",
+  };
+  return map[raw] ?? translateStatusToken(raw);
 }
 
 function getSignalText(signal?: ApiSignal | null) {
   if (!signal) return "신호 없음";
-  return signal.message || signal.type;
+  return signal.message || formatSignalType(signal.type);
 }
 
 function getSignalColor(type?: string) {
@@ -244,8 +339,8 @@ function buildSignals(data: MarketResponse): SignalItem[] {
 
   const advancedSignal = apiTopSignal
     ? {
-        value: apiTopSignal.type,
-        desc: `${getSignalText(apiTopSignal)} · ${apiTopSignal.level ?? "-"} · priority ${apiTopSignal.priority ?? "-"}`,
+        value: formatSignalType(apiTopSignal.type),
+        desc: `${getSignalText(apiTopSignal)} · ${formatSignalLevel(apiTopSignal.level)} · 우선순위 ${apiTopSignal.priority ?? "-"}`,
         color: getSignalColor(apiTopSignal.type),
         bg: apiTopSignal.type.includes("SELL") || apiTopSignal.type.includes("DOWN") ? "#0f274a" : "#3f3410",
       }
@@ -257,11 +352,11 @@ function buildSignals(data: MarketResponse): SignalItem[] {
       };
 
   return [
-    { title: "ADVANCED", ...advancedSignal },
-    { title: "BREADTH", ...breadthSignal },
-    { title: "ACCEL", ...accelSignal },
-    { title: "RATIO", ...ratioSignal },
-    { title: "FLOW", ...flowSignal },
+    { title: "고급 신호", ...advancedSignal },
+    { title: "시장 폭", ...breadthSignal },
+    { title: "가속도", ...accelSignal },
+    { title: "비율", ...ratioSignal },
+    { title: "수급", ...flowSignal },
   ];
 }
 
@@ -644,39 +739,29 @@ export default function Home() {
     };
   }, []);
 
-  const glassCardStyle: CSSProperties = {
-    background: "linear-gradient(145deg, rgba(20, 32, 58, 0.88), rgba(9, 17, 34, 0.92))",
-    border: "1px solid rgba(148, 163, 184, 0.16)",
-    boxShadow: "0 18px 55px rgba(0,0,0,0.28)",
-    backdropFilter: "blur(18px)",
-  };
-
   const cardStyle: CSSProperties = {
-    ...glassCardStyle,
+    background: "#111827",
     padding: "20px",
-    borderRadius: "22px",
+    borderRadius: "12px",
     textAlign: "center",
   };
 
   const sectionStyle: CSSProperties = {
-    ...glassCardStyle,
     marginTop: "24px",
-    padding: "22px",
-    borderRadius: "24px",
+    background: "#111827",
+    padding: "20px",
+    borderRadius: "12px",
   };
 
   const labelStyle: CSSProperties = {
-    fontSize: "12px",
-    color: "#9FB2D8",
-    marginBottom: "8px",
-    fontWeight: 800,
-    letterSpacing: "-0.01em",
+    fontSize: "13px",
+    color: "#94A3B8",
+    marginBottom: "6px",
   };
 
   const valueStyle: CSSProperties = {
-    fontSize: "23px",
-    fontWeight: 950,
-    letterSpacing: "-0.04em",
+    fontSize: "22px",
+    fontWeight: "bold",
   };
 
   const flowColor = (value: number) => {
@@ -696,39 +781,33 @@ export default function Home() {
   const regularCount = history.filter((x) => getSessionLabel(x.time).includes("정규")).length;
   const afterCount = history.length - nxtCount - regularCount;
   const stickyChartStyle: CSSProperties = {
-    ...glassCardStyle,
     marginTop: "24px",
-    padding: isStickyChartCollapsed ? "12px 18px" : "22px",
-    borderRadius: "26px",
+    background: "#111827",
+    padding: isStickyChartCollapsed ? "12px 16px" : "20px",
+    borderRadius: "14px",
+    border: "1px solid #1F2937",
     position: "sticky",
-    top: "14px",
+    top: "92px",
     zIndex: 8,
-    maxHeight: isStickyChartCollapsed ? "74px" : "calc(100vh - 36px)",
+    boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+    maxHeight: isStickyChartCollapsed ? "64px" : "calc(100vh - 120px)",
     overflow: "hidden",
-    transition: "max-height 0.25s ease, padding 0.25s ease, box-shadow 0.25s ease",
+    transition: "max-height 0.25s ease, padding 0.25s ease",
   };
 
   return (
-    <div
-      style={{
-        background:
-          "radial-gradient(circle at 8% 0%, rgba(56,189,248,0.20), transparent 34%), radial-gradient(circle at 90% 4%, rgba(168,85,247,0.22), transparent 32%), linear-gradient(180deg, #08111F 0%, #0A1020 44%, #070B14 100%)",
-        minHeight: "100vh",
-        padding: "34px",
-        color: "white",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 26 }}>
+    <div style={{ background: "#020617", minHeight: "100vh", padding: "40px", color: "white" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 30 }}>
         <div>
-          <h1 style={{ fontSize: "30px", marginBottom: 8, letterSpacing: "-0.05em" }}>📊 시장 대시보드</h1>
-          <div style={{ color: "#A7B7D8", fontSize: 14 }}>1분마다 자동 갱신 · 한국시간 기준 · 최근 120개 기록 표시</div>
+          <h1 style={{ fontSize: "28px", marginBottom: 8 }}>📊 MARKET DASHBOARD</h1>
+          <div style={{ color: "#94A3B8", fontSize: 14 }}>1분마다 자동 갱신 · 최근 120개 기록 기준</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <a
             href="/daily"
             style={{
-              background: "linear-gradient(135deg, rgba(14,165,233,0.18), rgba(59,130,246,0.12))",
-              border: "1px solid rgba(56,189,248,0.45)",
+              background: "#0F172A",
+              border: "1px solid #38BDF866",
               borderRadius: 999,
               padding: "10px 16px",
               color: "#38BDF8",
@@ -742,8 +821,8 @@ export default function Home() {
           </a>
           <div
             style={{
-              background: "linear-gradient(135deg, rgba(250,204,21,0.16), rgba(15,23,42,0.85))",
-              border: "1px solid rgba(250,204,21,0.30)",
+              background: "#1E293B",
+              border: "1px solid #334155",
               borderRadius: 999,
               padding: "10px 16px",
               color: "#FACC15",
@@ -773,42 +852,37 @@ export default function Home() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1.25fr 0.85fr 0.85fr 1fr 1fr 1fr",
-          gap: "14px",
-          marginBottom: "22px",
+          gridTemplateColumns: "1.2fr 1fr 1fr 1fr",
+          gap: "12px",
+          marginBottom: "24px",
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          background: "#020617",
+          padding: "10px 0",
         }}
       >
         <div
           style={{
-            ...cardStyle,
-            textAlign: "left",
-            border: `1px solid ${getSignalColor(data.marketState)}77`,
-            background: "linear-gradient(145deg, rgba(30,45,76,0.96), rgba(12,20,40,0.94))",
+            background: "#1E293B",
+            border: `1px solid ${getSignalColor(data.marketState)}66`,
+            borderRadius: "12px",
+            padding: "18px",
           }}
         >
           <div style={labelStyle}>시장 상태</div>
           <div style={{ ...valueStyle, color: getSignalColor(data.marketState) }}>{getStateText(data.marketState)}</div>
-          <div style={{ marginTop: 8, color: "#C9D7F2", fontSize: 13, lineHeight: 1.45 }}>{topSignal ? getSignalText(topSignal) : mainSignal}</div>
-        </div>
-        <div style={{ ...cardStyle, border: "1px solid rgba(250,204,21,0.32)" }}>
-          <div style={labelStyle}>코스피</div>
-          <div style={{ ...valueStyle, color: "#FACC15" }}>{Number(data.kospi).toLocaleString()}</div>
-          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>KOSPI</div>
-        </div>
-        <div style={{ ...cardStyle, border: "1px solid rgba(167,139,250,0.34)" }}>
-          <div style={labelStyle}>코스닥</div>
-          <div style={{ ...valueStyle, color: "#A78BFA" }}>{Number(data.kosdaq).toLocaleString()}</div>
-          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>KOSDAQ</div>
+          <div style={{ marginTop: 8, color: "#CBD5E1", fontSize: 13 }}>{getStateDescription(data.marketState)}</div>
         </div>
         <div style={cardStyle}>
           <div style={labelStyle}>수급 강도</div>
           <div style={{ ...valueStyle, color: flowColor(flowPower) }}>{formatFlow(flowPower)}</div>
-          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>외국인 + 기관</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>외국인+기관</div>
         </div>
         <div style={cardStyle}>
           <div style={labelStyle}>수급 추세</div>
           <div style={{ ...valueStyle, color: flowColor(flowTrend) }}>{formatFlow(flowTrend)}</div>
-          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>직전 대비 변화</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>직전 대비</div>
         </div>
         <div style={cardStyle}>
           <div style={labelStyle}>수급 가속도</div>
@@ -922,7 +996,7 @@ export default function Home() {
 
         <div style={cardStyle}>
           <div style={labelStyle}>시장톤</div>
-          <div style={{ ...valueStyle, color: "#FACC15" }}>{data.marketTone}</div>
+          <div style={{ ...valueStyle, color: "#FACC15" }}>{getStateText(data.marketTone)}</div>
         </div>
 
         <div style={cardStyle}>
@@ -936,8 +1010,8 @@ export default function Home() {
         </div>
 
         <div style={cardStyle}>
-          <div style={labelStyle}>대표 신호</div>
-          <div style={{ ...valueStyle, color: getSignalColor(topSignal?.type), fontSize: 18 }}>{topSignal?.type ?? mainSignal}</div>
+          <div style={labelStyle}>대표 SIGNAL</div>
+          <div style={{ ...valueStyle, color: getSignalColor(topSignal?.type), fontSize: 18 }}>{topSignal ? formatSignalType(topSignal.type) : mainSignal}</div>
         </div>
 
         <div style={cardStyle}>
@@ -972,8 +1046,8 @@ export default function Home() {
       <div style={stickyChartStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
           <div>
-            <h3 style={{ margin: 0, marginBottom: 4 }}>📌 핵심 차트 요약</h3>
-            <div style={{ color: "#94A3B8", fontSize: 13 }}>접기/펼치기로 화면을 가리지 않게 조정할 수 있습니다</div>
+            <h3 style={{ margin: 0, marginBottom: 4 }}>📌 STICKY 핵심 차트</h3>
+            <div style={{ color: "#94A3B8", fontSize: 13 }}>스크롤해도 따라오는 시장점수 · 지수 · 수급 요약</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <div style={{ color: getSessionColor(latestSession), fontWeight: 900 }}>{latestSession}</div>
@@ -982,13 +1056,11 @@ export default function Home() {
               onClick={() => setIsStickyChartCollapsed((prev) => !prev)}
               style={{
                 cursor: "pointer",
-                border: "1px solid rgba(56,189,248,0.45)",
-                background: isStickyChartCollapsed
-                  ? "linear-gradient(135deg, #38BDF8, #2563EB)"
-                  : "rgba(15,23,42,0.72)",
-                color: isStickyChartCollapsed ? "#FFFFFF" : "#BAE6FD",
+                border: "1px solid #38BDF866",
+                background: isStickyChartCollapsed ? "#0EA5E9" : "#0F172A",
+                color: isStickyChartCollapsed ? "#FFFFFF" : "#38BDF8",
                 borderRadius: 999,
-                padding: "9px 14px",
+                padding: "8px 12px",
                 fontSize: 12,
                 fontWeight: 900,
                 whiteSpace: "nowrap",
@@ -999,11 +1071,11 @@ export default function Home() {
           </div>
         </div>
         {!isStickyChartCollapsed && (
-          <div style={{ display: "grid", gridTemplateColumns: "1.05fr 1fr", gap: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr", gap: 16 }}>
           <MarketScoreChart logs={history} />
           <div style={{ display: "grid", gap: 16 }}>
             <div>
-              <div style={{ color: "#94A3B8", marginBottom: 8, fontWeight: 800 }}>코스피 / 코스닥 추이</div>
+              <div style={{ color: "#94A3B8", marginBottom: 8, fontWeight: 800 }}>KOSPI / KOSDAQ 분리 추이</div>
               <MiniMultiLineChart
                 height={190}
                 series={[
@@ -1098,7 +1170,7 @@ export default function Home() {
       </div>
 
       <div style={sectionStyle}>
-        <h3 style={{ marginBottom: "14px" }}>신호 로그</h3>
+        <h3 style={{ marginBottom: "14px" }}>SIGNAL LOG</h3>
         <div style={{ display: "grid", gap: 8 }}>
           {(data.signals?.length ? data.signals : topSignal ? [topSignal] : []).map((s, idx) => (
             <div
@@ -1115,13 +1187,13 @@ export default function Home() {
                 fontSize: 13,
               }}
             >
-              <b style={{ color: getSignalColor(s.type) }}>{s.type}</b>
+              <b style={{ color: getSignalColor(s.type) }}>{formatSignalType(s.type)}</b>
               <span style={{ color: "#CBD5E1" }}>{getSignalText(s)}</span>
-              <span style={{ color: "#94A3B8" }}>{s.level ?? "-"}</span>
+              <span style={{ color: "#94A3B8" }}>{formatSignalLevel(s.level)}</span>
               <span style={{ color: "#94A3B8" }}>{s.priority ?? "-"}</span>
             </div>
           ))}
-          {!data.signals?.length && !topSignal && <div style={{ color: "#94A3B8" }}>현재 표시할 고급 SIGNAL이 없습니다</div>}
+          {!data.signals?.length && !topSignal && <div style={{ color: "#94A3B8" }}>현재 표시할 고급 신호가 없습니다</div>}
         </div>
       </div>
 
