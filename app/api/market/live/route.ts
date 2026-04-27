@@ -21,7 +21,7 @@ type FlowData = {
   foreign: number;
   inst: number;
   indiv: number;
-  source: "LIVE" | "EMPTY" | "ERROR";
+  source: "LIVE" | "EMPTY" | "ERROR" | "FILTERED" | "FALLBACK";
   raw?: any;
 };
 
@@ -132,6 +132,7 @@ function normalizeMinuteValue(time: string) {
   return `${m[1].padStart(2, "0")}:${m[2]}`;
 }
 
+
 function normalizeSavedRow(row: any): SavedLogRow | null {
   if (!row || typeof row !== "object") return null;
 
@@ -196,6 +197,90 @@ function isValidMarketSnapshot(row: SupabaseLogPayload) {
   return hasBreadth && hasIndex;
 }
 
+function hasSavedFlow(prevRow: SavedLogRow | null) {
+  if (!prevRow) return false;
+
+  return (
+    toNumber(prevRow.foreignflow) !== 0 ||
+    toNumber(prevRow.instflow) !== 0 ||
+    toNumber(prevRow.indivflow) !== 0
+  );
+}
+
+function getPrevFlowSnapshot(prevRow: SavedLogRow | null) {
+  return {
+    foreign: toNumber(prevRow?.foreignflow),
+    inst: toNumber(prevRow?.instflow),
+    indiv: toNumber(prevRow?.indivflow),
+  };
+}
+
+function isSuspiciousFlowJump(current: Omit<FlowData, "source" | "raw">, prevRow: SavedLogRow | null) {
+  if (!prevRow || !hasSavedFlow(prevRow)) return false;
+
+  const prev = getPrevFlowSnapshot(prevRow);
+  const currentValues = [current.foreign, current.inst, current.indiv];
+  const prevValues = [prev.foreign, prev.inst, prev.indiv];
+
+  const currentAbsTotal = currentValues.reduce((sum, value) => sum + Math.abs(value), 0);
+  const prevAbsTotal = prevValues.reduce((sum, value) => sum + Math.abs(value), 0);
+
+  // TR074가 가끔 현재 누적 수급 대신 짧은 순간값/수량값을 반환하면 그래프가 튑니다.
+  // 직전 정상 누적값 대비 갑자기 너무 작아지거나 한 번에 과하게 튀면 이전 정상값을 유지합니다.
+  if (prevAbsTotal >= 50_000 && currentAbsTotal <= 10_000) return true;
+
+  return currentValues.some((value, index) => {
+    const prevValue = prevValues[index];
+    const delta = Math.abs(value - prevValue);
+
+    if (Math.abs(prevValue) >= 20_000 && Math.abs(value) <= 3_000) return true;
+    if (delta >= 80_000) return true;
+
+    return false;
+  });
+}
+
+function stabilizeFlowData(flowData: FlowData, prevRow: SavedLogRow | null): FlowData {
+  const prev = getPrevFlowSnapshot(prevRow);
+
+  if (flowData.source !== "LIVE") {
+    if (hasSavedFlow(prevRow)) {
+      return {
+        foreign: prev.foreign,
+        inst: prev.inst,
+        indiv: prev.indiv,
+        source: "FALLBACK",
+        raw: flowData.raw,
+      };
+    }
+
+    return flowData;
+  }
+
+  const current = {
+    foreign: flowData.foreign,
+    inst: flowData.inst,
+    indiv: flowData.indiv,
+  };
+
+  if (isSuspiciousFlowJump(current, prevRow)) {
+    console.warn("⚠️ 수급 튐 감지 → 직전 정상값 유지", {
+      current,
+      prev,
+    });
+
+    return {
+      foreign: prev.foreign,
+      inst: prev.inst,
+      indiv: prev.indiv,
+      source: "FILTERED",
+      raw: flowData.raw,
+    };
+  }
+
+  return flowData;
+}
+
 function applyFallbackIfNeeded(row: SupabaseLogPayload, prevRow: SavedLogRow | null) {
   if (!prevRow) return row;
 
@@ -209,12 +294,7 @@ function applyFallbackIfNeeded(row: SupabaseLogPayload, prevRow: SavedLogRow | n
     next.instflow === 0 &&
     next.indivflow === 0;
 
-  const prevHasFlow =
-    toNumber(prevRow.foreignflow) !== 0 ||
-    toNumber(prevRow.instflow) !== 0 ||
-    toNumber(prevRow.indivflow) !== 0;
-
-  if (flowIsEmpty && prevHasFlow) {
+  if (flowIsEmpty && hasSavedFlow(prevRow)) {
     next.foreignflow = toNumber(prevRow.foreignflow);
     next.instflow = toNumber(prevRow.instflow);
     next.indivflow = toNumber(prevRow.indivflow);
@@ -258,6 +338,8 @@ async function saveLogToSupabase(row: SupabaseLogPayload) {
     return { action: "failed", id: null };
   }
 }
+
+
 async function getAccessToken() {
   const appkey = process.env.KIS_APPKEY;
   const appsecret = process.env.KIS_APPSECRET;
@@ -420,7 +502,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       "frgn_ntby_tr_pbmn",
       "frgn_ntby_amt",
       "frgn_ntby_val",
-      "frgn_ntby_qty",
       "frgn_seln_buy_amt",
       "frgn_ntby_tr_pbmn_1",
       "frgn",
@@ -434,8 +515,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       "inst_ntby_amt",
       "orgn_ntby_val",
       "inst_ntby_val",
-      "orgn_ntby_qty",
-      "inst_ntby_qty",
       "orgn",
       "inst",
       "instFlow",
@@ -447,8 +526,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       "indv_ntby_amt",
       "prsn_ntby_val",
       "indv_ntby_val",
-      "prsn_ntby_qty",
-      "indv_ntby_qty",
       "individual",
       "indiv",
       "indivFlow",
@@ -504,7 +581,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       "net_buy_amt",
       "smtl_ntby_tr_pbmn",
       "tr_pbmn",
-      "ntby_qty",
       "amount",
     ]);
 
@@ -1010,17 +1086,11 @@ export async function GET() {
     const kospi = kospiData.price > 0 ? kospiData.price : toNumber(latestDbRow?.kospi);
     const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(latestDbRow?.kosdaq);
 
-    const fallbackFlowAllowed = flowData.source !== "LIVE" && latestDbRow;
+    const stableFlowData = stabilizeFlowData(flowData, latestDbRow);
 
-    const foreign = fallbackFlowAllowed
-      ? toNumber(latestDbRow?.foreignflow)
-      : flowData.foreign;
-    const inst = fallbackFlowAllowed
-      ? toNumber(latestDbRow?.instflow)
-      : flowData.inst;
-    const indiv = fallbackFlowAllowed
-      ? toNumber(latestDbRow?.indivflow)
-      : flowData.indiv;
+    const foreign = stableFlowData.foreign;
+    const inst = stableFlowData.inst;
+    const indiv = stableFlowData.indiv;
 
     const flowPower = foreign + inst;
     const prevFlowPower = toNumber(latestDbRow?.flowpower ?? memoryPrevFlowPower);
@@ -1051,7 +1121,7 @@ export async function GET() {
       indiv,
       diff,
       accel,
-      flowData.source,
+      stableFlowData.source,
       prevFlowPower,
       recentRows
     );
@@ -1117,7 +1187,7 @@ export async function GET() {
 
       saveResult = await saveLogToSupabase(rowToSave);
 
-      console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", flowData.source, {
+      console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", stableFlowData.source, {
         foreign: rowToSave.foreignflow,
         inst: rowToSave.instflow,
         indiv: rowToSave.indivflow,
@@ -1130,7 +1200,7 @@ export async function GET() {
         flat,
         kospi,
         kosdaq,
-        flowSource: flowData.source,
+        flowSource: stableFlowData.source,
       });
     }
 
@@ -1154,7 +1224,7 @@ export async function GET() {
       foreignFlow: rowToSave.foreignflow,
       instFlow: rowToSave.instflow,
       indivFlow: rowToSave.indivflow,
-      flowSource: flowData.source,
+      flowSource: stableFlowData.source,
       flowPower: rowToSave.flowpower,
       prevFlowPower,
       flowTrend: rowToSave.flowtrend,
