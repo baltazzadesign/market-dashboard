@@ -257,31 +257,80 @@ function getFlowPower(row?: Row) {
   return Number(row.foreignFlow ?? 0) + Number(row.instFlow ?? 0);
 }
 
+function isLiveFlowRow(row?: Row | any) {
+  const source = getFlowSource(row);
+  // 예전 데이터처럼 source가 없는 행은 기존 표시를 유지합니다.
+  if (!source) return true;
+  return source === "LIVE";
+}
+
+function getCleanMarketState(value?: string) {
+  return String(value ?? "").replace(/\|FLOW_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED)$/i, "");
+}
+
 function getFlowSource(row?: Row | any) {
-  return String(
+  const explicit = String(
     row?.flowSource ??
       row?.flowsource ??
       row?.flowStatus ??
       row?.flowstatus ??
       ""
   ).toUpperCase();
+
+  if (explicit) return explicit;
+
+  const state = String(row?.marketState ?? row?.marketstate ?? "");
+  const match = state.match(/FLOW_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED)/i);
+  return match ? match[1].toUpperCase() : "";
 }
 
-function isLiveFlowRow(row?: Row | any) {
-  const source = getFlowSource(row);
-  const foreign = Number(row?.foreignFlow ?? row?.foreignflow ?? 0);
-  const inst = Number(row?.instFlow ?? row?.instflow ?? 0);
-  const indiv = Number(row?.indivFlow ?? row?.indivflow ?? 0);
-  const absTotal = Math.abs(foreign) + Math.abs(inst) + Math.abs(indiv);
+function buildRowsWithFlowFallback(rows: Row[]) {
+  let lastLiveFlow: { foreignFlow: number; instFlow: number; indivFlow: number; flowPower: number; flowMomentum: number } | null = null;
 
-  // route.ts에서 LIVE/EMPTY/FILTERED/ERROR가 내려오는 최신 행은 LIVE만 차트에 반영합니다.
-  if (source) return source === "LIVE";
+  return rows.map((row) => {
+    const source = getFlowSource(row);
+    const hasSource = Boolean(source);
+    const isLive = !hasSource || source === "LIVE";
 
-  // 과거 데이터처럼 source가 없는 행은 0값/명백한 비정상치만 제외합니다.
-  if (absTotal === 0) return false;
-  if (absTotal >= 500000) return false;
+    const current = {
+      foreignFlow: Number(row.foreignFlow ?? 0),
+      instFlow: Number(row.instFlow ?? 0),
+      indivFlow: Number(row.indivFlow ?? 0),
+      flowPower: getFlowPower(row),
+      flowMomentum: Number(row.flowMomentum ?? getFlowPower(row)),
+    };
 
-  return true;
+    if (isLive) {
+      lastLiveFlow = current;
+      return {
+        ...row,
+        marketState: getCleanMarketState(row.marketState),
+        flowDisplaySource: source || "LIVE",
+        flowFallback: false,
+      } as Row & { flowDisplaySource: string; flowFallback: boolean };
+    }
+
+    if (!lastLiveFlow) {
+      return {
+        ...row,
+        marketState: getCleanMarketState(row.marketState),
+        flowDisplaySource: source,
+        flowFallback: true,
+      } as Row & { flowDisplaySource: string; flowFallback: boolean };
+    }
+
+    return {
+      ...row,
+      foreignFlow: lastLiveFlow.foreignFlow,
+      instFlow: lastLiveFlow.instFlow,
+      indivFlow: lastLiveFlow.indivFlow,
+      flowPower: lastLiveFlow.flowPower,
+      flowMomentum: lastLiveFlow.flowMomentum,
+      marketState: getCleanMarketState(row.marketState),
+      flowDisplaySource: source,
+      flowFallback: true,
+    } as Row & { flowDisplaySource: string; flowFallback: boolean };
+  });
 }
 
 function getFlowTrend(row?: Row, prev?: Row) {
@@ -648,9 +697,10 @@ export default function DailyPage() {
     return () => clearInterval(interval);
   }, [selectedDate]);
 
-  const chartRows = rows.map((r, index) => {
-    const prev = index > 0 ? rows[index - 1] : undefined;
-    const liveFlow = isLiveFlowRow(r);
+  const flowDisplayRows = buildRowsWithFlowFallback(rows);
+
+  const chartRows = flowDisplayRows.map((r, index) => {
+    const prev = index > 0 ? flowDisplayRows[index - 1] : undefined;
 
     return {
       ...r,
@@ -659,17 +709,14 @@ export default function DailyPage() {
       downRatioPct: Number(r.downRatio) * 100,
       score: marketScore(r),
 
-      // 수급 차트는 LIVE 수급만 표시합니다.
-      // EMPTY/FILTERED/ERROR/FALLBACK 행은 null로 두어 차트가 억지로 이어지지 않게 합니다.
-      foreignFlowValue: liveFlow ? Number(r.foreignFlow ?? 0) : null,
-      instFlowValue: liveFlow ? Number(r.instFlow ?? 0) : null,
-      indivFlowValue: liveFlow ? Number(r.indivFlow ?? 0) : null,
-      flowPowerValue: liveFlow ? getFlowPower(r) : null,
-      flowTrendValue: liveFlow ? getFlowTrend(r, prev) : null,
-      flowMomentumValue: liveFlow ? Number(r.flowMomentum ?? getFlowPower(r)) : null,
-      foreignInstFlowValue: liveFlow
-        ? Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0)
-        : null,
+      // GAS 방식과 동일하게 수급 실패 구간은 직전 정상값으로 표시합니다.
+      foreignFlowValue: Number(r.foreignFlow ?? 0),
+      instFlowValue: Number(r.instFlow ?? 0),
+      indivFlowValue: Number(r.indivFlow ?? 0),
+      flowPowerValue: getFlowPower(r),
+      flowTrendValue: getFlowTrend(r, prev),
+      flowMomentumValue: Number(r.flowMomentum ?? getFlowPower(r)),
+      foreignInstFlowValue: Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0),
     };
   });
 
@@ -684,16 +731,16 @@ export default function DailyPage() {
     foreignInstFlowValue: clampChartNullable(row.foreignInstFlowValue),
   }));
 
-  const last = rows[rows.length - 1];
-  const prevLast = rows.length >= 2 ? rows[rows.length - 2] : undefined;
-  const localAlerts = makeAlerts(rows);
+  const last = flowDisplayRows[flowDisplayRows.length - 1];
+  const prevLast = flowDisplayRows.length >= 2 ? flowDisplayRows[flowDisplayRows.length - 2] : undefined;
+  const localAlerts = makeAlerts(flowDisplayRows);
   const sourceAlerts = dbAlerts.length > 0 ? dbAlerts : localAlerts;
   const alerts =
     alertFilter === "전체"
       ? sourceAlerts.slice(0, 12)
       : sourceAlerts.filter((alert) => alert.level === alertFilter).slice(0, 12);
 
-  const localSignals = buildSignals(rows);
+  const localSignals = buildSignals(flowDisplayRows);
   const signals = dbSignals.length > 0 ? dbSignals : localSignals;
   const sigSummary = signalSummary(signals);
 
@@ -850,7 +897,7 @@ export default function DailyPage() {
           />
           <SummaryCard
             title="수급상태"
-            value={String(last.marketState ?? flowTone(last, prevLast))}
+            value={getCleanMarketState(String(last.marketState ?? flowTone(last, prevLast)))}
             color="#e5e7eb"
           />
         </div>
@@ -916,7 +963,7 @@ export default function DailyPage() {
             </thead>
 
             <tbody>
-              {rows.map((row, index) => (
+              {flowDisplayRows.map((row, index) => (
                 <tr
                   key={row.id}
                   style={{

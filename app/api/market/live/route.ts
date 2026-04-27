@@ -21,7 +21,7 @@ type FlowData = {
   foreign: number;
   inst: number;
   indiv: number;
-  source: "LIVE" | "EMPTY" | "ERROR" | "FILTERED" | "FALLBACK";
+  source: "LIVE" | "FALLBACK" | "EMPTY" | "ERROR";
   raw?: any;
 };
 
@@ -60,12 +60,6 @@ type SupabaseLogPayload = {
   marketscore: number;
   marketstate: string;
   signals: MarketSignal[];
-};
-
-type SavedLogRow = Partial<SupabaseLogPayload> & {
-  id?: number;
-  created_at?: string;
-  createdAt?: string;
 };
 
 function getSupabaseConfig() {
@@ -121,10 +115,6 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
   return res.json();
 }
 
-function encodeFilterValue(value: string) {
-  return encodeURIComponent(value);
-}
-
 function normalizeMinuteValue(time: string) {
   if (!time) return "";
   const m = String(time).match(/(\d{1,2}):(\d{2})/);
@@ -132,6 +122,10 @@ function normalizeMinuteValue(time: string) {
   return `${m[1].padStart(2, "0")}:${m[2]}`;
 }
 
+type SavedLogRow = Partial<SupabaseLogPayload> & {
+  id?: number;
+  created_at?: string;
+};
 
 function normalizeSavedRow(row: any): SavedLogRow | null {
   if (!row || typeof row !== "object") return null;
@@ -139,7 +133,6 @@ function normalizeSavedRow(row: any): SavedLogRow | null {
   return {
     id: toNumber(row.id),
     createdat: row.createdat ?? row.createdAt ?? row.created_at ?? "",
-    created_at: row.created_at ?? "",
     time: normalizeMinuteValue(row.time ?? ""),
     up: toNumber(row.up),
     down: toNumber(row.down),
@@ -178,9 +171,8 @@ async function getLatestLogFromSupabase() {
 async function getLogByMinuteFromSupabase(createdat: string, time: string) {
   try {
     const rows = await supabaseRequest(
-      `/rest/v1/logs?select=*&createdat=eq.${encodeFilterValue(createdat)}&time=eq.${encodeFilterValue(time)}&order=id.desc&limit=1`
+      `/rest/v1/logs?select=*&createdat=eq.${encodeURIComponent(createdat)}&time=eq.${encodeURIComponent(time)}&order=id.desc&limit=1`
     );
-
     if (!Array.isArray(rows) || rows.length === 0) return null;
     return normalizeSavedRow(rows[0]);
   } catch (error) {
@@ -189,17 +181,8 @@ async function getLogByMinuteFromSupabase(createdat: string, time: string) {
   }
 }
 
-function isValidMarketSnapshot(row: SupabaseLogPayload) {
-  const total = row.up + row.down + row.flat;
-  const hasBreadth = total > 0 && Math.abs(row.diff) <= total;
-  const hasIndex = row.kospi > 0 || row.kosdaq > 0;
-
-  return hasBreadth && hasIndex;
-}
-
 function hasSavedFlow(prevRow: SavedLogRow | null) {
   if (!prevRow) return false;
-
   return (
     toNumber(prevRow.foreignflow) !== 0 ||
     toNumber(prevRow.instflow) !== 0 ||
@@ -207,62 +190,15 @@ function hasSavedFlow(prevRow: SavedLogRow | null) {
   );
 }
 
-function getPrevFlowSnapshot(prevRow: SavedLogRow | null) {
-  return {
-    foreign: toNumber(prevRow?.foreignflow),
-    inst: toNumber(prevRow?.instflow),
-    indiv: toNumber(prevRow?.indivflow),
-  };
-}
+function applyGasStyleFlowFallback(flowData: FlowData, prevRow: SavedLogRow | null): FlowData {
+  if (flowData.source === "LIVE") return flowData;
 
-function isSuspiciousFlowJump(current: Omit<FlowData, "source" | "raw">, prevRow: SavedLogRow | null) {
-  const values = [current.foreign, current.inst, current.indiv];
-  const absValues = values.map((value) => Math.abs(value));
-  const absTotal = absValues.reduce((sum, value) => sum + value, 0);
-
-  // 074 수급은 당일 누적 순매수대금(백만원)입니다.
-  // 장중 5만~15만 수준은 정상적으로 나올 수 있으므로 이전값 대비 변화율로 강하게 막지 않습니다.
-  // 원 단위 파싱, 잘못된 객체 파싱 등으로 생기는 진짜 비정상치만 차단합니다.
-  if (absTotal >= 500_000) return true;
-  if (absValues.some((value) => value >= 300_000)) return true;
-
-  return false;
-}
-
-function stabilizeFlowData(flowData: FlowData, prevRow: SavedLogRow | null): FlowData {
-  const prev = getPrevFlowSnapshot(prevRow);
-
-  if (flowData.source !== "LIVE") {
-    if (hasSavedFlow(prevRow)) {
-      return {
-        foreign: prev.foreign,
-        inst: prev.inst,
-        indiv: prev.indiv,
-        source: "FALLBACK",
-        raw: flowData.raw,
-      };
-    }
-
-    return flowData;
-  }
-
-  const current = {
-    foreign: flowData.foreign,
-    inst: flowData.inst,
-    indiv: flowData.indiv,
-  };
-
-  if (isSuspiciousFlowJump(current, prevRow)) {
-    console.warn("⚠️ 수급 튐 감지 → 직전 정상값 유지", {
-      current,
-      prev,
-    });
-
+  if (hasSavedFlow(prevRow)) {
     return {
-      foreign: prev.foreign,
-      inst: prev.inst,
-      indiv: prev.indiv,
-      source: "FILTERED",
+      foreign: toNumber(prevRow?.foreignflow),
+      inst: toNumber(prevRow?.instflow),
+      indiv: toNumber(prevRow?.indivflow),
+      source: "FALLBACK",
       raw: flowData.raw,
     };
   }
@@ -270,29 +206,9 @@ function stabilizeFlowData(flowData: FlowData, prevRow: SavedLogRow | null): Flo
   return flowData;
 }
 
-function applyFallbackIfNeeded(row: SupabaseLogPayload, prevRow: SavedLogRow | null) {
-  if (!prevRow) return row;
-
-  const next = { ...row };
-
-  if (next.kospi <= 0 && toNumber(prevRow.kospi) > 0) next.kospi = toNumber(prevRow.kospi);
-  if (next.kosdaq <= 0 && toNumber(prevRow.kosdaq) > 0) next.kosdaq = toNumber(prevRow.kosdaq);
-
-  const flowIsEmpty =
-    next.foreignflow === 0 &&
-    next.instflow === 0 &&
-    next.indivflow === 0;
-
-  if (flowIsEmpty && hasSavedFlow(prevRow)) {
-    next.foreignflow = toNumber(prevRow.foreignflow);
-    next.instflow = toNumber(prevRow.instflow);
-    next.indivflow = toNumber(prevRow.indivflow);
-    next.flowpower = next.foreignflow + next.instflow;
-    next.flowtrend = next.flowpower - toNumber(prevRow.flowpower);
-    next.flowmomentum = Math.round(toNumber(prevRow.flowpower) * 0.7 + next.flowpower * 0.3);
-  }
-
-  return next;
+function isValidMarketSnapshot(row: SupabaseLogPayload) {
+  const total = row.up + row.down + row.flat;
+  return total > 500 && total < 5000 && row.kospi > 1000 && row.kosdaq > 300;
 }
 
 async function saveLogToSupabase(row: SupabaseLogPayload) {
@@ -429,12 +345,10 @@ async function fetchBreadth(code: "0001" | "1001") {
 }
 
 function normalizeFlowUnit(value: number) {
-  // KIS 074 순매수대금은 기존 GAS 기준으로 이미 백만원 단위입니다.
-  // 9만, 10만 같은 값도 정상 범위일 수 있으므로 1,000으로 나누면 안 됩니다.
-  // 다만 원 단위처럼 비정상적으로 큰 값이 들어온 경우만 백만원 단위로 보정합니다.
   const abs = Math.abs(value);
 
   if (abs >= 100_000_000) return Math.round(value / 1_000_000);
+  if (abs >= 100_000) return Math.round(value / 1_000);
 
   return value;
 }
@@ -486,44 +400,130 @@ function pickNumberByPattern(obj: any, patterns: RegExp[]) {
 }
 
 function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
-  // GAS에서 안정적으로 쓰던 방식 그대로 적용합니다.
-  // 074는 json.output 또는 json.output1의 첫 객체에 외국인/기관/개인 순매수대금 필드가 들어옵니다.
-  // 기존처럼 전체 JSON을 재귀 탐색하면 다른 투자자 분류/잔여 필드까지 잘못 잡아 수급값이 오락가락합니다.
-  let out = data?.output ?? data?.output1 ?? {};
-  if (Array.isArray(out)) out = out[0] ?? {};
-  if (!out || typeof out !== "object") out = {};
+  const rows = getRows(data);
 
-  const foreign = normalizeFlowUnit(
-    pickNumber(out, [
+  const directKeyGroups = {
+    foreign: [
       "frgn_ntby_tr_pbmn",
       "frgn_ntby_amt",
       "frgn_ntby_val",
-    ])
-  );
-
-  const inst = normalizeFlowUnit(
-    pickNumber(out, [
+      "frgn_ntby_qty",
+      "frgn_seln_buy_amt",
+      "frgn_ntby_tr_pbmn_1",
+      "frgn",
+      "foreign",
+      "foreignFlow",
+    ],
+    inst: [
       "orgn_ntby_tr_pbmn",
       "inst_ntby_tr_pbmn",
       "orgn_ntby_amt",
       "inst_ntby_amt",
       "orgn_ntby_val",
       "inst_ntby_val",
-    ])
-  );
-
-  const indiv = normalizeFlowUnit(
-    pickNumber(out, [
+      "orgn_ntby_qty",
+      "inst_ntby_qty",
+      "orgn",
+      "inst",
+      "instFlow",
+    ],
+    indiv: [
       "prsn_ntby_tr_pbmn",
       "indv_ntby_tr_pbmn",
       "prsn_ntby_amt",
       "indv_ntby_amt",
       "prsn_ntby_val",
       "indv_ntby_val",
-    ])
-  );
+      "prsn_ntby_qty",
+      "indv_ntby_qty",
+      "individual",
+      "indiv",
+      "indivFlow",
+    ],
+  };
 
-  return { foreign, inst, indiv };
+  const patternGroups = {
+    foreign: [/frgn.*ntby/i, /foreign.*net/i, /frgn.*net/i],
+    inst: [/orgn.*ntby/i, /inst.*ntby/i, /organ.*net/i, /inst.*net/i],
+    indiv: [/prsn.*ntby/i, /indv.*ntby/i, /individual.*net/i, /person.*net/i],
+  };
+
+  for (const row of rows) {
+    const foreign =
+      pickNumber(row, directKeyGroups.foreign) ||
+      pickNumberByPattern(row, patternGroups.foreign);
+
+    const inst =
+      pickNumber(row, directKeyGroups.inst) ||
+      pickNumberByPattern(row, patternGroups.inst);
+
+    const indiv =
+      pickNumber(row, directKeyGroups.indiv) ||
+      pickNumberByPattern(row, patternGroups.indiv);
+
+    if (foreign !== 0 || inst !== 0 || indiv !== 0) {
+      return {
+        foreign: normalizeFlowUnit(foreign),
+        inst: normalizeFlowUnit(inst),
+        indiv: normalizeFlowUnit(indiv),
+      };
+    }
+  }
+
+  let foreign = 0;
+  let inst = 0;
+  let indiv = 0;
+
+  for (const row of rows) {
+    const name = String(
+      row?.invt_cls_name ??
+        row?.ivst_cls_name ??
+        row?.invr_cls_name ??
+        row?.invst_cls_name ??
+        row?.investor ??
+        row?.name ??
+        ""
+    );
+
+    const amount = pickNumber(row, [
+      "ntby_tr_pbmn",
+      "ntby_amt",
+      "net_buy_amt",
+      "smtl_ntby_tr_pbmn",
+      "tr_pbmn",
+      "ntby_qty",
+      "amount",
+    ]);
+
+    if (!amount) continue;
+
+    if (name.includes("외국") || name.toLowerCase().includes("foreign")) {
+      foreign += amount;
+    }
+
+    if (
+      name.includes("기관") ||
+      name.toLowerCase().includes("inst") ||
+      name.includes("금융투자") ||
+      name.includes("투신") ||
+      name.includes("연기금") ||
+      name.includes("보험") ||
+      name.includes("은행") ||
+      name.includes("기타금융")
+    ) {
+      inst += amount;
+    }
+
+    if (name.includes("개인") || name.toLowerCase().includes("individual")) {
+      indiv += amount;
+    }
+  }
+
+  return {
+    foreign: normalizeFlowUnit(foreign),
+    inst: normalizeFlowUnit(inst),
+    indiv: normalizeFlowUnit(indiv),
+  };
 }
 
 async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<FlowData> {
@@ -590,37 +590,23 @@ async function fetchInvestorFlow(): Promise<FlowData> {
       fetchInvestorFlowByMarket("KOSDAQ"),
     ]);
 
-    // KOSPI/KOSDAQ 둘 다 LIVE일 때만 합산합니다.
-    // 한쪽만 EMPTY/ERROR인데 합산하면 예전 구글시트 대비 수급값이 튀거나 반쪽 데이터가 저장됩니다.
-    if (kospiFlow.source !== "LIVE" || kosdaqFlow.source !== "LIVE") {
-      const source =
-        kospiFlow.source === "ERROR" || kosdaqFlow.source === "ERROR"
-          ? "ERROR"
-          : "EMPTY";
-
-      return {
-        foreign: 0,
-        inst: 0,
-        indiv: 0,
-        source,
-        raw: {
-          kospi: kospiFlow.raw,
-          kosdaq: kosdaqFlow.raw,
-        },
-      };
-    }
-
     const foreign = kospiFlow.foreign + kosdaqFlow.foreign;
     const inst = kospiFlow.inst + kosdaqFlow.inst;
     const indiv = kospiFlow.indiv + kosdaqFlow.indiv;
 
     const hasValue = foreign !== 0 || inst !== 0 || indiv !== 0;
 
+    const source = hasValue
+      ? "LIVE"
+      : kospiFlow.source === "ERROR" || kosdaqFlow.source === "ERROR"
+        ? "ERROR"
+        : "EMPTY";
+
     return {
       foreign,
       inst,
       indiv,
-      source: hasValue ? "LIVE" : "EMPTY",
+      source,
       raw: {
         kospi: kospiFlow.raw,
         kosdaq: kosdaqFlow.raw,
@@ -988,7 +974,7 @@ export async function GET() {
     const createdat = getKstDateString(now);
     const minuteKey = `${createdat} ${timeStr}`;
 
-    const [kospiData, kosdaqData, flowData, latestDbRow] = await Promise.all([
+    const [kospiData, kosdaqData, rawFlowData, latestDbRow] = await Promise.all([
       fetchBreadth("0001"),
       fetchBreadth("1001"),
       fetchInvestorFlow(),
@@ -1005,23 +991,6 @@ export async function GET() {
     const upRatio = total > 0 ? up / total : 0;
     const downRatio = total > 0 ? down / total : 0;
 
-    const prevDiff = toNumber(latestDbRow?.diff ?? memoryPrevDiff);
-    const accel = diff - prevDiff;
-
-    const kospi = kospiData.price > 0 ? kospiData.price : toNumber(latestDbRow?.kospi);
-    const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(latestDbRow?.kosdaq);
-
-    const stableFlowData = stabilizeFlowData(flowData, latestDbRow);
-
-    const foreign = stableFlowData.foreign;
-    const inst = stableFlowData.inst;
-    const indiv = stableFlowData.indiv;
-
-    const flowPower = foreign + inst;
-    const prevFlowPower = toNumber(latestDbRow?.flowpower ?? memoryPrevFlowPower);
-    const flowTrend = flowPower - prevFlowPower;
-    const flowMomentum = Math.round(prevFlowPower * 0.7 + flowPower * 0.3);
-
     const recentRowsFromMemory = memoryRecentRows.slice(-3);
     const recentRows = recentRowsFromMemory.length > 0
       ? recentRowsFromMemory
@@ -1035,6 +1004,25 @@ export async function GET() {
           ]
         : [];
 
+    const prevDiff = toNumber(latestDbRow?.diff ?? memoryPrevDiff);
+    const accel = diff - prevDiff;
+
+    const kospi = kospiData.price > 0 ? kospiData.price : toNumber(latestDbRow?.kospi);
+    const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(latestDbRow?.kosdaq);
+
+    // GAS 방식과 동일하게 074 LIVE 실패 시에는 직전 정상 수급값을 대체 표시/저장합니다.
+    // 대신 marketstate에 FLOW_FALLBACK 마커를 남겨 page.tsx에서 상태를 구분할 수 있게 합니다.
+    const flowData = applyGasStyleFlowFallback(rawFlowData, latestDbRow);
+
+    const foreign = flowData.foreign;
+    const inst = flowData.inst;
+    const indiv = flowData.indiv;
+
+    const flowPower = foreign + inst;
+    const prevFlowPower = toNumber(latestDbRow?.flowpower ?? memoryPrevFlowPower);
+    const flowTrend = flowPower - prevFlowPower;
+    const flowMomentum = Math.round(prevFlowPower * 0.7 + flowPower * 0.3);
+
     const baseAlert = buildAlert(diff, accel, upRatio, downRatio);
     const marketTone = buildTone(diff);
     const marketScore = buildMarketScore(diff, upRatio, downRatio);
@@ -1046,14 +1034,14 @@ export async function GET() {
       indiv,
       diff,
       accel,
-      stableFlowData.source,
+      flowData.source,
       prevFlowPower,
       recentRows
     );
     const signals = sortSignals([...baseSignals, ...flowSignals]);
     const signalAlert = buildSignalAlert(signals);
     const alert = signalAlert ?? baseAlert;
-    const marketState = buildMarketState(
+    const baseMarketState = buildMarketState(
       diff,
       accel,
       marketScore,
@@ -1061,8 +1049,9 @@ export async function GET() {
       flowTrend,
       signals[0] ?? null
     );
+    const marketState = `${baseMarketState}|FLOW_${flowData.source}`;
 
-    let rowToSave: SupabaseLogPayload = {
+    const rowToSave: SupabaseLogPayload = {
       createdat,
       time: timeStr,
       up,
@@ -1087,35 +1076,30 @@ export async function GET() {
       signals,
     };
 
-    rowToSave = applyFallbackIfNeeded(rowToSave, latestDbRow);
-
-    const shouldSave = isValidMarketSnapshot(rowToSave);
     let saveResult: { action: string; id: number | null } = {
       action: "skipped",
       id: null,
     };
 
-    if (shouldSave) {
-      if (lastSavedMinute !== minuteKey) {
-        lastSavedMinute = minuteKey;
-      }
+    if (isValidMarketSnapshot(rowToSave)) {
+      lastSavedMinute = minuteKey;
 
       memoryRecentRows.push({
-        diff: rowToSave.diff,
-        foreignFlow: rowToSave.foreignflow,
-        instFlow: rowToSave.instflow,
+        diff,
+        foreignFlow: foreign,
+        instFlow: inst,
       });
       memoryRecentRows = memoryRecentRows.slice(-10);
 
-      memoryPrevDiff = rowToSave.diff;
-      memoryPrevFlowPower = rowToSave.flowpower;
+      memoryPrevDiff = diff;
+      memoryPrevFlowPower = flowPower;
 
       saveResult = await saveLogToSupabase(rowToSave);
 
-      console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", stableFlowData.source, {
-        foreign: rowToSave.foreignflow,
-        inst: rowToSave.instflow,
-        indiv: rowToSave.indivflow,
+      console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", flowData.source, {
+        foreign,
+        inst,
+        indiv,
       });
     } else {
       console.warn("⚠️ 비정상 데이터라 저장 생략:", {
@@ -1125,45 +1109,45 @@ export async function GET() {
         flat,
         kospi,
         kosdaq,
-        flowSource: stableFlowData.source,
+        flowSource: flowData.source,
       });
     }
 
     return Response.json({
-      up: rowToSave.up,
-      down: rowToSave.down,
-      flat: rowToSave.flat,
-      diff: rowToSave.diff,
-      accel: rowToSave.accel,
-      upRatio: rowToSave.upratio,
-      downRatio: rowToSave.downratio,
-      kospi: rowToSave.kospi,
-      kosdaq: rowToSave.kosdaq,
+      up,
+      down,
+      flat,
+      diff,
+      accel,
+      upRatio,
+      downRatio,
+      kospi,
+      kosdaq,
       kospiUp: kospiData.up,
       kospiDown: kospiData.down,
       kosdaqUp: kosdaqData.up,
       kosdaqDown: kosdaqData.down,
-      foreign: rowToSave.foreignflow,
-      inst: rowToSave.instflow,
-      indiv: rowToSave.indivflow,
-      foreignFlow: rowToSave.foreignflow,
-      instFlow: rowToSave.instflow,
-      indivFlow: rowToSave.indivflow,
-      flowSource: stableFlowData.source,
-      flowPower: rowToSave.flowpower,
+      foreign,
+      inst,
+      indiv,
+      foreignFlow: foreign,
+      instFlow: inst,
+      indivFlow: indiv,
+      flowSource: flowData.source,
+      rawFlowSource: rawFlowData.source,
+      flowPower,
       prevFlowPower,
-      flowTrend: rowToSave.flowtrend,
-      flowMomentum: rowToSave.flowmomentum,
-      alert: rowToSave.alert,
+      flowTrend,
+      flowMomentum,
+      alert,
       baseAlert,
-      topSignal: rowToSave.signals[0] ?? null,
-      marketTone: rowToSave.markettone,
-      marketScore: rowToSave.marketscore,
-      marketState: rowToSave.marketstate,
-      signals: rowToSave.signals,
-      saved: shouldSave,
+      topSignal: signals[0] ?? null,
+      marketTone,
+      marketScore,
+      marketState,
+      signals,
+      saved: saveResult.action !== "skipped",
       saveAction: saveResult.action,
-      minuteKey,
     });
   } catch (error: any) {
     return Response.json(
