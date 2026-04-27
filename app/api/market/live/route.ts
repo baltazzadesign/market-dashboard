@@ -62,6 +62,12 @@ type SupabaseLogPayload = {
   signals: MarketSignal[];
 };
 
+type SavedLogRow = Partial<SupabaseLogPayload> & {
+  id?: number;
+  created_at?: string;
+  createdAt?: string;
+};
+
 function getSupabaseConfig() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -115,11 +121,128 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
   return res.json();
 }
 
+function encodeFilterValue(value: string) {
+  return encodeURIComponent(value);
+}
+
+function normalizeMinuteValue(time: string) {
+  if (!time) return "";
+  const m = String(time).match(/(\d{1,2}):(\d{2})/);
+  if (!m) return String(time);
+  return `${m[1].padStart(2, "0")}:${m[2]}`;
+}
+
+function normalizeSavedRow(row: any): SavedLogRow | null {
+  if (!row || typeof row !== "object") return null;
+
+  return {
+    id: toNumber(row.id),
+    createdat: row.createdat ?? row.createdAt ?? row.created_at ?? "",
+    created_at: row.created_at ?? "",
+    time: normalizeMinuteValue(row.time ?? ""),
+    up: toNumber(row.up),
+    down: toNumber(row.down),
+    flat: toNumber(row.flat),
+    diff: toNumber(row.diff),
+    accel: toNumber(row.accel),
+    upratio: toNumber(row.upratio ?? row.upRatio),
+    downratio: toNumber(row.downratio ?? row.downRatio),
+    kospi: toNumber(row.kospi),
+    kosdaq: toNumber(row.kosdaq),
+    foreignflow: toNumber(row.foreignflow ?? row.foreignFlow),
+    instflow: toNumber(row.instflow ?? row.instFlow),
+    indivflow: toNumber(row.indivflow ?? row.indivFlow),
+    flowpower: toNumber(row.flowpower ?? row.flowPower),
+    flowtrend: toNumber(row.flowtrend ?? row.flowTrend),
+    flowmomentum: toNumber(row.flowmomentum ?? row.flowMomentum),
+    alert: row.alert ?? "",
+    markettone: row.markettone ?? row.marketTone ?? "",
+    marketscore: toNumber(row.marketscore ?? row.marketScore),
+    marketstate: row.marketstate ?? row.marketState ?? "",
+    signals: Array.isArray(row.signals) ? row.signals : [],
+  };
+}
+
+async function getLatestLogFromSupabase() {
+  try {
+    const rows = await supabaseRequest("/rest/v1/logs?select=*&order=id.desc&limit=1");
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    return normalizeSavedRow(rows[0]);
+  } catch (error) {
+    console.warn("Supabase 최근 로그 조회 실패:", error);
+    return null;
+  }
+}
+
+async function getLogByMinuteFromSupabase(createdat: string, time: string) {
+  try {
+    const rows = await supabaseRequest(
+      `/rest/v1/logs?select=*&createdat=eq.${encodeFilterValue(createdat)}&time=eq.${encodeFilterValue(time)}&order=id.desc&limit=1`
+    );
+
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    return normalizeSavedRow(rows[0]);
+  } catch (error) {
+    console.warn("Supabase 같은 분 로그 조회 실패:", error);
+    return null;
+  }
+}
+
+function isValidMarketSnapshot(row: SupabaseLogPayload) {
+  const total = row.up + row.down + row.flat;
+  const hasBreadth = total > 0 && Math.abs(row.diff) <= total;
+  const hasIndex = row.kospi > 0 || row.kosdaq > 0;
+
+  return hasBreadth && hasIndex;
+}
+
+function applyFallbackIfNeeded(row: SupabaseLogPayload, prevRow: SavedLogRow | null) {
+  if (!prevRow) return row;
+
+  const next = { ...row };
+
+  if (next.kospi <= 0 && toNumber(prevRow.kospi) > 0) next.kospi = toNumber(prevRow.kospi);
+  if (next.kosdaq <= 0 && toNumber(prevRow.kosdaq) > 0) next.kosdaq = toNumber(prevRow.kosdaq);
+
+  const flowIsEmpty =
+    next.foreignflow === 0 &&
+    next.instflow === 0 &&
+    next.indivflow === 0;
+
+  const prevHasFlow =
+    toNumber(prevRow.foreignflow) !== 0 ||
+    toNumber(prevRow.instflow) !== 0 ||
+    toNumber(prevRow.indivflow) !== 0;
+
+  if (flowIsEmpty && prevHasFlow) {
+    next.foreignflow = toNumber(prevRow.foreignflow);
+    next.instflow = toNumber(prevRow.instflow);
+    next.indivflow = toNumber(prevRow.indivflow);
+    next.flowpower = next.foreignflow + next.instflow;
+    next.flowtrend = next.flowpower - toNumber(prevRow.flowpower);
+    next.flowmomentum = Math.round(toNumber(prevRow.flowpower) * 0.7 + next.flowpower * 0.3);
+  }
+
+  return next;
+}
+
 async function saveLogToSupabase(row: SupabaseLogPayload) {
   try {
-    // Vercel 서버리스에서는 메모리 상태가 초기화될 수 있으므로
-    // DB 중복 체크에 의존하지 않고 호출 시점의 1분 스냅샷을 그대로 저장합니다.
-    // created_at 컬럼은 Supabase 기본값 now()로 자동 저장됩니다.
+    const sameMinuteRow = await getLogByMinuteFromSupabase(row.createdat, row.time);
+
+    if (sameMinuteRow?.id) {
+      await supabaseRequest(`/rest/v1/logs?id=eq.${sameMinuteRow.id}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify(row),
+      });
+
+      return { action: "updated", id: sameMinuteRow.id };
+    }
+
     await supabaseRequest("/rest/v1/logs", {
       method: "POST",
       headers: {
@@ -128,12 +251,13 @@ async function saveLogToSupabase(row: SupabaseLogPayload) {
       },
       body: JSON.stringify(row),
     });
+
+    return { action: "inserted", id: null };
   } catch (error) {
     console.warn("Supabase 로그 저장 실패:", error);
+    return { action: "failed", id: null };
   }
 }
-
-
 async function getAccessToken() {
   const appkey = process.env.KIS_APPKEY;
   const appsecret = process.env.KIS_APPSECRET;
@@ -849,10 +973,25 @@ function buildFinalAlertLevel(alert: string, signals: MarketSignal[]) {
 
 export async function GET() {
   try {
-    const [kospiData, kosdaqData, flowData] = await Promise.all([
+    const now = new Date();
+
+    const timeStr = normalizeMinuteValue(
+      new Intl.DateTimeFormat("ko-KR", {
+        timeZone: "Asia/Seoul",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(now)
+    );
+
+    const createdat = getKstDateString(now);
+    const minuteKey = `${createdat} ${timeStr}`;
+
+    const [kospiData, kosdaqData, flowData, latestDbRow] = await Promise.all([
       fetchBreadth("0001"),
       fetchBreadth("1001"),
       fetchInvestorFlow(),
+      getLatestLogFromSupabase(),
     ]);
 
     const up = kospiData.up + kosdaqData.up;
@@ -865,22 +1004,41 @@ export async function GET() {
     const upRatio = total > 0 ? up / total : 0;
     const downRatio = total > 0 ? down / total : 0;
 
-    const recentRows = memoryRecentRows.slice(-3);
-
-    const prevDiff = memoryPrevDiff;
+    const prevDiff = toNumber(latestDbRow?.diff ?? memoryPrevDiff);
     const accel = diff - prevDiff;
 
-    const kospi = kospiData.price;
-    const kosdaq = kosdaqData.price;
+    const kospi = kospiData.price > 0 ? kospiData.price : toNumber(latestDbRow?.kospi);
+    const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(latestDbRow?.kosdaq);
 
-    const foreign = flowData.foreign;
-    const inst = flowData.inst;
-    const indiv = flowData.indiv;
+    const fallbackFlowAllowed = flowData.source !== "LIVE" && latestDbRow;
+
+    const foreign = fallbackFlowAllowed
+      ? toNumber(latestDbRow?.foreignflow)
+      : flowData.foreign;
+    const inst = fallbackFlowAllowed
+      ? toNumber(latestDbRow?.instflow)
+      : flowData.inst;
+    const indiv = fallbackFlowAllowed
+      ? toNumber(latestDbRow?.indivflow)
+      : flowData.indiv;
 
     const flowPower = foreign + inst;
-    const prevFlowPower = memoryPrevFlowPower;
+    const prevFlowPower = toNumber(latestDbRow?.flowpower ?? memoryPrevFlowPower);
     const flowTrend = flowPower - prevFlowPower;
     const flowMomentum = Math.round(prevFlowPower * 0.7 + flowPower * 0.3);
+
+    const recentRowsFromMemory = memoryRecentRows.slice(-3);
+    const recentRows = recentRowsFromMemory.length > 0
+      ? recentRowsFromMemory
+      : latestDbRow
+        ? [
+            {
+              diff: toNumber(latestDbRow.diff),
+              foreignFlow: toNumber(latestDbRow.foreignflow),
+              instFlow: toNumber(latestDbRow.instflow),
+            },
+          ]
+        : [];
 
     const baseAlert = buildAlert(diff, accel, upRatio, downRatio);
     const marketTone = buildTone(diff);
@@ -909,94 +1067,108 @@ export async function GET() {
       signals[0] ?? null
     );
 
-    const now = new Date();
-
-    const timeStr = new Intl.DateTimeFormat("ko-KR", {
-      timeZone: "Asia/Seoul",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(now);
-
-    const minuteKey = `${getKstDateString(now)} ${timeStr}`;
-
-    if (lastSavedMinute !== minuteKey) {
-      lastSavedMinute = minuteKey;
-
-      memoryRecentRows.push({
-        diff,
-        foreignFlow: foreign,
-        instFlow: inst,
-      });
-      memoryRecentRows = memoryRecentRows.slice(-10);
-
-      memoryPrevDiff = diff;
-      memoryPrevFlowPower = flowPower;
-
-      await saveLogToSupabase({
-        createdat: getKstDateString(now),
-        time: timeStr,
-        up,
-        down,
-        flat,
-        diff,
-        accel,
-        upratio: upRatio,
-        downratio: downRatio,
-        kospi,
-        kosdaq,
-        foreignflow: foreign,
-        instflow: inst,
-        indivflow: indiv,
-        flowpower: flowPower,
-        flowtrend: flowTrend,
-        flowmomentum: flowMomentum,
-        alert,
-        markettone: marketTone,
-        marketscore: marketScore,
-        marketstate: marketState,
-        signals,
-      });
-
-      console.log("✅ LIVE 계산됨:", timeStr, "수급:", flowData.source, {
-        foreign,
-        inst,
-        indiv,
-      });
-    }
-
-    return Response.json({
+    let rowToSave: SupabaseLogPayload = {
+      createdat,
+      time: timeStr,
       up,
       down,
       flat,
       diff,
       accel,
-      upRatio,
-      downRatio,
+      upratio: upRatio,
+      downratio: downRatio,
       kospi,
       kosdaq,
+      foreignflow: foreign,
+      instflow: inst,
+      indivflow: indiv,
+      flowpower: flowPower,
+      flowtrend: flowTrend,
+      flowmomentum: flowMomentum,
+      alert,
+      markettone: marketTone,
+      marketscore: marketScore,
+      marketstate: marketState,
+      signals,
+    };
+
+    rowToSave = applyFallbackIfNeeded(rowToSave, latestDbRow);
+
+    const shouldSave = isValidMarketSnapshot(rowToSave);
+    let saveResult: { action: string; id: number | null } = {
+      action: "skipped",
+      id: null,
+    };
+
+    if (shouldSave) {
+      if (lastSavedMinute !== minuteKey) {
+        lastSavedMinute = minuteKey;
+      }
+
+      memoryRecentRows.push({
+        diff: rowToSave.diff,
+        foreignFlow: rowToSave.foreignflow,
+        instFlow: rowToSave.instflow,
+      });
+      memoryRecentRows = memoryRecentRows.slice(-10);
+
+      memoryPrevDiff = rowToSave.diff;
+      memoryPrevFlowPower = rowToSave.flowpower;
+
+      saveResult = await saveLogToSupabase(rowToSave);
+
+      console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", flowData.source, {
+        foreign: rowToSave.foreignflow,
+        inst: rowToSave.instflow,
+        indiv: rowToSave.indivflow,
+      });
+    } else {
+      console.warn("⚠️ 비정상 데이터라 저장 생략:", {
+        time: timeStr,
+        up,
+        down,
+        flat,
+        kospi,
+        kosdaq,
+        flowSource: flowData.source,
+      });
+    }
+
+    return Response.json({
+      up: rowToSave.up,
+      down: rowToSave.down,
+      flat: rowToSave.flat,
+      diff: rowToSave.diff,
+      accel: rowToSave.accel,
+      upRatio: rowToSave.upratio,
+      downRatio: rowToSave.downratio,
+      kospi: rowToSave.kospi,
+      kosdaq: rowToSave.kosdaq,
       kospiUp: kospiData.up,
       kospiDown: kospiData.down,
       kosdaqUp: kosdaqData.up,
       kosdaqDown: kosdaqData.down,
-      foreign,
-      inst,
-      indiv,
-      foreignFlow: foreign,
-      instFlow: inst,
-      indivFlow: indiv,
+      foreign: rowToSave.foreignflow,
+      inst: rowToSave.instflow,
+      indiv: rowToSave.indivflow,
+      foreignFlow: rowToSave.foreignflow,
+      instFlow: rowToSave.instflow,
+      indivFlow: rowToSave.indivflow,
       flowSource: flowData.source,
-      flowPower,
+      flowPower: rowToSave.flowpower,
       prevFlowPower,
-      flowTrend,
-      flowMomentum,
-      alert,
+      flowTrend: rowToSave.flowtrend,
+      flowMomentum: rowToSave.flowmomentum,
+      alert: rowToSave.alert,
       baseAlert,
-      topSignal: signals[0] ?? null,
-      marketTone,
-      marketScore,
-      marketState,
-      signals,
+      topSignal: rowToSave.signals[0] ?? null,
+      marketTone: rowToSave.markettone,
+      marketScore: rowToSave.marketscore,
+      marketState: rowToSave.marketstate,
+      signals: rowToSave.signals,
+      saved: shouldSave,
+      saveAction: saveResult.action,
+      minuteKey,
     });
   } catch (error: any) {
     return Response.json(

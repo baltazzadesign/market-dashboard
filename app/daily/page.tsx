@@ -792,8 +792,15 @@ export default function DailyPage() {
           alignItems: "start",
         }}
       >
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div
+          style={{
+            maxHeight: "calc(100vh - 220px)",
+            overflow: "auto",
+            border: "1px solid #1e293b",
+            borderRadius: 14,
+          }}
+        >
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr>
                 <th style={th}>시간</th>
@@ -1402,10 +1409,16 @@ function SignalBox({ signals }: { signals: SignalItem[] }) {
 }
 
 const th: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 20,
   padding: "12px",
   borderBottom: "1px solid #334155",
+  background: "#0f172a",
+  color: "#e5e7eb",
   textAlign: "center",
   whiteSpace: "nowrap",
+  boxShadow: "0 1px 0 rgba(51,65,85,0.9), 0 8px 18px rgba(2,6,23,0.45)",
 };
 
 const td: React.CSSProperties = {
