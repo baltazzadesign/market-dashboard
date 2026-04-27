@@ -321,9 +321,10 @@ async function getAccessToken() {
     storedExpireMs &&
     now < storedExpireMs - KIS_TOKEN_REFRESH_BUFFER_MS
   ) {
-    cachedToken = storedToken.access_token;
+    const storedAccessToken = String(storedToken.access_token);
+    cachedToken = storedAccessToken;
     cachedTokenExpireAt = storedExpireMs;
-    return cachedToken;
+    return storedAccessToken;
   }
 
   // 3) 저장 토큰이 없거나 만료 임박이면 새로 발급
@@ -355,14 +356,14 @@ async function getAccessToken() {
   const safeExpiresInSec = Number.isFinite(expiresInSec) && expiresInSec > 0 ? expiresInSec : 86400;
   const expiresAtMs = now + safeExpiresInSec * 1000;
 
-const accessToken = String(json.access_token);
+  const accessToken = String(json.access_token);
 
-cachedToken = accessToken;
-cachedTokenExpireAt = expiresAtMs;
+  cachedToken = accessToken;
+  cachedTokenExpireAt = expiresAtMs;
 
-await saveKisTokenToSupabase(accessToken, expiresAtMs);
+  await saveKisTokenToSupabase(accessToken, expiresAtMs);
 
-return accessToken;
+  return accessToken;
 }
 
 function pickOutput(data: any) {
