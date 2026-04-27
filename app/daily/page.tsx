@@ -269,10 +269,19 @@ function getFlowSource(row?: Row | any) {
 
 function isLiveFlowRow(row?: Row | any) {
   const source = getFlowSource(row);
-  // 예전 데이터처럼 source가 없는 행은 기존 표시를 유지하고,
-  // route.ts에서 LIVE/EMPTY/FILTERED/ERROR가 들어온 최신 행만 필터링합니다.
-  if (!source) return true;
-  return source === "LIVE";
+  const foreign = Number(row?.foreignFlow ?? row?.foreignflow ?? 0);
+  const inst = Number(row?.instFlow ?? row?.instflow ?? 0);
+  const indiv = Number(row?.indivFlow ?? row?.indivflow ?? 0);
+  const absTotal = Math.abs(foreign) + Math.abs(inst) + Math.abs(indiv);
+
+  // route.ts에서 LIVE/EMPTY/FILTERED/ERROR가 내려오는 최신 행은 LIVE만 차트에 반영합니다.
+  if (source) return source === "LIVE";
+
+  // 과거 데이터처럼 source가 없는 행은 0값/명백한 비정상치만 제외합니다.
+  if (absTotal === 0) return false;
+  if (absTotal >= 500000) return false;
+
+  return true;
 }
 
 function getFlowTrend(row?: Row, prev?: Row) {

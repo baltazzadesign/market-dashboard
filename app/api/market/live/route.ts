@@ -189,28 +189,12 @@ async function getLogByMinuteFromSupabase(createdat: string, time: string) {
   }
 }
 
-function getBreadthTotal(row: Pick<SupabaseLogPayload, "up" | "down" | "flat"> | SavedLogRow | null) {
-  if (!row) return 0;
-  return toNumber(row.up) + toNumber(row.down) + toNumber(row.flat);
-}
+function isValidMarketSnapshot(row: SupabaseLogPayload) {
+  const total = row.up + row.down + row.flat;
+  const hasBreadth = total > 0 && Math.abs(row.diff) <= total;
+  const hasIndex = row.kospi > 0 || row.kosdaq > 0;
 
-function isValidMarketSnapshot(row: SupabaseLogPayload, prevRow: SavedLogRow | null = null) {
-  const total = getBreadthTotal(row);
-  const prevTotal = getBreadthTotal(prevRow);
-
-  const hasFullBreadth = total >= 1800 && total <= 3800 && Math.abs(row.diff) <= total;
-  const hasBothIndex = row.kospi > 1000 && row.kosdaq > 300;
-
-  const totalChangeRate = prevTotal > 1800 ? Math.abs(total - prevTotal) / prevTotal : 0;
-  const hasStableTotal = prevTotal > 1800 ? totalChangeRate <= 0.25 : true;
-
-  const prevUp = toNumber(prevRow?.up);
-  const prevDown = toNumber(prevRow?.down);
-  const upChangeRate = prevUp > 0 ? Math.abs(row.up - prevUp) / prevUp : 0;
-  const downChangeRate = prevDown > 0 ? Math.abs(row.down - prevDown) / prevDown : 0;
-  const hasStableBreadth = prevTotal > 1800 ? upChangeRate <= 0.45 && downChangeRate <= 0.45 : true;
-
-  return hasFullBreadth && hasBothIndex && hasStableTotal && hasStableBreadth;
+  return hasBreadth && hasIndex;
 }
 
 function hasSavedFlow(prevRow: SavedLogRow | null) {
@@ -232,44 +216,34 @@ function getPrevFlowSnapshot(prevRow: SavedLogRow | null) {
 }
 
 function isSuspiciousFlowJump(current: Omit<FlowData, "source" | "raw">, prevRow: SavedLogRow | null) {
-  if (!prevRow || !hasSavedFlow(prevRow)) return false;
+  const values = [current.foreign, current.inst, current.indiv];
+  const absValues = values.map((value) => Math.abs(value));
+  const absTotal = absValues.reduce((sum, value) => sum + value, 0);
 
-  const prev = getPrevFlowSnapshot(prevRow);
-  const currentValues = [current.foreign, current.inst, current.indiv];
-  const prevValues = [prev.foreign, prev.inst, prev.indiv];
+  // 074 수급은 당일 누적 순매수대금(백만원)입니다.
+  // 장중 5만~15만 수준은 정상적으로 나올 수 있으므로 이전값 대비 변화율로 강하게 막지 않습니다.
+  // 원 단위 파싱, 잘못된 객체 파싱 등으로 생기는 진짜 비정상치만 차단합니다.
+  if (absTotal >= 500_000) return true;
+  if (absValues.some((value) => value >= 300_000)) return true;
 
-  const currentAbsTotal = currentValues.reduce((sum, value) => sum + Math.abs(value), 0);
-  const prevAbsTotal = prevValues.reduce((sum, value) => sum + Math.abs(value), 0);
-
-  // 너무 강한 필터를 걸면 수급이 계속 직전값으로 고정됩니다.
-  // 그래서 진짜로 말이 안 되는 값만 FILTERED 처리합니다.
-  // 예: 직전 누적 수급은 큰데 이번 값이 사실상 0에 가까움, 또는 한 번에 20만 이상 튐.
-  if (prevAbsTotal >= 50_000 && currentAbsTotal <= 1_000) return true;
-
-  return currentValues.some((value, index) => {
-    const prevValue = prevValues[index];
-    const delta = Math.abs(value - prevValue);
-
-    if (Math.abs(prevValue) >= 30_000 && Math.abs(value) <= 500) return true;
-    if (delta >= 200_000) return true;
-
-    return false;
-  });
+  return false;
 }
 
 function stabilizeFlowData(flowData: FlowData, prevRow: SavedLogRow | null): FlowData {
   const prev = getPrevFlowSnapshot(prevRow);
 
-  // LIVE가 아니면 직전 수급값을 반복 저장하지 않습니다.
-  // 반복 저장하면 표/차트에서 수급이 계속 같은 값으로 보입니다.
   if (flowData.source !== "LIVE") {
-    return {
-      foreign: 0,
-      inst: 0,
-      indiv: 0,
-      source: flowData.source,
-      raw: flowData.raw,
-    };
+    if (hasSavedFlow(prevRow)) {
+      return {
+        foreign: prev.foreign,
+        inst: prev.inst,
+        indiv: prev.indiv,
+        source: "FALLBACK",
+        raw: flowData.raw,
+      };
+    }
+
+    return flowData;
   }
 
   const current = {
@@ -279,15 +253,15 @@ function stabilizeFlowData(flowData: FlowData, prevRow: SavedLogRow | null): Flo
   };
 
   if (isSuspiciousFlowJump(current, prevRow)) {
-    console.warn("⚠️ 수급 튐 감지 → 이번 수급값은 저장하지 않음", {
+    console.warn("⚠️ 수급 튐 감지 → 직전 정상값 유지", {
       current,
       prev,
     });
 
     return {
-      foreign: 0,
-      inst: 0,
-      indiv: 0,
+      foreign: prev.foreign,
+      inst: prev.inst,
+      indiv: prev.indiv,
       source: "FILTERED",
       raw: flowData.raw,
     };
@@ -304,9 +278,19 @@ function applyFallbackIfNeeded(row: SupabaseLogPayload, prevRow: SavedLogRow | n
   if (next.kospi <= 0 && toNumber(prevRow.kospi) > 0) next.kospi = toNumber(prevRow.kospi);
   if (next.kosdaq <= 0 && toNumber(prevRow.kosdaq) > 0) next.kosdaq = toNumber(prevRow.kosdaq);
 
-  // 수급값은 더 이상 직전값으로 fallback하지 않습니다.
-  // LIVE가 아닌 수급을 직전값으로 채우면 같은 수급값이 계속 반복 저장됩니다.
-  // 수급 차트 보정은 app/daily/page.tsx에서 LIVE/0값 제외 방식으로 처리합니다.
+  const flowIsEmpty =
+    next.foreignflow === 0 &&
+    next.instflow === 0 &&
+    next.indivflow === 0;
+
+  if (flowIsEmpty && hasSavedFlow(prevRow)) {
+    next.foreignflow = toNumber(prevRow.foreignflow);
+    next.instflow = toNumber(prevRow.instflow);
+    next.indivflow = toNumber(prevRow.indivflow);
+    next.flowpower = next.foreignflow + next.instflow;
+    next.flowtrend = next.flowpower - toNumber(prevRow.flowpower);
+    next.flowmomentum = Math.round(toNumber(prevRow.flowpower) * 0.7 + next.flowpower * 0.3);
+  }
 
   return next;
 }
@@ -445,10 +429,12 @@ async function fetchBreadth(code: "0001" | "1001") {
 }
 
 function normalizeFlowUnit(value: number) {
+  // KIS 074 순매수대금은 기존 GAS 기준으로 이미 백만원 단위입니다.
+  // 9만, 10만 같은 값도 정상 범위일 수 있으므로 1,000으로 나누면 안 됩니다.
+  // 다만 원 단위처럼 비정상적으로 큰 값이 들어온 경우만 백만원 단위로 보정합니다.
   const abs = Math.abs(value);
 
   if (abs >= 100_000_000) return Math.round(value / 1_000_000);
-  if (abs >= 100_000) return Math.round(value / 1_000);
 
   return value;
 }
@@ -500,124 +486,44 @@ function pickNumberByPattern(obj: any, patterns: RegExp[]) {
 }
 
 function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
-  const rows = getRows(data);
+  // GAS에서 안정적으로 쓰던 방식 그대로 적용합니다.
+  // 074는 json.output 또는 json.output1의 첫 객체에 외국인/기관/개인 순매수대금 필드가 들어옵니다.
+  // 기존처럼 전체 JSON을 재귀 탐색하면 다른 투자자 분류/잔여 필드까지 잘못 잡아 수급값이 오락가락합니다.
+  let out = data?.output ?? data?.output1 ?? {};
+  if (Array.isArray(out)) out = out[0] ?? {};
+  if (!out || typeof out !== "object") out = {};
 
-  const directKeyGroups = {
-    foreign: [
+  const foreign = normalizeFlowUnit(
+    pickNumber(out, [
       "frgn_ntby_tr_pbmn",
       "frgn_ntby_amt",
       "frgn_ntby_val",
-      "frgn_seln_buy_amt",
-      "frgn_ntby_tr_pbmn_1",
-      "frgn",
-      "foreign",
-      "foreignFlow",
-    ],
-    inst: [
+    ])
+  );
+
+  const inst = normalizeFlowUnit(
+    pickNumber(out, [
       "orgn_ntby_tr_pbmn",
       "inst_ntby_tr_pbmn",
       "orgn_ntby_amt",
       "inst_ntby_amt",
       "orgn_ntby_val",
       "inst_ntby_val",
-      "orgn",
-      "inst",
-      "instFlow",
-    ],
-    indiv: [
+    ])
+  );
+
+  const indiv = normalizeFlowUnit(
+    pickNumber(out, [
       "prsn_ntby_tr_pbmn",
       "indv_ntby_tr_pbmn",
       "prsn_ntby_amt",
       "indv_ntby_amt",
       "prsn_ntby_val",
       "indv_ntby_val",
-      "individual",
-      "indiv",
-      "indivFlow",
-    ],
-  };
+    ])
+  );
 
-  const patternGroups = {
-    foreign: [/frgn.*ntby/i, /foreign.*net/i, /frgn.*net/i],
-    inst: [/orgn.*ntby/i, /inst.*ntby/i, /organ.*net/i, /inst.*net/i],
-    indiv: [/prsn.*ntby/i, /indv.*ntby/i, /individual.*net/i, /person.*net/i],
-  };
-
-  for (const row of rows) {
-    const foreign =
-      pickNumber(row, directKeyGroups.foreign) ||
-      pickNumberByPattern(row, patternGroups.foreign);
-
-    const inst =
-      pickNumber(row, directKeyGroups.inst) ||
-      pickNumberByPattern(row, patternGroups.inst);
-
-    const indiv =
-      pickNumber(row, directKeyGroups.indiv) ||
-      pickNumberByPattern(row, patternGroups.indiv);
-
-    if (foreign !== 0 || inst !== 0 || indiv !== 0) {
-      return {
-        foreign: normalizeFlowUnit(foreign),
-        inst: normalizeFlowUnit(inst),
-        indiv: normalizeFlowUnit(indiv),
-      };
-    }
-  }
-
-  let foreign = 0;
-  let inst = 0;
-  let indiv = 0;
-
-  for (const row of rows) {
-    const name = String(
-      row?.invt_cls_name ??
-        row?.ivst_cls_name ??
-        row?.invr_cls_name ??
-        row?.invst_cls_name ??
-        row?.investor ??
-        row?.name ??
-        ""
-    );
-
-    const amount = pickNumber(row, [
-      "ntby_tr_pbmn",
-      "ntby_amt",
-      "net_buy_amt",
-      "smtl_ntby_tr_pbmn",
-      "tr_pbmn",
-      "amount",
-    ]);
-
-    if (!amount) continue;
-
-    if (name.includes("외국") || name.toLowerCase().includes("foreign")) {
-      foreign += amount;
-    }
-
-    if (
-      name.includes("기관") ||
-      name.toLowerCase().includes("inst") ||
-      name.includes("금융투자") ||
-      name.includes("투신") ||
-      name.includes("연기금") ||
-      name.includes("보험") ||
-      name.includes("은행") ||
-      name.includes("기타금융")
-    ) {
-      inst += amount;
-    }
-
-    if (name.includes("개인") || name.toLowerCase().includes("individual")) {
-      indiv += amount;
-    }
-  }
-
-  return {
-    foreign: normalizeFlowUnit(foreign),
-    inst: normalizeFlowUnit(inst),
-    indiv: normalizeFlowUnit(indiv),
-  };
+  return { foreign, inst, indiv };
 }
 
 async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<FlowData> {
@@ -684,23 +590,37 @@ async function fetchInvestorFlow(): Promise<FlowData> {
       fetchInvestorFlowByMarket("KOSDAQ"),
     ]);
 
+    // KOSPI/KOSDAQ 둘 다 LIVE일 때만 합산합니다.
+    // 한쪽만 EMPTY/ERROR인데 합산하면 예전 구글시트 대비 수급값이 튀거나 반쪽 데이터가 저장됩니다.
+    if (kospiFlow.source !== "LIVE" || kosdaqFlow.source !== "LIVE") {
+      const source =
+        kospiFlow.source === "ERROR" || kosdaqFlow.source === "ERROR"
+          ? "ERROR"
+          : "EMPTY";
+
+      return {
+        foreign: 0,
+        inst: 0,
+        indiv: 0,
+        source,
+        raw: {
+          kospi: kospiFlow.raw,
+          kosdaq: kosdaqFlow.raw,
+        },
+      };
+    }
+
     const foreign = kospiFlow.foreign + kosdaqFlow.foreign;
     const inst = kospiFlow.inst + kosdaqFlow.inst;
     const indiv = kospiFlow.indiv + kosdaqFlow.indiv;
 
     const hasValue = foreign !== 0 || inst !== 0 || indiv !== 0;
 
-    const source = hasValue
-      ? "LIVE"
-      : kospiFlow.source === "ERROR" || kosdaqFlow.source === "ERROR"
-        ? "ERROR"
-        : "EMPTY";
-
     return {
       foreign,
       inst,
       indiv,
-      source,
+      source: hasValue ? "LIVE" : "EMPTY",
       raw: {
         kospi: kospiFlow.raw,
         kosdaq: kosdaqFlow.raw,
@@ -1169,7 +1089,7 @@ export async function GET() {
 
     rowToSave = applyFallbackIfNeeded(rowToSave, latestDbRow);
 
-    const shouldSave = isValidMarketSnapshot(rowToSave, latestDbRow);
+    const shouldSave = isValidMarketSnapshot(rowToSave);
     let saveResult: { action: string; id: number | null } = {
       action: "skipped",
       id: null,
