@@ -25,6 +25,19 @@ type FlowData = {
   raw?: any;
 };
 
+type BreadthSource = "LIVE" | "FALLBACK" | "SKIPPED";
+
+type BreadthData = {
+  up: number;
+  down: number;
+  flat: number;
+  price: number;
+  raw?: any;
+};
+
+const MIN_NORMAL_BREADTH_TOTAL = 1500;
+const BREADTH_DROP_FALLBACK_RATIO = 0.75;
+
 type SignalLevel = "강" | "중" | "약";
 
 type SignalCategory = "FLOW" | "DIVERGENCE" | "ACCEL" | "SCORE" | "CROSS" | "TREND";
@@ -208,7 +221,46 @@ function applyGasStyleFlowFallback(flowData: FlowData, prevRow: SavedLogRow | nu
 
 function isValidMarketSnapshot(row: SupabaseLogPayload) {
   const total = row.up + row.down + row.flat;
-  return total > 500 && total < 5000 && row.kospi > 1000 && row.kosdaq > 300;
+  return total >= MIN_NORMAL_BREADTH_TOTAL && total < 5000 && row.kospi > 1000 && row.kosdaq > 300;
+}
+
+function getBreadthTotal(row: Pick<SavedLogRow, "up" | "down" | "flat"> | null | undefined) {
+  if (!row) return 0;
+  return toNumber(row.up) + toNumber(row.down) + toNumber(row.flat);
+}
+
+function isNormalBreadthRow(row: SavedLogRow | null | undefined) {
+  if (!row) return false;
+  const total = getBreadthTotal(row);
+  return (
+    total >= MIN_NORMAL_BREADTH_TOTAL &&
+    toNumber(row.up) > 0 &&
+    toNumber(row.down) > 0 &&
+    toNumber(row.kospi) > 1000 &&
+    toNumber(row.kosdaq) > 300
+  );
+}
+
+async function getLatestNormalBreadthRowFromSupabase() {
+  try {
+    const rows = await supabaseRequest("/rest/v1/logs?select=*&order=id.desc&limit=30");
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+
+    for (const row of rows) {
+      const normalized = normalizeSavedRow(row);
+      if (isNormalBreadthRow(normalized)) return normalized;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn("Supabase 최근 정상 breadth 조회 실패:", error);
+    return null;
+  }
+}
+
+function shouldFallbackBreadth(currentTotal: number, prevNormalTotal: number) {
+  if (prevNormalTotal < MIN_NORMAL_BREADTH_TOTAL) return false;
+  return currentTotal < Math.round(prevNormalTotal * BREADTH_DROP_FALLBACK_RATIO);
 }
 
 async function saveLogToSupabase(row: SupabaseLogPayload) {
@@ -388,7 +440,7 @@ function pickNumber(obj: any, keys: string[]) {
   return 0;
 }
 
-async function fetchBreadth(code: "0001" | "1001") {
+async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
   const appkey = process.env.KIS_APPKEY!;
   const appsecret = process.env.KIS_APPSECRET!;
   const token = await getAccessToken();
@@ -418,6 +470,12 @@ async function fetchBreadth(code: "0001" | "1001") {
   );
 
   const data = await res.json();
+
+  if (!res.ok || String(data?.rt_cd ?? "0") !== "0") {
+    console.warn("066 ERROR", code, JSON.stringify(data).slice(0, 1000));
+    return { up: 0, down: 0, flat: 0, price: 0, raw: data };
+  }
+
   const out = pickOutput(data);
 
   return {
@@ -425,6 +483,7 @@ async function fetchBreadth(code: "0001" | "1001") {
     down: toNumber(out.down_issu_cnt ?? out.down_cnt),
     flat: toNumber(out.stnr_issu_cnt ?? out.flat_cnt),
     price: toNumber(out.bstp_nmix_prpr ?? out.stck_prpr ?? out.prpr),
+    raw: data,
   };
 }
 
@@ -1058,16 +1117,44 @@ export async function GET() {
     const createdat = getKstDateString(now);
     const minuteKey = `${createdat} ${timeStr}`;
 
-    const [kospiData, kosdaqData, rawFlowData, latestDbRow] = await Promise.all([
+    const [kospiData, kosdaqData, rawFlowData, latestDbRow, latestNormalBreadthRow] = await Promise.all([
       fetchBreadth("0001"),
       fetchBreadth("1001"),
       fetchInvestorFlow(),
       getLatestLogFromSupabase(),
+      getLatestNormalBreadthRowFromSupabase(),
     ]);
 
-    const up = kospiData.up + kosdaqData.up;
-    const down = kospiData.down + kosdaqData.down;
-    const flat = kospiData.flat + kosdaqData.flat;
+    const liveUp = kospiData.up + kosdaqData.up;
+    const liveDown = kospiData.down + kosdaqData.down;
+    const liveFlat = kospiData.flat + kosdaqData.flat;
+    const liveTotal = liveUp + liveDown + liveFlat;
+
+    const prevNormalRow = latestNormalBreadthRow ?? (isNormalBreadthRow(latestDbRow) ? latestDbRow : null);
+    const prevNormalTotal = getBreadthTotal(prevNormalRow);
+
+    let breadthSource: BreadthSource = "LIVE";
+    let breadthFallbackReason = "";
+
+    let up = liveUp;
+    let down = liveDown;
+    let flat = liveFlat;
+
+    if (shouldFallbackBreadth(liveTotal, prevNormalTotal) && prevNormalRow) {
+      breadthSource = "FALLBACK";
+      breadthFallbackReason = `066 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
+      up = toNumber(prevNormalRow.up);
+      down = toNumber(prevNormalRow.down);
+      flat = toNumber(prevNormalRow.flat);
+
+      console.warn("⚠️ 066 breadth 급감 감지, 직전 정상값으로 대체:", {
+        time: timeStr,
+        liveTotal,
+        prevNormalTotal,
+        live: { up: liveUp, down: liveDown, flat: liveFlat },
+        fallback: { up, down, flat },
+      });
+    }
 
     const diff = up - down;
     const total = up + down + flat;
@@ -1091,8 +1178,8 @@ export async function GET() {
     const prevDiff = toNumber(latestDbRow?.diff ?? memoryPrevDiff);
     const accel = diff - prevDiff;
 
-    const kospi = kospiData.price > 0 ? kospiData.price : toNumber(latestDbRow?.kospi);
-    const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(latestDbRow?.kosdaq);
+    const kospi = kospiData.price > 0 ? kospiData.price : toNumber(prevNormalRow?.kospi ?? latestDbRow?.kospi);
+    const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(prevNormalRow?.kosdaq ?? latestDbRow?.kosdaq);
 
     // GAS 방식과 동일하게 074 LIVE 실패 시에는 직전 정상 수급값을 대체 표시/저장합니다.
     // 대신 marketstate에 FLOW_FALLBACK 마커를 남겨 page.tsx에서 상태를 구분할 수 있게 합니다.
@@ -1133,7 +1220,7 @@ export async function GET() {
       flowTrend,
       signals[0] ?? null
     );
-    const marketState = `${baseMarketState}|FLOW_${flowData.source}`;
+    const marketState = `${baseMarketState}|FLOW_${flowData.source}|BREADTH_${breadthSource}`;
 
     const rowToSave: SupabaseLogPayload = {
       createdat,
@@ -1180,7 +1267,7 @@ export async function GET() {
 
       saveResult = await saveLogToSupabase(rowToSave);
 
-      console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", flowData.source, {
+      console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", flowData.source, "breadth:", breadthSource, {
         foreign,
         inst,
         indiv,
@@ -1191,9 +1278,14 @@ export async function GET() {
         up,
         down,
         flat,
+        total,
+        liveTotal,
+        prevNormalTotal,
         kospi,
         kosdaq,
         flowSource: flowData.source,
+        breadthSource,
+        breadthFallbackReason,
       });
     }
 
@@ -1211,6 +1303,11 @@ export async function GET() {
       kospiDown: kospiData.down,
       kosdaqUp: kosdaqData.up,
       kosdaqDown: kosdaqData.down,
+      liveBreadthTotal: liveTotal,
+      savedBreadthTotal: total,
+      prevNormalBreadthTotal: prevNormalTotal,
+      breadthSource,
+      breadthFallbackReason,
       foreign,
       inst,
       indiv,

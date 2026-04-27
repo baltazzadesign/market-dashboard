@@ -36,6 +36,8 @@ type Row = {
   flowsource?: string;
   flowStatus?: string;
   flowstatus?: string;
+  breadthSource?: string;
+  breadthsource?: string;
   marketState?: string;
   signals?: any[];
 };
@@ -265,7 +267,18 @@ function isLiveFlowRow(row?: Row | any) {
 }
 
 function getCleanMarketState(value?: string) {
-  return String(value ?? "").replace(/\|FLOW_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED)$/i, "");
+  return String(value ?? "")
+    .replace(/\|FLOW_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED)/gi, "")
+    .replace(/\|BREADTH_(LIVE|FALLBACK|SKIPPED)/gi, "");
+}
+
+function getBreadthSource(row?: Row | any) {
+  const explicit = String(row?.breadthSource ?? row?.breadthsource ?? "").toUpperCase();
+  if (explicit) return explicit;
+
+  const state = String(row?.marketState ?? row?.marketstate ?? "");
+  const match = state.match(/BREADTH_(LIVE|FALLBACK|SKIPPED)/i);
+  return match ? match[1].toUpperCase() : "";
 }
 
 function getFlowSource(row?: Row | any) {
