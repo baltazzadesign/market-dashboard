@@ -241,16 +241,17 @@ function isSuspiciousFlowJump(current: Omit<FlowData, "source" | "raw">, prevRow
   const currentAbsTotal = currentValues.reduce((sum, value) => sum + Math.abs(value), 0);
   const prevAbsTotal = prevValues.reduce((sum, value) => sum + Math.abs(value), 0);
 
-  // TR074가 가끔 현재 누적 수급 대신 짧은 순간값/수량값을 반환하면 그래프가 튑니다.
-  // 직전 정상 누적값 대비 갑자기 너무 작아지거나 한 번에 과하게 튀면 이전 정상값을 유지합니다.
-  if (prevAbsTotal >= 50_000 && currentAbsTotal <= 10_000) return true;
+  // 너무 강한 필터를 걸면 수급이 계속 직전값으로 고정됩니다.
+  // 그래서 진짜로 말이 안 되는 값만 FILTERED 처리합니다.
+  // 예: 직전 누적 수급은 큰데 이번 값이 사실상 0에 가까움, 또는 한 번에 20만 이상 튐.
+  if (prevAbsTotal >= 50_000 && currentAbsTotal <= 1_000) return true;
 
   return currentValues.some((value, index) => {
     const prevValue = prevValues[index];
     const delta = Math.abs(value - prevValue);
 
-    if (Math.abs(prevValue) >= 20_000 && Math.abs(value) <= 3_000) return true;
-    if (delta >= 80_000) return true;
+    if (Math.abs(prevValue) >= 30_000 && Math.abs(value) <= 500) return true;
+    if (delta >= 200_000) return true;
 
     return false;
   });
@@ -259,18 +260,16 @@ function isSuspiciousFlowJump(current: Omit<FlowData, "source" | "raw">, prevRow
 function stabilizeFlowData(flowData: FlowData, prevRow: SavedLogRow | null): FlowData {
   const prev = getPrevFlowSnapshot(prevRow);
 
+  // LIVE가 아니면 직전 수급값을 반복 저장하지 않습니다.
+  // 반복 저장하면 표/차트에서 수급이 계속 같은 값으로 보입니다.
   if (flowData.source !== "LIVE") {
-    if (hasSavedFlow(prevRow)) {
-      return {
-        foreign: prev.foreign,
-        inst: prev.inst,
-        indiv: prev.indiv,
-        source: "FALLBACK",
-        raw: flowData.raw,
-      };
-    }
-
-    return flowData;
+    return {
+      foreign: 0,
+      inst: 0,
+      indiv: 0,
+      source: flowData.source,
+      raw: flowData.raw,
+    };
   }
 
   const current = {
@@ -280,15 +279,15 @@ function stabilizeFlowData(flowData: FlowData, prevRow: SavedLogRow | null): Flo
   };
 
   if (isSuspiciousFlowJump(current, prevRow)) {
-    console.warn("⚠️ 수급 튐 감지 → 직전 정상값 유지", {
+    console.warn("⚠️ 수급 튐 감지 → 이번 수급값은 저장하지 않음", {
       current,
       prev,
     });
 
     return {
-      foreign: prev.foreign,
-      inst: prev.inst,
-      indiv: prev.indiv,
+      foreign: 0,
+      inst: 0,
+      indiv: 0,
       source: "FILTERED",
       raw: flowData.raw,
     };
@@ -305,19 +304,9 @@ function applyFallbackIfNeeded(row: SupabaseLogPayload, prevRow: SavedLogRow | n
   if (next.kospi <= 0 && toNumber(prevRow.kospi) > 0) next.kospi = toNumber(prevRow.kospi);
   if (next.kosdaq <= 0 && toNumber(prevRow.kosdaq) > 0) next.kosdaq = toNumber(prevRow.kosdaq);
 
-  const flowIsEmpty =
-    next.foreignflow === 0 &&
-    next.instflow === 0 &&
-    next.indivflow === 0;
-
-  if (flowIsEmpty && hasSavedFlow(prevRow)) {
-    next.foreignflow = toNumber(prevRow.foreignflow);
-    next.instflow = toNumber(prevRow.instflow);
-    next.indivflow = toNumber(prevRow.indivflow);
-    next.flowpower = next.foreignflow + next.instflow;
-    next.flowtrend = next.flowpower - toNumber(prevRow.flowpower);
-    next.flowmomentum = Math.round(toNumber(prevRow.flowpower) * 0.7 + next.flowpower * 0.3);
-  }
+  // 수급값은 더 이상 직전값으로 fallback하지 않습니다.
+  // LIVE가 아닌 수급을 직전값으로 채우면 같은 수급값이 계속 반복 저장됩니다.
+  // 수급 차트 보정은 app/daily/page.tsx에서 LIVE/0값 제외 방식으로 처리합니다.
 
   return next;
 }
