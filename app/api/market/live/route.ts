@@ -189,12 +189,28 @@ async function getLogByMinuteFromSupabase(createdat: string, time: string) {
   }
 }
 
-function isValidMarketSnapshot(row: SupabaseLogPayload) {
-  const total = row.up + row.down + row.flat;
-  const hasBreadth = total > 0 && Math.abs(row.diff) <= total;
-  const hasIndex = row.kospi > 0 || row.kosdaq > 0;
+function getBreadthTotal(row: Pick<SupabaseLogPayload, "up" | "down" | "flat"> | SavedLogRow | null) {
+  if (!row) return 0;
+  return toNumber(row.up) + toNumber(row.down) + toNumber(row.flat);
+}
 
-  return hasBreadth && hasIndex;
+function isValidMarketSnapshot(row: SupabaseLogPayload, prevRow: SavedLogRow | null = null) {
+  const total = getBreadthTotal(row);
+  const prevTotal = getBreadthTotal(prevRow);
+
+  const hasFullBreadth = total >= 1800 && total <= 3800 && Math.abs(row.diff) <= total;
+  const hasBothIndex = row.kospi > 1000 && row.kosdaq > 300;
+
+  const totalChangeRate = prevTotal > 1800 ? Math.abs(total - prevTotal) / prevTotal : 0;
+  const hasStableTotal = prevTotal > 1800 ? totalChangeRate <= 0.25 : true;
+
+  const prevUp = toNumber(prevRow?.up);
+  const prevDown = toNumber(prevRow?.down);
+  const upChangeRate = prevUp > 0 ? Math.abs(row.up - prevUp) / prevUp : 0;
+  const downChangeRate = prevDown > 0 ? Math.abs(row.down - prevDown) / prevDown : 0;
+  const hasStableBreadth = prevTotal > 1800 ? upChangeRate <= 0.45 && downChangeRate <= 0.45 : true;
+
+  return hasFullBreadth && hasBothIndex && hasStableTotal && hasStableBreadth;
 }
 
 function hasSavedFlow(prevRow: SavedLogRow | null) {
@@ -1164,7 +1180,7 @@ export async function GET() {
 
     rowToSave = applyFallbackIfNeeded(rowToSave, latestDbRow);
 
-    const shouldSave = isValidMarketSnapshot(rowToSave);
+    const shouldSave = isValidMarketSnapshot(rowToSave, latestDbRow);
     let saveResult: { action: string; id: number | null } = {
       action: "skipped",
       id: null,
