@@ -257,11 +257,11 @@ function buildSignals(data: MarketResponse): SignalItem[] {
       };
 
   return [
-    { title: "고급 신호", ...advancedSignal },
-    { title: "시장 폭", ...breadthSignal },
-    { title: "가속도", ...accelSignal },
-    { title: "비율", ...ratioSignal },
-    { title: "수급", ...flowSignal },
+    { title: "ADVANCED", ...advancedSignal },
+    { title: "BREADTH", ...breadthSignal },
+    { title: "ACCEL", ...accelSignal },
+    { title: "RATIO", ...ratioSignal },
+    { title: "FLOW", ...flowSignal },
   ];
 }
 
@@ -483,6 +483,7 @@ export default function Home() {
 
   const [history, setHistory] = useState<Snapshot[]>([]);
   const [error, setError] = useState("");
+  const [isStickyChartCollapsed, setIsStickyChartCollapsed] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -643,35 +644,39 @@ export default function Home() {
     };
   }, []);
 
-  const cardStyle: CSSProperties = {
-    background: "linear-gradient(180deg, rgba(15,23,42,0.78), rgba(15,23,42,0.52))",
-    border: "1px solid rgba(255,255,255,0.10)",
-    boxShadow: "0 20px 70px rgba(0,0,0,0.25)",
+  const glassCardStyle: CSSProperties = {
+    background: "linear-gradient(145deg, rgba(20, 32, 58, 0.88), rgba(9, 17, 34, 0.92))",
+    border: "1px solid rgba(148, 163, 184, 0.16)",
+    boxShadow: "0 18px 55px rgba(0,0,0,0.28)",
     backdropFilter: "blur(18px)",
+  };
+
+  const cardStyle: CSSProperties = {
+    ...glassCardStyle,
     padding: "20px",
-    borderRadius: "20px",
+    borderRadius: "22px",
     textAlign: "center",
   };
 
   const sectionStyle: CSSProperties = {
+    ...glassCardStyle,
     marginTop: "24px",
-    background: "linear-gradient(180deg, rgba(15,23,42,0.78), rgba(15,23,42,0.52))",
-    border: "1px solid rgba(255,255,255,0.10)",
-    boxShadow: "0 20px 70px rgba(0,0,0,0.25)",
-    backdropFilter: "blur(18px)",
     padding: "22px",
-    borderRadius: "22px",
+    borderRadius: "24px",
   };
 
   const labelStyle: CSSProperties = {
-    fontSize: "13px",
-    color: "#94A3B8",
-    marginBottom: "6px",
+    fontSize: "12px",
+    color: "#9FB2D8",
+    marginBottom: "8px",
+    fontWeight: 800,
+    letterSpacing: "-0.01em",
   };
 
   const valueStyle: CSSProperties = {
-    fontSize: "22px",
-    fontWeight: "bold",
+    fontSize: "23px",
+    fontWeight: 950,
+    letterSpacing: "-0.04em",
   };
 
   const flowColor = (value: number) => {
@@ -691,36 +696,39 @@ export default function Home() {
   const regularCount = history.filter((x) => getSessionLabel(x.time).includes("정규")).length;
   const afterCount = history.length - nxtCount - regularCount;
   const stickyChartStyle: CSSProperties = {
+    ...glassCardStyle,
     marginTop: "24px",
-    background: "#111827",
-    padding: "20px",
-    borderRadius: "14px",
-    border: "1px solid #1F2937",
+    padding: isStickyChartCollapsed ? "12px 18px" : "22px",
+    borderRadius: "26px",
     position: "sticky",
-    top: "92px",
+    top: "14px",
     zIndex: 8,
-    boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+    maxHeight: isStickyChartCollapsed ? "74px" : "calc(100vh - 36px)",
+    overflow: "hidden",
+    transition: "max-height 0.25s ease, padding 0.25s ease, box-shadow 0.25s ease",
   };
 
   return (
-    <div style={{
-        minHeight: "100vh",
-        padding: "32px",
-        color: "white",
+    <div
+      style={{
         background:
-          "radial-gradient(circle at top left, rgba(59,130,246,0.22), transparent 32%), radial-gradient(circle at top right, rgba(168,85,247,0.18), transparent 34%), linear-gradient(135deg, #020617 0%, #08111f 45%, #0f172a 100%)",
-      }}>
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 30 }}>
+          "radial-gradient(circle at 8% 0%, rgba(56,189,248,0.20), transparent 34%), radial-gradient(circle at 90% 4%, rgba(168,85,247,0.22), transparent 32%), linear-gradient(180deg, #08111F 0%, #0A1020 44%, #070B14 100%)",
+        minHeight: "100vh",
+        padding: "34px",
+        color: "white",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 26 }}>
         <div>
-          <h1 style={{ fontSize: "28px", marginBottom: 8 }}>📊 시장 대시보드</h1>
-          <div style={{ color: "#94A3B8", fontSize: 14 }}>1분마다 자동 갱신 · 한국시간 기준 · 최근 120개 기록 표시</div>
+          <h1 style={{ fontSize: "30px", marginBottom: 8, letterSpacing: "-0.05em" }}>📊 시장 대시보드</h1>
+          <div style={{ color: "#A7B7D8", fontSize: 14 }}>1분마다 자동 갱신 · 한국시간 기준 · 최근 120개 기록 표시</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <a
             href="/daily"
             style={{
-              background: "#0F172A",
-              border: "1px solid #38BDF866",
+              background: "linear-gradient(135deg, rgba(14,165,233,0.18), rgba(59,130,246,0.12))",
+              border: "1px solid rgba(56,189,248,0.45)",
               borderRadius: 999,
               padding: "10px 16px",
               color: "#38BDF8",
@@ -734,8 +742,8 @@ export default function Home() {
           </a>
           <div
             style={{
-              background: "#1E293B",
-              border: "1px solid #334155",
+              background: "linear-gradient(135deg, rgba(250,204,21,0.16), rgba(15,23,42,0.85))",
+              border: "1px solid rgba(250,204,21,0.30)",
               borderRadius: 999,
               padding: "10px 16px",
               color: "#FACC15",
@@ -765,37 +773,42 @@ export default function Home() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1.2fr 1fr 1fr 1fr",
-          gap: "12px",
-          marginBottom: "24px",
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-          background: "#020617",
-          padding: "10px 0",
+          gridTemplateColumns: "1.25fr 0.85fr 0.85fr 1fr 1fr 1fr",
+          gap: "14px",
+          marginBottom: "22px",
         }}
       >
         <div
           style={{
-            background: "#1E293B",
-            border: `1px solid ${getSignalColor(data.marketState)}66`,
-            borderRadius: "12px",
-            padding: "18px",
+            ...cardStyle,
+            textAlign: "left",
+            border: `1px solid ${getSignalColor(data.marketState)}77`,
+            background: "linear-gradient(145deg, rgba(30,45,76,0.96), rgba(12,20,40,0.94))",
           }}
         >
           <div style={labelStyle}>시장 상태</div>
           <div style={{ ...valueStyle, color: getSignalColor(data.marketState) }}>{getStateText(data.marketState)}</div>
-          <div style={{ marginTop: 8, color: "#CBD5E1", fontSize: 13 }}>{topSignal ? getSignalText(topSignal) : mainSignal}</div>
+          <div style={{ marginTop: 8, color: "#C9D7F2", fontSize: 13, lineHeight: 1.45 }}>{topSignal ? getSignalText(topSignal) : mainSignal}</div>
+        </div>
+        <div style={{ ...cardStyle, border: "1px solid rgba(250,204,21,0.32)" }}>
+          <div style={labelStyle}>코스피</div>
+          <div style={{ ...valueStyle, color: "#FACC15" }}>{Number(data.kospi).toLocaleString()}</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>KOSPI</div>
+        </div>
+        <div style={{ ...cardStyle, border: "1px solid rgba(167,139,250,0.34)" }}>
+          <div style={labelStyle}>코스닥</div>
+          <div style={{ ...valueStyle, color: "#A78BFA" }}>{Number(data.kosdaq).toLocaleString()}</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>KOSDAQ</div>
         </div>
         <div style={cardStyle}>
           <div style={labelStyle}>수급 강도</div>
           <div style={{ ...valueStyle, color: flowColor(flowPower) }}>{formatFlow(flowPower)}</div>
-          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>외국인+기관</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>외국인 + 기관</div>
         </div>
         <div style={cardStyle}>
           <div style={labelStyle}>수급 추세</div>
           <div style={{ ...valueStyle, color: flowColor(flowTrend) }}>{formatFlow(flowTrend)}</div>
-          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>직전 대비</div>
+          <div style={{ marginTop: 4, color: "#94A3B8", fontSize: 12 }}>직전 대비 변화</div>
         </div>
         <div style={cardStyle}>
           <div style={labelStyle}>수급 가속도</div>
@@ -960,15 +973,37 @@ export default function Home() {
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
           <div>
             <h3 style={{ margin: 0, marginBottom: 4 }}>📌 핵심 차트 요약</h3>
-            <div style={{ color: "#94A3B8", fontSize: 13 }}>스크롤 중에도 시장 점수 · 지수 · 수급을 빠르게 확인합니다</div>
+            <div style={{ color: "#94A3B8", fontSize: 13 }}>접기/펼치기로 화면을 가리지 않게 조정할 수 있습니다</div>
           </div>
-          <div style={{ color: getSessionColor(latestSession), fontWeight: 900 }}>{latestSession}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div style={{ color: getSessionColor(latestSession), fontWeight: 900 }}>{latestSession}</div>
+            <button
+              type="button"
+              onClick={() => setIsStickyChartCollapsed((prev) => !prev)}
+              style={{
+                cursor: "pointer",
+                border: "1px solid rgba(56,189,248,0.45)",
+                background: isStickyChartCollapsed
+                  ? "linear-gradient(135deg, #38BDF8, #2563EB)"
+                  : "rgba(15,23,42,0.72)",
+                color: isStickyChartCollapsed ? "#FFFFFF" : "#BAE6FD",
+                borderRadius: 999,
+                padding: "9px 14px",
+                fontSize: 12,
+                fontWeight: 900,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {isStickyChartCollapsed ? "펼치기" : "접기"}
+            </button>
+          </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr", gap: 16 }}>
+        {!isStickyChartCollapsed && (
+          <div style={{ display: "grid", gridTemplateColumns: "1.05fr 1fr", gap: 18 }}>
           <MarketScoreChart logs={history} />
           <div style={{ display: "grid", gap: 16 }}>
             <div>
-              <div style={{ color: "#94A3B8", marginBottom: 8, fontWeight: 800 }}>코스피 / 코스닥 분리 추이</div>
+              <div style={{ color: "#94A3B8", marginBottom: 8, fontWeight: 800 }}>코스피 / 코스닥 추이</div>
               <MiniMultiLineChart
                 height={190}
                 series={[
@@ -989,7 +1024,8 @@ export default function Home() {
               />
             </div>
           </div>
-        </div>
+          </div>
+        )}
       </div>
 
       <div style={sectionStyle}>
