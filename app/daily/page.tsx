@@ -101,6 +101,35 @@ function formatTime(t: string) {
   return t;
 }
 
+function timeToMinute(time: string) {
+  const normalized = formatTime(time);
+  const [h, m] = normalized.split(":").map((v) => Number(v));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return -1;
+  return h * 60 + m;
+}
+
+function clampChartValue(value: any, limit = 120000) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  if (n > limit) return limit;
+  if (n < -limit) return -limit;
+  return n;
+}
+
+function getSessionChartRows<T extends { timeLabel: string; up?: number; down?: number; kospi?: number; kosdaq?: number }>(rows: T[]) {
+  const regularRows = rows.filter((row) => {
+    const minute = timeToMinute(row.timeLabel);
+    return minute >= 8 * 60 + 50 && minute <= 15 * 60 + 40;
+  });
+
+  const cleanRegularRows = regularRows.filter((row) => {
+    const hasBreadth = Number(row.up ?? 0) > 0 || Number(row.down ?? 0) > 0;
+    const hasIndex = Number(row.kospi ?? 0) > 1000 || Number(row.kosdaq ?? 0) > 100;
+    return hasBreadth && hasIndex;
+  });
+
+  return cleanRegularRows.length > 3 ? cleanRegularRows : rows;
+}
 
 function getAlertColor(level?: string, fallback?: string) {
   if (fallback) return fallback;
@@ -598,6 +627,17 @@ export default function DailyPage() {
     };
   });
 
+  const visibleChartRows = getSessionChartRows(chartRows).map((row) => ({
+    ...row,
+    foreignFlowValue: clampChartValue(row.foreignFlowValue),
+    instFlowValue: clampChartValue(row.instFlowValue),
+    indivFlowValue: clampChartValue(row.indivFlowValue),
+    flowPowerValue: clampChartValue(row.flowPowerValue),
+    flowTrendValue: clampChartValue(row.flowTrendValue),
+    flowMomentumValue: clampChartValue(row.flowMomentumValue),
+    foreignInstFlowValue: clampChartValue(row.foreignInstFlowValue),
+  }));
+
   const last = rows[rows.length - 1];
   const prevLast = rows.length >= 2 ? rows[rows.length - 2] : undefined;
   const localAlerts = makeAlerts(rows);
@@ -882,207 +922,108 @@ export default function DailyPage() {
           }}
         >
           <ChartBox title="핵심 통합 흐름 · Diff / Flow / Score">
-            <ResponsiveContainer width="100%" height={360}>
-              <LineChart data={chartRows} margin={{ top: 8, right: 14, left: 4, bottom: 4 }}>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={visibleChartRows} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="diffArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.34} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
+                  <linearGradient id="modernDiffArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#22c55e" stopOpacity={0.18} />
+                    <stop offset="100%" stopColor="#22c55e" stopOpacity={0.01} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="rgba(148, 163, 184, 0.13)" strokeDasharray="3 3" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} minTickGap={24} />
-                <YAxis yAxisId="diff" stroke="#22c55e" fontSize={11} width={42} />
-                <YAxis yAxisId="flow" orientation="right" stroke="#f59e0b" fontSize={11} width={58} />
+                <CartesianGrid stroke="rgba(148, 163, 184, 0.10)" vertical={false} />
+                <XAxis dataKey="timeLabel" stroke="rgba(203, 213, 225, 0.62)" fontSize={10} tickLine={false} axisLine={{ stroke: "rgba(148, 163, 184, 0.18)" }} minTickGap={34} />
+                <YAxis yAxisId="diff" stroke="rgba(34, 197, 94, 0.78)" fontSize={10} tickLine={false} axisLine={false} width={42} />
+                <YAxis yAxisId="flow" orientation="right" stroke="rgba(251, 191, 36, 0.78)" fontSize={10} tickLine={false} axisLine={false} width={54} />
                 <YAxis yAxisId="score" hide domain={[-100, 100]} />
-                <Tooltip
-                  formatter={(value, name) => [Number(value).toLocaleString(), name]}
-                  contentStyle={{
-                    background: "rgba(2, 6, 23, 0.94)",
-                    border: "1px solid rgba(56, 189, 248, 0.35)",
-                    borderRadius: 14,
-                    color: "#e5e7eb",
-                    boxShadow: "0 18px 40px rgba(0,0,0,0.45)",
-                  }}
-                  labelStyle={{ color: "#cbd5e1", fontWeight: 800 }}
-                />
-                <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 12 }} />
-                <ReferenceLine yAxisId="diff" y={0} stroke="#94a3b8" strokeDasharray="4 4" />
-                <Area
-                  yAxisId="diff"
-                  type="monotone"
-                  dataKey="diff"
-                  name="차이(Diff)"
-                  stroke="#22c55e"
-                  fill="url(#diffArea)"
-                  strokeWidth={3}
-                  dot={false}
-                  activeDot={{ r: 5 }}
-                />
-                <Line
-                  yAxisId="flow"
-                  type="monotone"
-                  dataKey="flowPowerValue"
-                  name="수급파워"
-                  stroke="#f59e0b"
-                  strokeWidth={3}
-                  dot={false}
-                  activeDot={{ r: 5 }}
-                />
-                <Line
-                  yAxisId="score"
-                  type="monotone"
-                  dataKey="score"
-                  name="시장점수"
-                  stroke="#38bdf8"
-                  strokeWidth={3}
-                  dot={false}
-                  activeDot={{ r: 5 }}
-                />
+                <Tooltip content={<ModernTooltip />} />
+                <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 11, paddingTop: 4 }} iconType="plainline" />
+                <ReferenceLine yAxisId="diff" y={0} stroke="rgba(148, 163, 184, 0.36)" strokeDasharray="3 5" />
+                <Area yAxisId="diff" type="monotone" dataKey="diff" name="차이(Diff)" stroke="#22c55e" fill="url(#modernDiffArea)" strokeWidth={1.55} dot={false} activeDot={{ r: 3 }} />
+                <Line yAxisId="flow" type="monotone" dataKey="flowPowerValue" name="수급파워" stroke="#f59e0b" strokeWidth={1.45} dot={false} activeDot={{ r: 3 }} />
+                <Line yAxisId="score" type="monotone" dataKey="score" name="시장점수" stroke="#38bdf8" strokeWidth={1.45} dot={false} activeDot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </ChartBox>
 
-          <ChartBox title="시장점수">
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} domain={[-100, 100]} />
-                <Tooltip />
-                <ReferenceLine y={0} stroke="#64748b" strokeDasharray="4 4" />
-                <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" />
-                <ReferenceLine y={-70} stroke="#3b82f6" strokeDasharray="3 3" />
-                <Line
-                  type="monotone"
-                  dataKey="score"
-                  name="시장점수"
-                  stroke="#facc15"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="시장점수" data={visibleChartRows} height={190} domain={[-100, 100]} referenceLines={[0, 70, -70]} lines={[{ key: "score", name: "시장점수", color: "#facc15" }]} />
 
           <AlertBox alerts={alerts} filter={alertFilter} onFilterChange={setAlertFilter} />
 
           <SignalBox signals={signals} />
 
-          <ChartBox title="시장 차이 추이">
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} />
-                <Tooltip />
-                <Line type="monotone" dataKey="diff" stroke="#22c55e" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="시장 차이 추이" data={visibleChartRows} height={190} referenceLines={[0]} lines={[{ key: "diff", name: "차이", color: "#22c55e" }]} />
 
-          <ChartBox title="FLOW 고급 상태">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} domain={["auto", "auto"]} />
-                <Tooltip formatter={(value) => Number(value).toLocaleString()} />
-                <Legend />
-                <ReferenceLine y={0} stroke="#64748b" strokeDasharray="4 4" />
-                <Line type="monotone" dataKey="foreignInstFlowValue" name="외인+기관" stroke="#facc15" strokeWidth={3} dot={false} />
-                <Line type="monotone" dataKey="flowMomentumValue" name="모멘텀" stroke="#22c55e" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="flowTrendValue" name="추세변화" stroke="#a78bfa" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="FLOW 고급 상태" data={visibleChartRows} height={220} referenceLines={[0]} lines={[{ key: "foreignInstFlowValue", name: "외인+기관", color: "#facc15" }, { key: "flowMomentumValue", name: "모멘텀", color: "#22c55e" }, { key: "flowTrendValue", name: "추세변화", color: "#a78bfa" }]} />
 
-          <ChartBox title="외국인 / 기관 / 개인 수급">
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} domain={["auto", "auto"]} />
-                <Tooltip formatter={(value) => Number(value).toLocaleString()} />
-                <Legend />
-                <ReferenceLine y={0} stroke="#64748b" strokeDasharray="4 4" />
-                <Line type="monotone" dataKey="foreignFlowValue" name="외국인" stroke="#ef4444" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="instFlowValue" name="기관" stroke="#f97316" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="indivFlowValue" name="개인" stroke="#38bdf8" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="외국인 / 기관 / 개인 수급" data={visibleChartRows} height={220} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#ef4444" }, { key: "instFlowValue", name: "기관", color: "#f97316" }, { key: "indivFlowValue", name: "개인", color: "#38bdf8" }]} />
 
-          <ChartBox title="수급 파워 / 추세">
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} domain={["auto", "auto"]} />
-                <Tooltip formatter={(value) => Number(value).toLocaleString()} />
-                <Legend />
-                <ReferenceLine y={0} stroke="#64748b" strokeDasharray="4 4" />
-                <Line type="monotone" dataKey="flowPowerValue" name="수급파워(외인+기관)" stroke="#facc15" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="flowTrendValue" name="수급추세" stroke="#a78bfa" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="flowMomentumValue" name="수급모멘텀" stroke="#22c55e" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="수급 파워 / 추세" data={visibleChartRows} height={220} referenceLines={[0]} lines={[{ key: "flowPowerValue", name: "수급파워", color: "#facc15" }, { key: "flowTrendValue", name: "수급추세", color: "#a78bfa" }, { key: "flowMomentumValue", name: "수급모멘텀", color: "#22c55e" }]} />
 
-          <ChartBox title="상승 / 하락 종목 수">
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="up" name="상승" stroke="#ff4d7d" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="down" name="하락" stroke="#60a5fa" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="상승 / 하락 종목 수" data={visibleChartRows} height={190} lines={[{ key: "up", name: "상승", color: "#fb7185" }, { key: "down", name: "하락", color: "#60a5fa" }]} />
 
-          <ChartBox title="상승 / 하락 비율">
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="upRatioPct" name="상승비율" stroke="#22c55e" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="downRatioPct" name="하락비율" stroke="#60a5fa" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="상승 / 하락 비율" data={visibleChartRows} height={190} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#22c55e" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} />
 
-          <ChartBox title="KOSPI">
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} domain={["auto", "auto"]} />
-                <Tooltip />
-                <Line type="monotone" dataKey="kospi" name="KOSPI" stroke="#38bdf8" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="KOSPI" data={visibleChartRows} height={190} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#38bdf8" }]} />
 
-          <ChartBox title="KOSDAQ">
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={chartRows}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} domain={["auto", "auto"]} />
-                <Tooltip />
-                <Line type="monotone" dataKey="kosdaq" name="KOSDAQ" stroke="#a78bfa" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartBox>
+          <MiniChart title="KOSDAQ" data={visibleChartRows} height={190} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} />
         </div>
       </div>
     </div>
+  );
+}
+
+type ChartLineConfig = {
+  key: string;
+  name: string;
+  color: string;
+};
+
+function ModernTooltip({ active, payload, label }: any) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        background: "rgba(2, 6, 23, 0.92)",
+        border: "1px solid rgba(148, 163, 184, 0.22)",
+        borderRadius: 12,
+        padding: "10px 12px",
+        color: "#e5e7eb",
+        boxShadow: "0 18px 44px rgba(0,0,0,0.42)",
+        backdropFilter: "blur(16px)",
+        minWidth: 132,
+      }}
+    >
+      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 7, fontWeight: 800 }}>{label}</div>
+      {payload.map((item: any) => (
+        <div key={`${item.name}-${item.dataKey}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", fontSize: 12, lineHeight: 1.7 }}>
+          <span style={{ color: item.color, fontWeight: 800 }}>{item.name}</span>
+          <strong style={{ color: "#f8fafc", fontWeight: 900 }}>{Number(item.value ?? 0).toLocaleString()}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MiniChart({ title, data, lines, height = 200, domain, referenceLines = [] }: { title: string; data: any[]; lines: ChartLineConfig[]; height?: number; domain?: any; referenceLines?: number[] }) {
+  return (
+    <ChartBox title={title}>
+      <ResponsiveContainer width="100%" height={height}>
+        <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke="rgba(148, 163, 184, 0.10)" vertical={false} />
+          <XAxis dataKey="timeLabel" stroke="rgba(203, 213, 225, 0.58)" fontSize={10} tickLine={false} axisLine={{ stroke: "rgba(148, 163, 184, 0.16)" }} minTickGap={36} />
+          <YAxis stroke="rgba(203, 213, 225, 0.58)" fontSize={10} tickLine={false} axisLine={false} width={42} domain={domain ?? ["auto", "auto"]} />
+          <Tooltip content={<ModernTooltip />} />
+          <Legend iconType="plainline" wrapperStyle={{ color: "#cbd5e1", fontSize: 11, paddingTop: 2, fontWeight: 800 }} />
+          {referenceLines.map((value) => (
+            <ReferenceLine key={value} y={value} stroke={value === 0 ? "rgba(148, 163, 184, 0.34)" : "rgba(148, 163, 184, 0.22)"} strokeDasharray="3 5" />
+          ))}
+          {lines.map((line) => (
+            <Line key={line.key} type="monotone" dataKey={line.key} name={line.name} stroke={line.color} strokeWidth={1.35} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} connectNulls />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </ChartBox>
   );
 }
 
@@ -1127,12 +1068,12 @@ function ChartBox({
           "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
         border: "1px solid rgba(148, 163, 184, 0.16)",
         borderRadius: 18,
-        padding: 16,
-        boxShadow: "0 18px 46px rgba(0,0,0,0.30)",
+        padding: 14,
+        boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
         backdropFilter: "blur(16px)",
       }}
     >
-      <h3 style={{ fontSize: 14, color: "#e5e7eb", margin: "0 0 14px", fontWeight: 900, letterSpacing: 0.2 }}>{title}</h3>
+      <h3 style={{ fontSize: 13, color: "#e5e7eb", margin: "0 0 12px", fontWeight: 900, letterSpacing: 0.15 }}>{title}</h3>
       {children}
     </div>
   );
@@ -1272,8 +1213,8 @@ function AlertBox({
           "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
         border: "1px solid rgba(148, 163, 184, 0.16)",
         borderRadius: 18,
-        padding: 16,
-        boxShadow: "0 18px 46px rgba(0,0,0,0.30)",
+        padding: 14,
+        boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
         backdropFilter: "blur(16px)",
       }}
     >
@@ -1414,8 +1355,8 @@ function SignalBox({ signals }: { signals: SignalItem[] }) {
           "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
         border: "1px solid rgba(148, 163, 184, 0.16)",
         borderRadius: 18,
-        padding: 16,
-        boxShadow: "0 18px 46px rgba(0,0,0,0.30)",
+        padding: 14,
+        boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
         backdropFilter: "blur(16px)",
       }}
     >
