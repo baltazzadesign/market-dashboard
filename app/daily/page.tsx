@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   LineChart,
   Line,
+  Area,
   XAxis,
   YAxis,
   Tooltip,
@@ -613,10 +614,13 @@ export default function DailyPage() {
   return (
     <div
       style={{
-        background: "#020617",
+        background:
+          "radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 32%), radial-gradient(circle at top right, rgba(168,85,247,0.16), transparent 34%), linear-gradient(135deg, #020617 0%, #07111f 46%, #020617 100%)",
         minHeight: "100vh",
         color: "white",
         padding: 24,
+        fontFamily:
+          "Pretendard, Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
       <div
@@ -629,8 +633,10 @@ export default function DailyPage() {
           position: "sticky",
           top: 0,
           zIndex: 20,
-          background: "#020617",
-          padding: "6px 0 10px",
+          background: "rgba(2, 6, 23, 0.84)",
+          backdropFilter: "blur(18px)",
+          borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
+          padding: "10px 0 14px",
         }}
       >
         <div>
@@ -787,7 +793,7 @@ export default function DailyPage() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) 620px",
+          gridTemplateColumns: "minmax(0, 1fr) minmax(520px, 680px)",
           gap: 20,
           alignItems: "start",
         }}
@@ -796,8 +802,11 @@ export default function DailyPage() {
           style={{
             maxHeight: "calc(100vh - 220px)",
             overflow: "auto",
-            border: "1px solid #1e293b",
-            borderRadius: 14,
+            border: "1px solid rgba(148, 163, 184, 0.16)",
+            borderRadius: 18,
+            background: "rgba(15, 23, 42, 0.54)",
+            backdropFilter: "blur(16px)",
+            boxShadow: "0 22px 60px rgba(0,0,0,0.35)",
           }}
         >
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
@@ -821,8 +830,13 @@ export default function DailyPage() {
             </thead>
 
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
+              {rows.map((row, index) => (
+                <tr
+                  key={row.id}
+                  style={{
+                    background: index % 2 === 0 ? "rgba(15, 23, 42, 0.18)" : "rgba(2, 6, 23, 0.24)",
+                  }}
+                >
                   <td style={td}>{formatTime(row.time)}</td>
                   <td style={{ ...td, color: "#ff4d7d" }}>{row.up}</td>
                   <td style={{ ...td, color: "#60a5fa" }}>{row.down}</td>
@@ -867,6 +881,68 @@ export default function DailyPage() {
             gap: 16,
           }}
         >
+          <ChartBox title="핵심 통합 흐름 · Diff / Flow / Score">
+            <ResponsiveContainer width="100%" height={360}>
+              <LineChart data={chartRows} margin={{ top: 8, right: 14, left: 4, bottom: 4 }}>
+                <defs>
+                  <linearGradient id="diffArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.34} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="rgba(148, 163, 184, 0.13)" strokeDasharray="3 3" />
+                <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={11} minTickGap={24} />
+                <YAxis yAxisId="diff" stroke="#22c55e" fontSize={11} width={42} />
+                <YAxis yAxisId="flow" orientation="right" stroke="#f59e0b" fontSize={11} width={58} />
+                <YAxis yAxisId="score" hide domain={[-100, 100]} />
+                <Tooltip
+                  formatter={(value, name) => [Number(value).toLocaleString(), name]}
+                  contentStyle={{
+                    background: "rgba(2, 6, 23, 0.94)",
+                    border: "1px solid rgba(56, 189, 248, 0.35)",
+                    borderRadius: 14,
+                    color: "#e5e7eb",
+                    boxShadow: "0 18px 40px rgba(0,0,0,0.45)",
+                  }}
+                  labelStyle={{ color: "#cbd5e1", fontWeight: 800 }}
+                />
+                <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 12 }} />
+                <ReferenceLine yAxisId="diff" y={0} stroke="#94a3b8" strokeDasharray="4 4" />
+                <Area
+                  yAxisId="diff"
+                  type="monotone"
+                  dataKey="diff"
+                  name="차이(Diff)"
+                  stroke="#22c55e"
+                  fill="url(#diffArea)"
+                  strokeWidth={3}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  yAxisId="flow"
+                  type="monotone"
+                  dataKey="flowPowerValue"
+                  name="수급파워"
+                  stroke="#f59e0b"
+                  strokeWidth={3}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  yAxisId="score"
+                  type="monotone"
+                  dataKey="score"
+                  name="시장점수"
+                  stroke="#38bdf8"
+                  strokeWidth={3}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartBox>
+
           <ChartBox title="시장점수">
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={chartRows}>
@@ -1022,13 +1098,17 @@ function SummaryCard({
   return (
     <div
       style={{
-        background: "#111827",
-        borderRadius: 12,
-        padding: 16,
+        background:
+          "linear-gradient(145deg, rgba(15,23,42,0.86), rgba(30,41,59,0.58))",
+        border: "1px solid rgba(148, 163, 184, 0.16)",
+        borderRadius: 18,
+        padding: 18,
+        boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+        backdropFilter: "blur(16px)",
       }}
     >
-      <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 8 }}>{title}</div>
-      <div style={{ fontSize: 24, fontWeight: 800, color }}>{value}</div>
+      <div style={{ fontSize: 12, color: "#93c5fd", marginBottom: 10, fontWeight: 800, letterSpacing: 0.2 }}>{title}</div>
+      <div style={{ fontSize: 28, fontWeight: 950, color, textShadow: "0 0 18px rgba(255,255,255,0.10)" }}>{value}</div>
     </div>
   );
 }
@@ -1043,12 +1123,16 @@ function ChartBox({
   return (
     <div
       style={{
-        background: "#111827",
-        borderRadius: 12,
-        padding: 14,
+        background:
+          "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
+        border: "1px solid rgba(148, 163, 184, 0.16)",
+        borderRadius: 18,
+        padding: 16,
+        boxShadow: "0 18px 46px rgba(0,0,0,0.30)",
+        backdropFilter: "blur(16px)",
       }}
     >
-      <h3 style={{ fontSize: 14, color: "#cbd5e1", marginBottom: 12 }}>{title}</h3>
+      <h3 style={{ fontSize: 14, color: "#e5e7eb", margin: "0 0 14px", fontWeight: 900, letterSpacing: 0.2 }}>{title}</h3>
       {children}
     </div>
   );
@@ -1072,10 +1156,13 @@ function FlowStatusPanel({
   return (
     <div
       style={{
-        background: "#0f172a",
+        background:
+          "linear-gradient(145deg, rgba(15,23,42,0.90), rgba(30,41,59,0.60))",
         border: `1px solid ${badge.color}`,
-        borderRadius: 16,
-        padding: 16,
+        borderRadius: 22,
+        padding: 18,
+        boxShadow: `0 0 0 1px rgba(255,255,255,0.02), 0 22px 60px rgba(0,0,0,0.34)`,
+        backdropFilter: "blur(18px)",
         marginBottom: 20,
       }}
     >
@@ -1114,7 +1201,7 @@ function FlowStatusPanel({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
+          gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
           gap: 10,
         }}
       >
@@ -1149,9 +1236,10 @@ function FlowMiniCard({
     <div
       style={{
         background: bg,
-        border: `1px solid ${strong ? color : "#1e293b"}`,
-        borderRadius: 12,
+        border: `1px solid ${strong ? color : "rgba(148, 163, 184, 0.14)"}`,
+        borderRadius: 16,
         padding: 12,
+        boxShadow: strong ? `0 0 22px ${bg}` : "none",
         minHeight: 76,
       }}
     >
@@ -1180,9 +1268,13 @@ function AlertBox({
   return (
     <div
       style={{
-        background: "#111827",
-        borderRadius: 12,
-        padding: 14,
+        background:
+          "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
+        border: "1px solid rgba(148, 163, 184, 0.16)",
+        borderRadius: 18,
+        padding: 16,
+        boxShadow: "0 18px 46px rgba(0,0,0,0.30)",
+        backdropFilter: "blur(16px)",
       }}
     >
       <div
@@ -1318,9 +1410,13 @@ function SignalBox({ signals }: { signals: SignalItem[] }) {
   return (
     <div
       style={{
-        background: "#111827",
-        borderRadius: 12,
-        padding: 14,
+        background:
+          "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
+        border: "1px solid rgba(148, 163, 184, 0.16)",
+        borderRadius: 18,
+        padding: 16,
+        boxShadow: "0 18px 46px rgba(0,0,0,0.30)",
+        backdropFilter: "blur(16px)",
       }}
     >
       <h3 style={{ fontSize: 14, color: "#cbd5e1", marginBottom: 12 }}>
@@ -1412,18 +1508,19 @@ const th: React.CSSProperties = {
   position: "sticky",
   top: 0,
   zIndex: 20,
-  padding: "12px",
-  borderBottom: "1px solid #334155",
-  background: "#0f172a",
+  padding: "13px 12px",
+  borderBottom: "1px solid rgba(56, 189, 248, 0.22)",
+  background: "rgba(15, 23, 42, 0.96)",
+  backdropFilter: "blur(12px)",
   color: "#e5e7eb",
   textAlign: "center",
   whiteSpace: "nowrap",
-  boxShadow: "0 1px 0 rgba(51,65,85,0.9), 0 8px 18px rgba(2,6,23,0.45)",
+  boxShadow: "0 1px 0 rgba(51,65,85,0.9), 0 12px 24px rgba(2,6,23,0.70)",
 };
 
 const td: React.CSSProperties = {
-  padding: "10px",
-  borderBottom: "1px solid #1e293b",
+  padding: "11px 10px",
+  borderBottom: "1px solid rgba(30, 41, 59, 0.92)",
   textAlign: "center",
   whiteSpace: "nowrap",
 };
