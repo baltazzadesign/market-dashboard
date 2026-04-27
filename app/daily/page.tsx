@@ -775,14 +775,8 @@ export default function DailyPage() {
           justifyContent: "space-between",
           alignItems: "center",
           gap: 12,
-          marginBottom: 20,
-          position: "sticky",
-          top: 0,
-          zIndex: 20,
-          background: "rgba(2, 6, 23, 0.84)",
-          backdropFilter: "blur(18px)",
-          borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
-          padding: "10px 0 14px",
+          marginBottom: 22,
+          padding: "4px 2px 8px",
         }}
       >
         <div>
