@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode, WheelEvent } from "react";
 import {
   ComposedChart,
   Line,
@@ -12,6 +13,7 @@ import {
   CartesianGrid,
   Legend,
   ReferenceLine,
+  ReferenceArea,
 } from "recharts";
 
 type Row = {
@@ -701,6 +703,61 @@ function makeAlerts(rows: Row[]) {
   return alerts.slice(-8).reverse();
 }
 
+function buildSessionSummary(rows: any[]) {
+  if (!rows.length) {
+    return {
+      highDiff: 0,
+      highDiffTime: "-",
+      lowDiff: 0,
+      lowDiffTime: "-",
+      maxAccel: 0,
+      maxAccelTime: "-",
+      minAccel: 0,
+      minAccelTime: "-",
+      dangerCount: 0,
+      accumulationCount: 0,
+      signalCount: 0,
+      flowPeak: 0,
+      flowPeakTime: "-",
+      flowLow: 0,
+      flowLowTime: "-",
+      latestTime: "-",
+    };
+  }
+
+  const highDiffRow = rows.reduce((best, row) => Number(row.diff ?? 0) > Number(best.diff ?? 0) ? row : best, rows[0]);
+  const lowDiffRow = rows.reduce((best, row) => Number(row.diff ?? 0) < Number(best.diff ?? 0) ? row : best, rows[0]);
+  const maxAccelRow = rows.reduce((best, row) => Number(row.accel ?? 0) > Number(best.accel ?? 0) ? row : best, rows[0]);
+  const minAccelRow = rows.reduce((best, row) => Number(row.accel ?? 0) < Number(best.accel ?? 0) ? row : best, rows[0]);
+  const flowPeakRow = rows.reduce((best, row) => Number(row.foreignInstFlowValue ?? 0) > Number(best.foreignInstFlowValue ?? 0) ? row : best, rows[0]);
+  const flowLowRow = rows.reduce((best, row) => Number(row.foreignInstFlowValue ?? 0) < Number(best.foreignInstFlowValue ?? 0) ? row : best, rows[0]);
+
+  return {
+    highDiff: Number(highDiffRow.diff ?? 0),
+    highDiffTime: highDiffRow.timeLabel ?? "-",
+    lowDiff: Number(lowDiffRow.diff ?? 0),
+    lowDiffTime: lowDiffRow.timeLabel ?? "-",
+    maxAccel: Number(maxAccelRow.accel ?? 0),
+    maxAccelTime: maxAccelRow.timeLabel ?? "-",
+    minAccel: Number(minAccelRow.accel ?? 0),
+    minAccelTime: minAccelRow.timeLabel ?? "-",
+    dangerCount: rows.filter((row) => row.divergenceType === "danger").length,
+    accumulationCount: rows.filter((row) => row.divergenceType === "accumulation").length,
+    signalCount: rows.filter((row) => row.signalMarkerColor).length,
+    flowPeak: Number(flowPeakRow.foreignInstFlowValue ?? 0),
+    flowPeakTime: flowPeakRow.timeLabel ?? "-",
+    flowLow: Number(flowLowRow.foreignInstFlowValue ?? 0),
+    flowLowTime: flowLowRow.timeLabel ?? "-",
+    latestTime: rows[rows.length - 1]?.timeLabel ?? "-",
+  };
+}
+
+function getActiveLabelFromChartEvent(event: any) {
+  const raw = Number(event?.activeLabel ?? event?.activePayload?.[0]?.payload?.timeMinuteValue);
+  if (!Number.isFinite(raw)) return null;
+  return Math.max(MARKET_OPEN_MINUTE, Math.min(MARKET_CLOSE_MINUTE, Math.round(raw)));
+}
+
 function getIndexChangeInfo(value?: number, prevValue?: number) {
   const current = Number(value ?? 0);
   const prev = Number(prevValue ?? 0);
@@ -778,6 +835,11 @@ export default function DailyPage() {
     MARKET_OPEN_MINUTE,
     MARKET_CLOSE_MINUTE,
   ]);
+  const [hoverMinute, setHoverMinute] = useState<number | null>(null);
+  const [dragStartMinute, setDragStartMinute] = useState<number | null>(null);
+  const [dragEndMinute, setDragEndMinute] = useState<number | null>(null);
+  const [signalNotifyEnabled, setSignalNotifyEnabled] = useState(false);
+  const notifiedSignalRef = useRef<string>("");
 
   async function loadData(dateValue = selectedDate) {
     const dateQuery = dateValue ? `?date=${dateValue}` : "";
@@ -831,7 +893,7 @@ export default function DailyPage() {
     setChartZoomDomain([MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE]);
   };
 
-  const handleFullscreenChartWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+  const handleFullscreenChartWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
 
@@ -852,6 +914,63 @@ export default function DailyPage() {
     const nextEnd = nextStart + nextRange;
 
     setChartZoomDomain(clampMinuteDomain(nextStart, nextEnd));
+  };
+
+
+  const handleChartMouseMove = (event: any) => {
+    const activeMinute = getActiveLabelFromChartEvent(event);
+    setHoverMinute(activeMinute);
+    if (dragStartMinute !== null && activeMinute !== null) {
+      setDragEndMinute(activeMinute);
+    }
+  };
+
+  const handleChartMouseLeave = () => {
+    setHoverMinute(null);
+    if (dragStartMinute === null) {
+      setDragEndMinute(null);
+    }
+  };
+
+  const handleChartDragStart = (event: any) => {
+    const activeMinute = getActiveLabelFromChartEvent(event);
+    if (activeMinute === null) return;
+    setDragStartMinute(activeMinute);
+    setDragEndMinute(activeMinute);
+  };
+
+  const handleChartDragEnd = (event: any) => {
+    const activeMinute = getActiveLabelFromChartEvent(event) ?? dragEndMinute;
+    if (dragStartMinute === null || activeMinute === null) {
+      setDragStartMinute(null);
+      setDragEndMinute(null);
+      return;
+    }
+
+    const start = Math.min(dragStartMinute, activeMinute);
+    const end = Math.max(dragStartMinute, activeMinute);
+
+    if (end - start >= 10) {
+      setChartZoomDomain(clampMinuteDomain(start, end));
+    }
+
+    setDragStartMinute(null);
+    setDragEndMinute(null);
+  };
+
+  const enableSignalNotification = async () => {
+    if (!("Notification" in window)) {
+      alert("이 브라우저는 알림을 지원하지 않습니다.");
+      return;
+    }
+
+    if (Notification.permission === "granted") {
+      setSignalNotifyEnabled(true);
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setSignalNotifyEnabled(permission === "granted");
   };
 
   const flowDisplayRows = buildRowsWithFlowFallback(rows);
@@ -905,6 +1024,31 @@ export default function DailyPage() {
   const sigSummary = signalSummary(signals);
   const enhancedChartRows = buildEnhancedChartRows(visibleChartRows, signals);
   const latestDivergence = [...enhancedChartRows].reverse().find((row) => row.divergenceType);
+  const sessionSummary = buildSessionSummary(enhancedChartRows);
+  const latestStrongSignal = signals.find((signal) => signal.strength === "강") ?? signals[0];
+
+  useEffect(() => {
+    if (!signalNotifyEnabled || !("Notification" in window) || Notification.permission !== "granted") return;
+
+    const latestDivergenceRow = [...enhancedChartRows].reverse().find((row) => row.divergenceType);
+    const target = latestStrongSignal
+      ? {
+          key: `signal-${latestStrongSignal.time}-${latestStrongSignal.type}-${latestStrongSignal.message}`,
+          title: `SIGNAL ${getSignalLabel(latestStrongSignal.type)}`,
+          body: `${latestStrongSignal.time} / ${latestStrongSignal.message}`,
+        }
+      : latestDivergenceRow
+        ? {
+            key: `divergence-${latestDivergenceRow.timeLabel}-${latestDivergenceRow.divergenceType}`,
+            title: latestDivergenceRow.divergenceLabel,
+            body: `${latestDivergenceRow.timeLabel} / 수급 변화 ${formatFlow(latestDivergenceRow.flowMoveValue)}`,
+          }
+        : null;
+
+    if (!target || notifiedSignalRef.current === target.key) return;
+    notifiedSignalRef.current = target.key;
+    new Notification(target.title, { body: target.body });
+  }, [signalNotifyEnabled, latestStrongSignal, enhancedChartRows]);
 
   return (
     <div
@@ -1129,6 +1273,22 @@ export default function DailyPage() {
         </div>
       )}
 
+      {enhancedChartRows.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 12,
+            marginBottom: 20,
+          }}
+        >
+          <SummaryCard title="세션 최고 Diff" value={`${sessionSummary.highDiff.toLocaleString()} / ${sessionSummary.highDiffTime}`} color="#22c55e" />
+          <SummaryCard title="세션 최저 Diff" value={`${sessionSummary.lowDiff.toLocaleString()} / ${sessionSummary.lowDiffTime}`} color="#60a5fa" />
+          <SummaryCard title="다이버전스" value={`위험 ${sessionSummary.dangerCount} / 매집 ${sessionSummary.accumulationCount}`} color="#facc15" />
+          <SummaryCard title="수급 범위" value={`${formatFlow(sessionSummary.flowLow)} ~ ${formatFlow(sessionSummary.flowPeak)}`} color="#38bdf8" />
+        </div>
+      )}
+
       <div
         className="daily-main-layout"
         style={{
@@ -1313,6 +1473,22 @@ export default function DailyPage() {
               </button>
 
               <button
+                onClick={enableSignalNotification}
+                style={{
+                  border: "1px solid rgba(250,204,21,0.34)",
+                  background: signalNotifyEnabled ? "rgba(250,204,21,0.14)" : "rgba(15,23,42,0.88)",
+                  color: signalNotifyEnabled ? "#fde68a" : "#94a3b8",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                알림 {signalNotifyEnabled ? "ON" : "OFF"}
+              </button>
+
+              <button
                 onClick={() => setChartPanelFullscreen(true)}
                 style={{
                   border: "1px solid rgba(56,189,248,0.32)",
@@ -1373,6 +1549,9 @@ export default function DailyPage() {
             showDangerDivergence={showDangerDivergence}
             showAccumulationDivergence={showAccumulationDivergence}
             showSignalMarker={showSignalMarker}
+            hoverMinute={hoverMinute}
+            onHoverMinuteChange={handleChartMouseMove}
+            onHoverLeave={handleChartMouseLeave}
           />
 
           <MiniChart
@@ -1389,6 +1568,9 @@ export default function DailyPage() {
             showDangerDivergence={showDangerDivergence}
             showAccumulationDivergence={showAccumulationDivergence}
             showSignalMarker={showSignalMarker}
+            hoverMinute={hoverMinute}
+            onHoverMinuteChange={handleChartMouseMove}
+            onHoverLeave={handleChartMouseLeave}
           />
 
           <MiniChart
@@ -1405,6 +1587,9 @@ export default function DailyPage() {
             showDangerDivergence={showDangerDivergence}
             showAccumulationDivergence={showAccumulationDivergence}
             showSignalMarker={showSignalMarker}
+            hoverMinute={hoverMinute}
+            onHoverMinuteChange={handleChartMouseMove}
+            onHoverLeave={handleChartMouseLeave}
           />
 
           <MiniChart
@@ -1418,6 +1603,9 @@ export default function DailyPage() {
             showDangerDivergence={showDangerDivergence}
             showAccumulationDivergence={showAccumulationDivergence}
             showSignalMarker={showSignalMarker}
+            hoverMinute={hoverMinute}
+            onHoverMinuteChange={handleChartMouseMove}
+            onHoverLeave={handleChartMouseLeave}
           />
 
           <MiniChart
@@ -1431,6 +1619,9 @@ export default function DailyPage() {
             showDangerDivergence={showDangerDivergence}
             showAccumulationDivergence={showAccumulationDivergence}
             showSignalMarker={showSignalMarker}
+            hoverMinute={hoverMinute}
+            onHoverMinuteChange={handleChartMouseMove}
+            onHoverLeave={handleChartMouseLeave}
           />
 
           <AlertBox alerts={alerts} filter={alertFilter} onFilterChange={setAlertFilter} />
@@ -1479,6 +1670,7 @@ export default function DailyPage() {
                 <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8" }}>
                   반등 {showRebound ? "ON" : "OFF"} / 위험 {showDangerDivergence ? "ON" : "OFF"} / 매집 {showAccumulationDivergence ? "ON" : "OFF"} / SIGNAL {showSignalMarker ? "ON" : "OFF"}
                   <span style={{ color: "#38bdf8", marginLeft: 10 }}>휠 확대 {minuteToTimeLabel(chartZoomDomain[0])}~{minuteToTimeLabel(chartZoomDomain[1])}</span>
+                  <span style={{ color: "#facc15", marginLeft: 10 }}>드래그 확대 가능</span>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1515,13 +1707,13 @@ export default function DailyPage() {
               </div>
             </div>
 
-            <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
-            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} referenceLines={[0]} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
+            <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} referenceLines={[0]} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
             <div style={{ gridColumn: "1 / -1" }}>
-              <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
+              <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
             </div>
-            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
-            <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
+            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+            <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
           </div>
         </div>
       )}
@@ -1708,6 +1900,13 @@ function MiniChart({
   showSignalMarker = true,
   xDomain,
   onChartWheel,
+  hoverMinute,
+  onHoverMinuteChange,
+  onHoverLeave,
+  onChartDragStart,
+  onChartDragEnd,
+  dragStartMinute,
+  dragEndMinute,
 }: {
   title: string;
   data: any[];
@@ -1720,7 +1919,14 @@ function MiniChart({
   showAccumulationDivergence?: boolean;
   showSignalMarker?: boolean;
   xDomain?: [number, number];
-  onChartWheel?: (event: React.WheelEvent<HTMLDivElement>) => void;
+  onChartWheel?: (event: WheelEvent<HTMLDivElement>) => void;
+  hoverMinute?: number | null;
+  onHoverMinuteChange?: (event: any) => void;
+  onHoverLeave?: () => void;
+  onChartDragStart?: (event: any) => void;
+  onChartDragEnd?: (event: any) => void;
+  dragStartMinute?: number | null;
+  dragEndMinute?: number | null;
 }) {
   const chartId = title.replace(/[^a-zA-Z0-9]/g, "");
   const activeXDomain: [number, number] = xDomain ?? [MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE];
@@ -1737,7 +1943,14 @@ function MiniChart({
         title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
       >
       <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={data} margin={{ top: 12, right: 22, left: 20, bottom: 0 }}>
+        <ComposedChart
+          data={data}
+          margin={{ top: 12, right: 22, left: 20, bottom: 0 }}
+          onMouseMove={onHoverMinuteChange}
+          onMouseLeave={onHoverLeave}
+          onMouseDown={onChartDragStart}
+          onMouseUp={onChartDragEnd}
+        >
           <defs>
             {lines.map((line) => (
               <linearGradient key={`gradient-${line.key}`} id={`areaGradient-${chartId}-${line.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -1795,6 +2008,23 @@ function MiniChart({
               strokeDasharray="4 6"
             />
           ))}
+          {hoverMinute !== null && (
+            <ReferenceLine
+              x={hoverMinute}
+              stroke="rgba(250, 204, 21, 0.72)"
+              strokeDasharray="3 4"
+              ifOverflow="extendDomain"
+            />
+          )}
+          {dragStartMinute !== null && dragEndMinute !== null && Math.abs(Number(dragEndMinute) - Number(dragStartMinute)) > 1 && (
+            <ReferenceArea
+              x1={Math.min(Number(dragStartMinute), Number(dragEndMinute))}
+              x2={Math.max(Number(dragStartMinute), Number(dragEndMinute))}
+              strokeOpacity={0.25}
+              fill="rgba(56, 189, 248, 0.18)"
+              ifOverflow="hidden"
+            />
+          )}
           {lines.map((line) => (
             <Area
               key={`area-${line.key}`}
@@ -1876,7 +2106,7 @@ function ChartBox({
   children,
 }: {
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div
@@ -2301,7 +2531,7 @@ function SignalBox({ signals }: { signals: SignalItem[] }) {
   );
 }
 
-const th: React.CSSProperties = {
+const th: CSSProperties = {
   position: "sticky",
   top: 0,
   zIndex: 20,
@@ -2315,7 +2545,7 @@ const th: React.CSSProperties = {
   boxShadow: "0 1px 0 rgba(51,65,85,0.9), 0 12px 24px rgba(2,6,23,0.70)",
 };
 
-const td: React.CSSProperties = {
+const td: CSSProperties = {
   padding: "11px 10px",
   borderBottom: "1px solid rgba(30, 41, 59, 0.92)",
   textAlign: "center",
