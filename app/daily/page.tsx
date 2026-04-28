@@ -112,6 +112,21 @@ function timeToMinute(time: string) {
   return h * 60 + m;
 }
 
+const MARKET_OPEN_MINUTE = 9 * 60;
+const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
+const MARKET_TIME_TICKS = Array.from(
+  { length: Math.floor((MARKET_CLOSE_MINUTE - MARKET_OPEN_MINUTE) / 30) + 1 },
+  (_, index) => MARKET_OPEN_MINUTE + index * 30
+);
+
+function minuteToTimeLabel(value: any) {
+  const minuteValue = Number(value);
+  if (!Number.isFinite(minuteValue)) return "";
+  const hour = Math.floor(minuteValue / 60);
+  const minute = minuteValue % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 function clampChartValue(value: any, limit = 120000) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;
@@ -693,6 +708,9 @@ export default function DailyPage() {
   const [selectedDate, setSelectedDate] = useState("");
   const [chartsCollapsed, setChartsCollapsed] = useState(false);
   const [showRebound, setShowRebound] = useState(true);
+  const [showDangerDivergence, setShowDangerDivergence] = useState(true);
+  const [showAccumulationDivergence, setShowAccumulationDivergence] = useState(true);
+  const [showSignalMarker, setShowSignalMarker] = useState(true);
   const [chartPanelFullscreen, setChartPanelFullscreen] = useState(false);
 
   async function loadData(dateValue = selectedDate) {
@@ -751,6 +769,7 @@ export default function DailyPage() {
     return {
       ...r,
       timeLabel: formatTime(r.time),
+      timeMinuteValue: timeToMinute(r.time),
       upRatioPct: Number(r.upRatio) * 100,
       downRatioPct: Number(r.downRatio) * 100,
       score: marketScore(r),
@@ -766,7 +785,9 @@ export default function DailyPage() {
     };
   });
 
-  const visibleChartRows = getSessionChartRows(chartRows).map((row) => ({
+  const visibleChartRows = getSessionChartRows(chartRows)
+    .filter((row) => row.timeMinuteValue >= MARKET_OPEN_MINUTE && row.timeMinuteValue <= MARKET_CLOSE_MINUTE)
+    .map((row) => ({
     ...row,
     foreignFlowValue: clampChartNullable(row.foreignFlowValue),
     instFlowValue: clampChartNullable(row.instFlowValue),
@@ -1114,7 +1135,7 @@ export default function DailyPage() {
           >
             <div>
               <div style={{ fontSize: 13, fontWeight: 950, color: "#f8fafc" }}>CHART PANEL</div>
-              <div style={{ marginTop: 3, fontSize: 11, color: "#94a3b8" }}>노란점=반등 / 빨강=위험 / 초록=매집 / 보라=SIGNAL</div>
+              <div style={{ marginTop: 3, fontSize: 11, color: "#94a3b8" }}>노란점=반등 / 빨강=위험 / 초록=매집 / 보라=SIGNAL / X축 09:00~15:30</div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
               <button
@@ -1131,6 +1152,54 @@ export default function DailyPage() {
                 }}
               >
                 반등표시 {showRebound ? "ON" : "OFF"}
+              </button>
+
+              <button
+                onClick={() => setShowDangerDivergence((v) => !v)}
+                style={{
+                  border: "1px solid rgba(239,68,68,0.34)",
+                  background: showDangerDivergence ? "rgba(239,68,68,0.12)" : "rgba(15,23,42,0.88)",
+                  color: showDangerDivergence ? "#fecaca" : "#94a3b8",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                위험 {showDangerDivergence ? "ON" : "OFF"}
+              </button>
+
+              <button
+                onClick={() => setShowAccumulationDivergence((v) => !v)}
+                style={{
+                  border: "1px solid rgba(34,197,94,0.34)",
+                  background: showAccumulationDivergence ? "rgba(34,197,94,0.12)" : "rgba(15,23,42,0.88)",
+                  color: showAccumulationDivergence ? "#bbf7d0" : "#94a3b8",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                매집 {showAccumulationDivergence ? "ON" : "OFF"}
+              </button>
+
+              <button
+                onClick={() => setShowSignalMarker((v) => !v)}
+                style={{
+                  border: "1px solid rgba(168,85,247,0.34)",
+                  background: showSignalMarker ? "rgba(168,85,247,0.12)" : "rgba(15,23,42,0.88)",
+                  color: showSignalMarker ? "#e9d5ff" : "#94a3b8",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                SIGNAL {showSignalMarker ? "ON" : "OFF"}
               </button>
 
               <button
@@ -1191,6 +1260,9 @@ export default function DailyPage() {
             referenceLines={[0]}
             lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]}
             showRebound={showRebound}
+            showDangerDivergence={showDangerDivergence}
+            showAccumulationDivergence={showAccumulationDivergence}
+            showSignalMarker={showSignalMarker}
           />
 
           <MiniChart
@@ -1203,6 +1275,9 @@ export default function DailyPage() {
               { key: "downRatioPct", name: "하락비율", color: "#60a5fa" },
             ]}
             showRebound={showRebound}
+            showDangerDivergence={showDangerDivergence}
+            showAccumulationDivergence={showAccumulationDivergence}
+            showSignalMarker={showSignalMarker}
           />
 
           <MiniChart
@@ -1216,6 +1291,9 @@ export default function DailyPage() {
               { key: "indivFlowValue", name: "개인", color: "#facc15" },
             ]}
             showRebound={showRebound}
+            showDangerDivergence={showDangerDivergence}
+            showAccumulationDivergence={showAccumulationDivergence}
+            showSignalMarker={showSignalMarker}
           />
 
           <MiniChart
@@ -1225,6 +1303,9 @@ export default function DailyPage() {
             domain={["auto", "auto"]}
             lines={[{ key: "kospi", name: "KOSPI", color: "#facc15" }]}
             showRebound={showRebound}
+            showDangerDivergence={showDangerDivergence}
+            showAccumulationDivergence={showAccumulationDivergence}
+            showSignalMarker={showSignalMarker}
           />
 
           <MiniChart
@@ -1234,6 +1315,9 @@ export default function DailyPage() {
             domain={["auto", "auto"]}
             lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
             showRebound={showRebound}
+            showDangerDivergence={showDangerDivergence}
+            showAccumulationDivergence={showAccumulationDivergence}
+            showSignalMarker={showSignalMarker}
           />
 
           <AlertBox alerts={alerts} filter={alertFilter} onFilterChange={setAlertFilter} />
@@ -1279,7 +1363,7 @@ export default function DailyPage() {
             >
               <div>
                 <div style={{ fontSize: 20, fontWeight: 950, color: "#f8fafc" }}>CHART PANEL 전체보기</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8" }}>기존 스타일 유지 / 반등표시 {showRebound ? "ON" : "OFF"}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8" }}>반등 {showRebound ? "ON" : "OFF"} / 위험 {showDangerDivergence ? "ON" : "OFF"} / 매집 {showAccumulationDivergence ? "ON" : "OFF"} / SIGNAL {showSignalMarker ? "ON" : "OFF"}</div>
               </div>
               <button
                 onClick={() => setChartPanelFullscreen(false)}
@@ -1298,12 +1382,12 @@ export default function DailyPage() {
               </button>
             </div>
 
-            <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} />
-            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} />
-            <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} />
-            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} />
+            <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
+            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
+            <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
+            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
             <div style={{ gridColumn: "1 / -1" }}>
-              <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} />
+              <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
             </div>
           </div>
         </div>
@@ -1359,6 +1443,8 @@ type ChartLineConfig = {
 function ModernTooltip({ active, payload, label }: any) {
   if (!active || !payload || payload.length === 0) return null;
 
+  const displayLabel = typeof label === "number" ? minuteToTimeLabel(label) : label;
+
   return (
     <div
       style={{
@@ -1372,7 +1458,7 @@ function ModernTooltip({ active, payload, label }: any) {
         minWidth: 132,
       }}
     >
-      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 7, fontWeight: 800 }}>{label}</div>
+      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 7, fontWeight: 800 }}>{displayLabel}</div>
       {payload.map((item: any) => (
         <div key={`${item.name}-${item.dataKey}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", fontSize: 12, lineHeight: 1.7 }}>
           <span style={{ color: item.color, fontWeight: 800 }}>{item.name}</span>
@@ -1383,43 +1469,56 @@ function ModernTooltip({ active, payload, label }: any) {
   );
 }
 
-function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine: boolean, showRebound: boolean) {
+function chartMarkerDot(
+  props: any,
+  data: any[],
+  dataKey: string,
+  isPrimaryLine: boolean,
+  showRebound: boolean,
+  showDangerDivergence: boolean,
+  showAccumulationDivergence: boolean,
+  showSignalMarker: boolean
+) {
   const { cx, cy, payload, index } = props;
 
   if (cx === undefined || cy === undefined || !payload) return null;
 
   if (isPrimaryLine && payload.divergenceType) {
     const isDanger = payload.divergenceType === "danger";
-    const color = isDanger ? "#ef4444" : "#22c55e";
+    const shouldShowDivergence = isDanger ? showDangerDivergence : showAccumulationDivergence;
 
-    return (
-      <g>
-        <circle
-          cx={cx}
-          cy={cy}
-          r={3.4}
-          fill="rgba(2, 6, 23, 0.92)"
-          stroke={color}
-          strokeWidth={1.5}
-        />
-        <circle cx={cx} cy={cy} r={1.3} fill={color} />
-      </g>
-    );
+    if (shouldShowDivergence) {
+      const color = isDanger ? "#ef4444" : "#22c55e";
+
+      return (
+        <g>
+          <circle
+            cx={cx}
+            cy={cy}
+            r={3}
+            fill="rgba(2, 6, 23, 0.92)"
+            stroke={color}
+            strokeWidth={1.35}
+          />
+          <circle cx={cx} cy={cy} r={1.05} fill={color} />
+        </g>
+      );
+    }
   }
 
-  if (isPrimaryLine && payload.signalMarkerColor) {
+  if (isPrimaryLine && showSignalMarker && payload.signalMarkerColor) {
     return (
       <g>
         <circle
           cx={cx}
           cy={cy}
-          r={3.2}
+          r={2.8}
           fill="rgba(2, 6, 23, 0.92)"
           stroke={payload.signalMarkerColor}
-          strokeWidth={1.4}
+          strokeWidth={1.25}
         />
         <path
-          d={`M ${cx} ${cy - 1.8} L ${cx + 1.8} ${cy} L ${cx} ${cy + 1.8} L ${cx - 1.8} ${cy} Z`}
+          d={`M ${cx} ${cy - 1.5} L ${cx + 1.5} ${cy} L ${cx} ${cy + 1.5} L ${cx - 1.5} ${cy} Z`}
           fill={payload.signalMarkerColor}
         />
       </g>
@@ -1454,7 +1553,29 @@ function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine:
   return null;
 }
 
-function MiniChart({ title, data, lines, height = 200, domain, referenceLines = [], showRebound = true }: { title: string; data: any[]; lines: ChartLineConfig[]; height?: number; domain?: any; referenceLines?: number[]; showRebound?: boolean }) {
+function MiniChart({
+  title,
+  data,
+  lines,
+  height = 200,
+  domain,
+  referenceLines = [],
+  showRebound = true,
+  showDangerDivergence = true,
+  showAccumulationDivergence = true,
+  showSignalMarker = true,
+}: {
+  title: string;
+  data: any[];
+  lines: ChartLineConfig[];
+  height?: number;
+  domain?: any;
+  referenceLines?: number[];
+  showRebound?: boolean;
+  showDangerDivergence?: boolean;
+  showAccumulationDivergence?: boolean;
+  showSignalMarker?: boolean;
+}) {
   const chartId = title.replace(/[^a-zA-Z0-9]/g, "");
 
   return (
@@ -1472,12 +1593,17 @@ function MiniChart({ title, data, lines, height = 200, domain, referenceLines = 
           </defs>
           <CartesianGrid stroke="rgba(148, 163, 184, 0.11)" vertical={false} strokeDasharray="3 8" />
           <XAxis
-            dataKey="timeLabel"
+            dataKey="timeMinuteValue"
+            type="number"
+            domain={[MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE]}
+            ticks={MARKET_TIME_TICKS}
+            tickFormatter={minuteToTimeLabel}
+            interval={0}
+            allowDataOverflow
             stroke="rgba(203, 213, 225, 0.62)"
             fontSize={10}
             tickLine={false}
             axisLine={{ stroke: "rgba(148, 163, 184, 0.18)" }}
-            minTickGap={36}
           />
           <YAxis
             stroke="rgba(203, 213, 225, 0.62)"
@@ -1514,7 +1640,18 @@ function MiniChart({ title, data, lines, height = 200, domain, referenceLines = 
               name={line.name}
               stroke={line.color}
               strokeWidth={1.6}
-              dot={(props) => chartMarkerDot(props, data, line.key, lineIndex === 0, showRebound)}
+              dot={(props) =>
+                chartMarkerDot(
+                  props,
+                  data,
+                  line.key,
+                  lineIndex === 0,
+                  showRebound,
+                  showDangerDivergence,
+                  showAccumulationDivergence,
+                  showSignalMarker
+                )
+              }
               activeDot={{
                 r: 3.5,
                 strokeWidth: 1.2,
