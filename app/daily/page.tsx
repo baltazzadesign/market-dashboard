@@ -692,6 +692,8 @@ export default function DailyPage() {
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [chartsCollapsed, setChartsCollapsed] = useState(false);
+  const [showRebound, setShowRebound] = useState(true);
+  const [chartPanelFullscreen, setChartPanelFullscreen] = useState(false);
 
   async function loadData(dateValue = selectedDate) {
     const dateQuery = dateValue ? `?date=${dateValue}` : "";
@@ -1114,22 +1116,57 @@ export default function DailyPage() {
               <div style={{ fontSize: 13, fontWeight: 950, color: "#f8fafc" }}>CHART PANEL</div>
               <div style={{ marginTop: 3, fontSize: 11, color: "#94a3b8" }}>노란점=반등 / 빨강=위험 / 초록=매집 / 보라=SIGNAL</div>
             </div>
-            <button
-              onClick={() => setChartsCollapsed((v) => !v)}
-              style={{
-                border: "1px solid rgba(56,189,248,0.32)",
-                background: chartsCollapsed ? "rgba(56,189,248,0.18)" : "rgba(15,23,42,0.88)",
-                color: "#e5e7eb",
-                borderRadius: 999,
-                padding: "8px 12px",
-                fontSize: 12,
-                fontWeight: 900,
-                cursor: "pointer",
-                boxShadow: "0 0 18px rgba(56,189,248,0.16)",
-              }}
-            >
-              {chartsCollapsed ? "차트 펼치기" : "차트 접기"}
-            </button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setShowRebound((v) => !v)}
+                style={{
+                  border: "1px solid rgba(250,204,21,0.34)",
+                  background: showRebound ? "rgba(250,204,21,0.12)" : "rgba(15,23,42,0.88)",
+                  color: showRebound ? "#fde68a" : "#94a3b8",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                반등표시 {showRebound ? "ON" : "OFF"}
+              </button>
+
+              <button
+                onClick={() => setChartPanelFullscreen(true)}
+                style={{
+                  border: "1px solid rgba(56,189,248,0.32)",
+                  background: "rgba(15,23,42,0.88)",
+                  color: "#e5e7eb",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  boxShadow: "0 0 14px rgba(56,189,248,0.10)",
+                }}
+              >
+                전체보기
+              </button>
+
+              <button
+                onClick={() => setChartsCollapsed((v) => !v)}
+                style={{
+                  border: "1px solid rgba(56,189,248,0.32)",
+                  background: chartsCollapsed ? "rgba(56,189,248,0.18)" : "rgba(15,23,42,0.88)",
+                  color: "#e5e7eb",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  boxShadow: "0 0 18px rgba(56,189,248,0.16)",
+                }}
+              >
+                {chartsCollapsed ? "차트 펼치기" : "차트 접기"}
+              </button>
+            </div>
           </div>
 
           {chartsCollapsed ? (
@@ -1153,6 +1190,7 @@ export default function DailyPage() {
             height={220}
             referenceLines={[0]}
             lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]}
+            showRebound={showRebound}
           />
 
           <MiniChart
@@ -1164,6 +1202,7 @@ export default function DailyPage() {
               { key: "upRatioPct", name: "상승비율", color: "#ef4444" },
               { key: "downRatioPct", name: "하락비율", color: "#60a5fa" },
             ]}
+            showRebound={showRebound}
           />
 
           <MiniChart
@@ -1176,6 +1215,7 @@ export default function DailyPage() {
               { key: "instFlowValue", name: "기관", color: "#ef4444" },
               { key: "indivFlowValue", name: "개인", color: "#facc15" },
             ]}
+            showRebound={showRebound}
           />
 
           <MiniChart
@@ -1184,6 +1224,7 @@ export default function DailyPage() {
             height={220}
             domain={["auto", "auto"]}
             lines={[{ key: "kospi", name: "KOSPI", color: "#facc15" }]}
+            showRebound={showRebound}
           />
 
           <MiniChart
@@ -1192,6 +1233,7 @@ export default function DailyPage() {
             height={220}
             domain={["auto", "auto"]}
             lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
+            showRebound={showRebound}
           />
 
           <AlertBox alerts={alerts} filter={alertFilter} onFilterChange={setAlertFilter} />
@@ -1201,6 +1243,71 @@ export default function DailyPage() {
           )}
         </div>
       </div>
+
+      {chartPanelFullscreen && (
+        <div
+          onClick={() => setChartPanelFullscreen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(2, 6, 23, 0.92)",
+            backdropFilter: "blur(18px)",
+            padding: 24,
+            overflow: "auto",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 1480,
+              margin: "0 auto",
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 16,
+            }}
+          >
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+                padding: "8px 2px 4px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 950, color: "#f8fafc" }}>CHART PANEL 전체보기</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8" }}>기존 스타일 유지 / 반등표시 {showRebound ? "ON" : "OFF"}</div>
+              </div>
+              <button
+                onClick={() => setChartPanelFullscreen(false)}
+                style={{
+                  border: "1px solid rgba(148, 163, 184, 0.24)",
+                  background: "rgba(15,23,42,0.92)",
+                  color: "#e5e7eb",
+                  borderRadius: 999,
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                닫기
+              </button>
+            </div>
+
+            <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} />
+            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} />
+            <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} />
+            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} />
+            <div style={{ gridColumn: "1 / -1" }}>
+              <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         .daily-table-scroll::-webkit-scrollbar {
@@ -1276,7 +1383,7 @@ function ModernTooltip({ active, payload, label }: any) {
   );
 }
 
-function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine: boolean) {
+function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine: boolean, showRebound: boolean) {
   const { cx, cy, payload, index } = props;
 
   if (cx === undefined || cy === undefined || !payload) return null;
@@ -1290,13 +1397,12 @@ function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine:
         <circle
           cx={cx}
           cy={cy}
-          r={7.2}
-          fill="rgba(2, 6, 23, 0.98)"
+          r={3.4}
+          fill="rgba(2, 6, 23, 0.92)"
           stroke={color}
-          strokeWidth={2.2}
-          style={{ filter: `drop-shadow(0 0 10px ${color})` }}
+          strokeWidth={1.5}
         />
-        <circle cx={cx} cy={cy} r={3.2} fill={color} />
+        <circle cx={cx} cy={cy} r={1.3} fill={color} />
       </g>
     );
   }
@@ -1307,19 +1413,20 @@ function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine:
         <circle
           cx={cx}
           cy={cy}
-          r={6.2}
-          fill="rgba(2, 6, 23, 0.98)"
+          r={3.2}
+          fill="rgba(2, 6, 23, 0.92)"
           stroke={payload.signalMarkerColor}
-          strokeWidth={2}
-          style={{ filter: `drop-shadow(0 0 8px ${payload.signalMarkerColor})` }}
+          strokeWidth={1.4}
         />
         <path
-          d={`M ${cx} ${cy - 3.4} L ${cx + 3.4} ${cy} L ${cx} ${cy + 3.4} L ${cx - 3.4} ${cy} Z`}
+          d={`M ${cx} ${cy - 1.8} L ${cx + 1.8} ${cy} L ${cx} ${cy + 1.8} L ${cx - 1.8} ${cy} Z`}
           fill={payload.signalMarkerColor}
         />
       </g>
     );
   }
+
+  if (!showRebound) return null;
 
   if (index < 2) return null;
 
@@ -1336,11 +1443,10 @@ function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine:
       <circle
         cx={cx}
         cy={cy}
-        r={4.8}
+        r={2.6}
         fill="#facc15"
-        stroke="rgba(2, 6, 23, 0.98)"
-        strokeWidth={1.4}
-        style={{ filter: "drop-shadow(0 0 7px rgba(250, 204, 21, 0.95))" }}
+        stroke="rgba(2, 6, 23, 0.95)"
+        strokeWidth={0.8}
       />
     );
   }
@@ -1348,13 +1454,13 @@ function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine:
   return null;
 }
 
-function MiniChart({ title, data, lines, height = 200, domain, referenceLines = [] }: { title: string; data: any[]; lines: ChartLineConfig[]; height?: number; domain?: any; referenceLines?: number[] }) {
+function MiniChart({ title, data, lines, height = 200, domain, referenceLines = [], showRebound = true }: { title: string; data: any[]; lines: ChartLineConfig[]; height?: number; domain?: any; referenceLines?: number[]; showRebound?: boolean }) {
   const chartId = title.replace(/[^a-zA-Z0-9]/g, "");
 
   return (
     <ChartBox title={title}>
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 16, right: 30, left: 26, bottom: 2 }}>
+        <LineChart data={data} margin={{ top: 12, right: 22, left: 20, bottom: 0 }}>
           <defs>
             <filter id={`chartGlow-${chartId}`} x="-30%" y="-30%" width="160%" height="160%">
               <feGaussianBlur stdDeviation="2.3" result="coloredBlur" />
@@ -1407,17 +1513,16 @@ function MiniChart({ title, data, lines, height = 200, domain, referenceLines = 
               dataKey={line.key}
               name={line.name}
               stroke={line.color}
-              strokeWidth={2.1}
-              dot={(props) => chartMarkerDot(props, data, line.key, lineIndex === 0)}
+              strokeWidth={1.6}
+              dot={(props) => chartMarkerDot(props, data, line.key, lineIndex === 0, showRebound)}
               activeDot={{
-                r: 5,
-                strokeWidth: 2,
+                r: 3.5,
+                strokeWidth: 1.2,
                 stroke: "rgba(255,255,255,0.9)",
                 fill: line.color,
               }}
               isAnimationActive={false}
               connectNulls
-              style={{ filter: `drop-shadow(0 0 7px ${line.color}66)` }}
             />
           ))}
         </LineChart>
@@ -1464,24 +1569,22 @@ function ChartBox({
     <div
       style={{
         background:
-          "radial-gradient(circle at top left, rgba(56,189,248,0.12), transparent 38%), radial-gradient(circle at bottom right, rgba(168,85,247,0.12), transparent 42%), linear-gradient(145deg, rgba(15,23,42,0.92), rgba(2,6,23,0.76))",
-        border: "1px solid rgba(255, 255, 255, 0.08)",
-        borderRadius: 22,
-        padding: 16,
-        boxShadow:
-          "0 20px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)",
-        backdropFilter: "blur(18px)",
+          "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
+        border: "1px solid rgba(148, 163, 184, 0.16)",
+        borderRadius: 18,
+        padding: 14,
+        boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
+        backdropFilter: "blur(16px)",
         overflow: "visible",
       }}
     >
       <h3
         style={{
           fontSize: 13,
-          color: "#f8fafc",
+          color: "#e5e7eb",
           margin: "0 0 12px",
-          fontWeight: 950,
+          fontWeight: 900,
           letterSpacing: 0.15,
-          textShadow: "0 0 16px rgba(56,189,248,0.18)",
         }}
       >
         {title}
