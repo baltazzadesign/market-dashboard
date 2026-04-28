@@ -1911,7 +1911,8 @@ function ChartLegend({
         justifyContent: "flex-end",
         gap: 8,
         flexWrap: "wrap",
-        maxWidth: "58%",
+        maxWidth: "72%",
+        flex: "0 0 auto",
         pointerEvents: "auto",
       }}
     >
@@ -1928,7 +1929,7 @@ function ChartLegend({
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
-              padding: "5px 9px",
+              padding: "6px 10px",
               borderRadius: 999,
               border: isHidden
                 ? "1px solid rgba(100, 116, 139, 0.24)"
@@ -1941,7 +1942,7 @@ function ChartLegend({
                 ? "inset 0 1px 0 rgba(255,255,255,0.03)"
                 : "0 10px 24px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
               color: isHidden ? "#64748b" : "#e5e7eb",
-              fontSize: 10.5,
+              fontSize: 11,
               fontWeight: 950,
               lineHeight: 1,
               whiteSpace: "nowrap",
@@ -2354,7 +2355,8 @@ function ChartBox({
           alignItems: "center",
           gap: 12,
           marginBottom: 12,
-          minHeight: 26,
+          minHeight: 30,
+          flexWrap: "nowrap",
         }}
       >
         <h3
@@ -2365,6 +2367,7 @@ function ChartBox({
             fontWeight: 900,
             letterSpacing: 0.15,
             minWidth: 0,
+            flex: "1 1 auto",
             lineHeight: 1.35,
           }}
         >
