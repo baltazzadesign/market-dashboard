@@ -641,6 +641,49 @@ function makeAlerts(rows: Row[]) {
   return alerts.slice(-8).reverse();
 }
 
+function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
+  return data.map((row, index) => {
+    const prev = index > 0 ? data[index - 1] : null;
+    const matchedSignal = signals.find((signal) => signal.time === row.timeLabel);
+
+    const kospiMove = prev ? Number(row.kospi ?? 0) - Number(prev.kospi ?? 0) : 0;
+    const kosdaqMove = prev ? Number(row.kosdaq ?? 0) - Number(prev.kosdaq ?? 0) : 0;
+    const indexMove = kospiMove + kosdaqMove;
+    const flowMove = prev
+      ? Number(row.foreignInstFlowValue ?? 0) - Number(prev.foreignInstFlowValue ?? 0)
+      : 0;
+
+    const dangerDivergence = Boolean(prev && indexMove >= 0 && flowMove <= -5000);
+    const accumulationDivergence = Boolean(prev && indexMove <= 0 && flowMove >= 5000);
+
+    const divergenceType = dangerDivergence
+      ? "danger"
+      : accumulationDivergence
+        ? "accumulation"
+        : "";
+
+    return {
+      ...row,
+      indexMoveValue: indexMove,
+      flowMoveValue: flowMove,
+      divergenceType,
+      divergenceLabel: dangerDivergence
+        ? "위험 다이버전스"
+        : accumulationDivergence
+          ? "매집 다이버전스"
+          : "",
+      divergenceColor: dangerDivergence
+        ? "#ef4444"
+        : accumulationDivergence
+          ? "#22c55e"
+          : "#94a3b8",
+      signalMarkerColor: matchedSignal?.color ?? "",
+      signalMarkerLabel: matchedSignal ? getSignalLabel(matchedSignal.type) : "",
+      signalMarkerDirection: matchedSignal?.direction ?? "",
+    };
+  });
+}
+
 export default function DailyPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [dbAlerts, setDbAlerts] = useState<AlertItem[]>([]);
@@ -648,6 +691,7 @@ export default function DailyPage() {
   const [alertFilter, setAlertFilter] = useState<AlertFilter>("전체");
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
+  const [chartsCollapsed, setChartsCollapsed] = useState(false);
 
   async function loadData(dateValue = selectedDate) {
     const dateQuery = dateValue ? `?date=${dateValue}` : "";
@@ -743,6 +787,8 @@ export default function DailyPage() {
   const localSignals = buildSignals(flowDisplayRows);
   const signals = dbSignals.length > 0 ? dbSignals : localSignals;
   const sigSummary = signalSummary(signals);
+  const enhancedChartRows = buildEnhancedChartRows(visibleChartRows, signals);
+  const latestDivergence = [...enhancedChartRows].reverse().find((row) => row.divergenceType);
 
   return (
     <div
@@ -923,6 +969,33 @@ export default function DailyPage() {
         </div>
       )}
 
+      {latestDivergence && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 12,
+            marginBottom: 20,
+          }}
+        >
+          <SummaryCard
+            title="FLOW 다이버전스"
+            value={latestDivergence.divergenceLabel}
+            color={latestDivergence.divergenceColor}
+          />
+          <SummaryCard
+            title="발생 시간"
+            value={latestDivergence.timeLabel}
+            color="#e5e7eb"
+          />
+          <SummaryCard
+            title="수급 변화"
+            value={formatFlow(latestDivergence.flowMoveValue)}
+            color={latestDivergence.flowMoveValue >= 0 ? "#22c55e" : "#ef4444"}
+          />
+        </div>
+      )}
+
       <div
         className="daily-main-layout"
         style={{
@@ -1023,9 +1096,60 @@ export default function DailyPage() {
             overflow: "visible",
           }}
         >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 12px",
+              border: "1px solid rgba(56, 189, 248, 0.16)",
+              borderRadius: 18,
+              background: "linear-gradient(145deg, rgba(15,23,42,0.82), rgba(2,6,23,0.66))",
+              boxShadow: "0 12px 32px rgba(0,0,0,0.30)",
+              backdropFilter: "blur(16px)",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 950, color: "#f8fafc" }}>CHART PANEL</div>
+              <div style={{ marginTop: 3, fontSize: 11, color: "#94a3b8" }}>노란점=반등 / 빨강=위험 / 초록=매집 / 보라=SIGNAL</div>
+            </div>
+            <button
+              onClick={() => setChartsCollapsed((v) => !v)}
+              style={{
+                border: "1px solid rgba(56,189,248,0.32)",
+                background: chartsCollapsed ? "rgba(56,189,248,0.18)" : "rgba(15,23,42,0.88)",
+                color: "#e5e7eb",
+                borderRadius: 999,
+                padding: "8px 12px",
+                fontSize: 12,
+                fontWeight: 900,
+                cursor: "pointer",
+                boxShadow: "0 0 18px rgba(56,189,248,0.16)",
+              }}
+            >
+              {chartsCollapsed ? "차트 펼치기" : "차트 접기"}
+            </button>
+          </div>
+
+          {chartsCollapsed ? (
+            <div
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.16)",
+                borderRadius: 20,
+                padding: 18,
+                background: "linear-gradient(145deg, rgba(15,23,42,0.82), rgba(2,6,23,0.70))",
+                color: "#94a3b8",
+                boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
+              }}
+            >
+              차트가 접혀 있습니다. 왼쪽 데이터 확인 시 화면 가림을 줄일 수 있습니다.
+            </div>
+          ) : (
+            <>
           <MiniChart
             title="1. Net Breadth · 전체 상승-하락 폭"
-            data={visibleChartRows}
+            data={enhancedChartRows}
             height={220}
             referenceLines={[0]}
             lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]}
@@ -1033,7 +1157,7 @@ export default function DailyPage() {
 
           <MiniChart
             title="2. Breadth Ratio · 상승/하락 비율"
-            data={visibleChartRows}
+            data={enhancedChartRows}
             height={220}
             domain={[0, 80]}
             lines={[
@@ -1044,7 +1168,7 @@ export default function DailyPage() {
 
           <MiniChart
             title="3. Flow · 외국인 / 기관 / 개인 수급"
-            data={visibleChartRows}
+            data={enhancedChartRows}
             height={240}
             referenceLines={[0]}
             lines={[
@@ -1056,7 +1180,7 @@ export default function DailyPage() {
 
           <MiniChart
             title="4. KOSPI 지수"
-            data={visibleChartRows}
+            data={enhancedChartRows}
             height={220}
             domain={["auto", "auto"]}
             lines={[{ key: "kospi", name: "KOSPI", color: "#facc15" }]}
@@ -1064,7 +1188,7 @@ export default function DailyPage() {
 
           <MiniChart
             title="5. KOSDAQ 지수"
-            data={visibleChartRows}
+            data={enhancedChartRows}
             height={220}
             domain={["auto", "auto"]}
             lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
@@ -1073,6 +1197,8 @@ export default function DailyPage() {
           <AlertBox alerts={alerts} filter={alertFilter} onFilterChange={setAlertFilter} />
 
           <SignalBox signals={signals} />
+            </>
+          )}
         </div>
       </div>
 
@@ -1150,10 +1276,52 @@ function ModernTooltip({ active, payload, label }: any) {
   );
 }
 
-function reboundDot(props: any, data: any[], dataKey: string) {
+function chartMarkerDot(props: any, data: any[], dataKey: string, isPrimaryLine: boolean) {
   const { cx, cy, payload, index } = props;
 
-  if (index < 2 || cx === undefined || cy === undefined || !payload) return null;
+  if (cx === undefined || cy === undefined || !payload) return null;
+
+  if (isPrimaryLine && payload.divergenceType) {
+    const isDanger = payload.divergenceType === "danger";
+    const color = isDanger ? "#ef4444" : "#22c55e";
+
+    return (
+      <g>
+        <circle
+          cx={cx}
+          cy={cy}
+          r={7.2}
+          fill="rgba(2, 6, 23, 0.98)"
+          stroke={color}
+          strokeWidth={2.2}
+          style={{ filter: `drop-shadow(0 0 10px ${color})` }}
+        />
+        <circle cx={cx} cy={cy} r={3.2} fill={color} />
+      </g>
+    );
+  }
+
+  if (isPrimaryLine && payload.signalMarkerColor) {
+    return (
+      <g>
+        <circle
+          cx={cx}
+          cy={cy}
+          r={6.2}
+          fill="rgba(2, 6, 23, 0.98)"
+          stroke={payload.signalMarkerColor}
+          strokeWidth={2}
+          style={{ filter: `drop-shadow(0 0 8px ${payload.signalMarkerColor})` }}
+        />
+        <path
+          d={`M ${cx} ${cy - 3.4} L ${cx + 3.4} ${cy} L ${cx} ${cy + 3.4} L ${cx - 3.4} ${cy} Z`}
+          fill={payload.signalMarkerColor}
+        />
+      </g>
+    );
+  }
+
+  if (index < 2) return null;
 
   const prev = Number(data[index - 1]?.[dataKey]);
   const prev2 = Number(data[index - 2]?.[dataKey]);
@@ -1163,7 +1331,6 @@ function reboundDot(props: any, data: any[], dataKey: string) {
     return null;
   }
 
-  // 직전 값이 저점을 만들고 현재 값이 다시 올라오는 구간을 노란 원형 포인트로 표시합니다.
   if (prev < prev2 && curr > prev) {
     return (
       <circle
@@ -1182,12 +1349,14 @@ function reboundDot(props: any, data: any[], dataKey: string) {
 }
 
 function MiniChart({ title, data, lines, height = 200, domain, referenceLines = [] }: { title: string; data: any[]; lines: ChartLineConfig[]; height?: number; domain?: any; referenceLines?: number[] }) {
+  const chartId = title.replace(/[^a-zA-Z0-9]/g, "");
+
   return (
     <ChartBox title={title}>
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 14, right: 28, left: 22, bottom: 2 }}>
+        <LineChart data={data} margin={{ top: 16, right: 30, left: 26, bottom: 2 }}>
           <defs>
-            <filter id={`chartGlow-${title.replace(/[^a-zA-Z0-9]/g, "")}`} x="-30%" y="-30%" width="160%" height="160%">
+            <filter id={`chartGlow-${chartId}`} x="-30%" y="-30%" width="160%" height="160%">
               <feGaussianBlur stdDeviation="2.3" result="coloredBlur" />
               <feMerge>
                 <feMergeNode in="coloredBlur" />
@@ -1209,7 +1378,7 @@ function MiniChart({ title, data, lines, height = 200, domain, referenceLines = 
             fontSize={10}
             tickLine={false}
             axisLine={false}
-            width={58}
+            width={62}
             domain={domain ?? ["auto", "auto"]}
             tickMargin={8}
           />
@@ -1231,15 +1400,15 @@ function MiniChart({ title, data, lines, height = 200, domain, referenceLines = 
               strokeDasharray="4 6"
             />
           ))}
-          {lines.map((line) => (
+          {lines.map((line, lineIndex) => (
             <Line
               key={line.key}
               type="monotone"
               dataKey={line.key}
               name={line.name}
               stroke={line.color}
-              strokeWidth={2.05}
-              dot={(props) => reboundDot(props, data, line.key)}
+              strokeWidth={2.1}
+              dot={(props) => chartMarkerDot(props, data, line.key, lineIndex === 0)}
               activeDot={{
                 r: 5,
                 strokeWidth: 2,
