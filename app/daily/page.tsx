@@ -1199,6 +1199,28 @@ export default function DailyPage() {
               "0 12px 34px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05)",
           }}
         >
+          <a
+            href="/"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+              border: "1px solid rgba(56, 189, 248, 0.42)",
+              background: "rgba(56, 189, 248, 0.08)",
+              color: "#bae6fd",
+              borderRadius: 999,
+              padding: "9px 13px",
+              fontSize: 13,
+              fontWeight: 900,
+              cursor: "pointer",
+              textDecoration: "none",
+              boxShadow: "0 0 18px rgba(56,189,248,0.12)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span>📊</span>
+            <span>대시보드</span>
+          </a>
           {selectedDate && (
             <button
               onClick={() => setSelectedDate("")}
