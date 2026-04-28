@@ -943,16 +943,16 @@ export default function DailyPage() {
 
   const handleChartMouseMove = (event: any) => {
     const activeMinute = getActiveLabelFromChartEvent(event);
-    setHoverMinute(activeMinute);
+    setHoverMinute((prev) => (prev === activeMinute ? prev : activeMinute));
     if (dragStartMinute !== null && activeMinute !== null) {
-      setDragEndMinute(activeMinute);
+      setDragEndMinute((prev) => (prev === activeMinute ? prev : activeMinute));
     }
   };
 
   const handleChartMouseLeave = () => {
-    setHoverMinute(null);
+    setHoverMinute((prev) => (prev === null ? prev : null));
     if (dragStartMinute === null) {
-      setDragEndMinute(null);
+      setDragEndMinute((prev) => (prev === null ? prev : null));
     }
   };
 
@@ -997,59 +997,90 @@ export default function DailyPage() {
     setSignalNotifyEnabled(permission === "granted");
   };
 
-  const flowDisplayRows = buildRowsWithFlowFallback(rows);
+  const flowDisplayRows = useMemo(() => buildRowsWithFlowFallback(rows), [rows]);
 
-  const chartRows = flowDisplayRows.map((r, index) => {
-    const prev = index > 0 ? flowDisplayRows[index - 1] : undefined;
+  const chartRows = useMemo(
+    () =>
+      flowDisplayRows.map((r, index) => {
+        const prev = index > 0 ? flowDisplayRows[index - 1] : undefined;
 
-    return {
-      ...r,
-      timeLabel: formatTime(r.time),
-      timeMinuteValue: timeToMinute(r.time),
-      upRatioPct: Number(r.upRatio) * 100,
-      downRatioPct: Number(r.downRatio) * 100,
-      score: marketScore(r),
+        return {
+          ...r,
+          timeLabel: formatTime(r.time),
+          timeMinuteValue: timeToMinute(r.time),
+          upRatioPct: Number(r.upRatio) * 100,
+          downRatioPct: Number(r.downRatio) * 100,
+          score: marketScore(r),
 
-      // GAS 방식과 동일하게 수급 실패 구간은 직전 정상값으로 표시합니다.
-      foreignFlowValue: Number(r.foreignFlow ?? 0),
-      instFlowValue: Number(r.instFlow ?? 0),
-      indivFlowValue: Number(r.indivFlow ?? 0),
-      flowPowerValue: getFlowPower(r),
-      flowTrendValue: getFlowTrend(r, prev),
-      flowMomentumValue: Number(r.flowMomentum ?? getFlowPower(r)),
-      foreignInstFlowValue: Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0),
-    };
-  });
+          // GAS 방식과 동일하게 수급 실패 구간은 직전 정상값으로 표시합니다.
+          foreignFlowValue: Number(r.foreignFlow ?? 0),
+          instFlowValue: Number(r.instFlow ?? 0),
+          indivFlowValue: Number(r.indivFlow ?? 0),
+          flowPowerValue: getFlowPower(r),
+          flowTrendValue: getFlowTrend(r, prev),
+          flowMomentumValue: Number(r.flowMomentum ?? getFlowPower(r)),
+          foreignInstFlowValue: Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0),
+        };
+      }),
+    [flowDisplayRows]
+  );
 
-  const visibleChartRows = getSessionChartRows(chartRows)
-    .filter((row) => row.timeMinuteValue >= MARKET_OPEN_MINUTE && row.timeMinuteValue <= MARKET_CLOSE_MINUTE)
-    .map((row) => ({
-    ...row,
-    foreignFlowValue: clampChartNullable(row.foreignFlowValue),
-    instFlowValue: clampChartNullable(row.instFlowValue),
-    indivFlowValue: clampChartNullable(row.indivFlowValue),
-    flowPowerValue: clampChartNullable(row.flowPowerValue),
-    flowTrendValue: clampChartNullable(row.flowTrendValue),
-    flowMomentumValue: clampChartNullable(row.flowMomentumValue),
-    foreignInstFlowValue: clampChartNullable(row.foreignInstFlowValue),
-  }));
+  const visibleChartRows = useMemo(
+    () =>
+      getSessionChartRows(chartRows)
+        .filter(
+          (row) =>
+            row.timeMinuteValue >= MARKET_OPEN_MINUTE &&
+            row.timeMinuteValue <= MARKET_CLOSE_MINUTE
+        )
+        .map((row) => ({
+          ...row,
+          foreignFlowValue: clampChartNullable(row.foreignFlowValue),
+          instFlowValue: clampChartNullable(row.instFlowValue),
+          indivFlowValue: clampChartNullable(row.indivFlowValue),
+          flowPowerValue: clampChartNullable(row.flowPowerValue),
+          flowTrendValue: clampChartNullable(row.flowTrendValue),
+          flowMomentumValue: clampChartNullable(row.flowMomentumValue),
+          foreignInstFlowValue: clampChartNullable(row.foreignInstFlowValue),
+        })),
+    [chartRows]
+  );
 
   const last = flowDisplayRows[flowDisplayRows.length - 1];
   const prevLast = flowDisplayRows.length >= 2 ? flowDisplayRows[flowDisplayRows.length - 2] : undefined;
-  const localAlerts = makeAlerts(flowDisplayRows);
-  const sourceAlerts = dbAlerts.length > 0 ? dbAlerts : localAlerts;
-  const alerts =
-    alertFilter === "전체"
-      ? sourceAlerts.slice(0, 12)
-      : sourceAlerts.filter((alert) => alert.level === alertFilter).slice(0, 12);
 
-  const localSignals = buildSignals(flowDisplayRows);
-  const signals = dbSignals.length > 0 ? dbSignals : localSignals;
-  const sigSummary = signalSummary(signals);
-  const enhancedChartRows = buildEnhancedChartRows(visibleChartRows, signals);
-  const latestDivergence = [...enhancedChartRows].reverse().find((row) => row.divergenceType);
-  const sessionSummary = buildSessionSummary(enhancedChartRows);
-  const latestStrongSignal = signals.find((signal) => signal.strength === "강") ?? signals[0];
+  const localAlerts = useMemo(() => makeAlerts(flowDisplayRows), [flowDisplayRows]);
+  const sourceAlerts = dbAlerts.length > 0 ? dbAlerts : localAlerts;
+  const alerts = useMemo(
+    () =>
+      alertFilter === "전체"
+        ? sourceAlerts.slice(0, 12)
+        : sourceAlerts.filter((alert) => alert.level === alertFilter).slice(0, 12),
+    [alertFilter, sourceAlerts]
+  );
+
+  const localSignals = useMemo(() => buildSignals(flowDisplayRows), [flowDisplayRows]);
+  const signals = useMemo(
+    () => (dbSignals.length > 0 ? dbSignals : localSignals),
+    [dbSignals, localSignals]
+  );
+  const sigSummary = useMemo(() => signalSummary(signals), [signals]);
+  const enhancedChartRows = useMemo(
+    () => buildEnhancedChartRows(visibleChartRows, signals),
+    [visibleChartRows, signals]
+  );
+  const latestDivergence = useMemo(
+    () => [...enhancedChartRows].reverse().find((row) => row.divergenceType),
+    [enhancedChartRows]
+  );
+  const sessionSummary = useMemo(
+    () => buildSessionSummary(enhancedChartRows),
+    [enhancedChartRows]
+  );
+  const latestStrongSignal = useMemo(
+    () => signals.find((signal) => signal.strength === "강") ?? signals[0],
+    [signals]
+  );
 
   useEffect(() => {
     if (!signalNotifyEnabled || !("Notification" in window) || Notification.permission !== "granted") return;
@@ -1963,6 +1994,8 @@ function MiniChart({
         style={{
           cursor: onChartWheel ? "zoom-in" : "default",
           touchAction: onChartWheel ? "none" : "auto",
+          transform: "translateZ(0)",
+          willChange: "transform",
         }}
         title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
       >
@@ -2059,7 +2092,9 @@ function MiniChart({
               dataKey={line.key}
               name={line.name}
               stroke={line.color}
-              strokeWidth={1.6}
+              strokeWidth={1.75}
+              strokeLinecap="round"
+              strokeLinejoin="round"
               dot={(props) =>
                 chartMarkerDot(
                   props,
@@ -2445,9 +2480,10 @@ function isRecentStrongSignal(signal: SignalItem) {
 }
 
 function SignalBox({ signals }: { signals: SignalItem[] }) {
-  const filteredSignals = signals
-    .filter(isRecentStrongSignal)
-    .slice(0, 10);
+  const filteredSignals = useMemo(
+    () => signals.filter(isRecentStrongSignal).slice(0, 10),
+    [signals]
+  );
 
   return (
     <div
