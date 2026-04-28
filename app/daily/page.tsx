@@ -1869,6 +1869,63 @@ type ChartLineConfig = {
   color: string;
 };
 
+function ChartLegend({ items }: { items: ChartLineConfig[] }) {
+  if (!items.length) return null;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 6,
+        right: 8,
+        zIndex: 10,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        gap: 7,
+        flexWrap: "wrap",
+        maxWidth: "78%",
+        pointerEvents: "none",
+      }}
+    >
+      {items.map((item) => (
+        <div
+          key={`${item.key}-${item.name}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            padding: "3px 7px",
+            borderRadius: 999,
+            border: "1px solid rgba(148, 163, 184, 0.22)",
+            background: "rgba(2, 6, 23, 0.68)",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 8px 18px rgba(0,0,0,0.22)",
+            color: "#e5e7eb",
+            fontSize: 10.5,
+            fontWeight: 900,
+            lineHeight: 1,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: item.color,
+              boxShadow: `0 0 10px ${item.color}88`,
+              display: "inline-block",
+              flex: "0 0 auto",
+            }}
+          />
+          <span>{item.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ModernTooltip({ active, payload, label }: any) {
   if (!active || !payload || payload.length === 0) return null;
 
@@ -2032,6 +2089,7 @@ function MiniChart({
       <div
         onWheel={onChartWheel}
         style={{
+          position: "relative",
           cursor: onChartWheel ? "zoom-in" : "default",
           touchAction: onChartWheel ? "none" : "auto",
           transform: "translate3d(0, 0, 0)",
@@ -2041,6 +2099,7 @@ function MiniChart({
         }}
         title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
       >
+      <ChartLegend items={lines} />
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart
           data={data}
@@ -2205,6 +2264,7 @@ function ChartBox({
   return (
     <div
       style={{
+        position: "relative",
         background:
           "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
         border: "1px solid rgba(148, 163, 184, 0.16)",
