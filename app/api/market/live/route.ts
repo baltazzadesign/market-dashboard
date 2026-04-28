@@ -286,7 +286,8 @@ async function getLatestNormalBreadthRowFromSupabase(createdat?: string) {
 
     for (const row of rows) {
       const normalized = normalizeSavedRow(row);
-      if (isNormalBreadthRow(normalized) && isRegularMarketTime(normalized.time ?? "")) return normalized;
+      const normalizedTime = String((normalized as any).time ?? "");
+      if (isNormalBreadthRow(normalized) && isRegularMarketTime(normalizedTime)) return normalized;
     }
 
     return null;
