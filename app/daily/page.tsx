@@ -889,11 +889,8 @@ export default function DailyPage() {
   async function loadData(dateValue = selectedDate) {
     const dateQuery = dateValue ? `?date=${dateValue}` : "";
 
-    // 오늘/실시간 화면일 때만 live를 호출해서 1분 기록을 갱신합니다.
-    // 과거 날짜 조회 중에는 새 기록을 만들지 않고 DB에 저장된 데이터만 가져옵니다.
-    if (isTodayDate(dateValue)) {
-      await fetch("/api/market/live", { cache: "no-store" });
-    }
+    // Vercel Cron이 /api/market/live를 1분마다 실행해 DB에 저장합니다.
+    // 페이지에서는 KIS API를 직접 호출하지 않고 저장된 DB 데이터만 조회합니다.
 
     const res = await fetch(`/api/market/daily${dateQuery}`, { cache: "no-store" });
     const json = await res.json();

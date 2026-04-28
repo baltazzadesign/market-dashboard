@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 function getKstTime() {
   return new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
@@ -1136,7 +1139,20 @@ function buildFinalAlertLevel(alert: string, signals: MarketSignal[]) {
   return buildAlertLevel(alert);
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (cronSecret) {
+    const auth = req.headers.get("authorization") ?? "";
+    const url = new URL(req.url);
+    const querySecret = url.searchParams.get("secret") ?? "";
+    const isAuthorized = auth === `Bearer ${cronSecret}` || querySecret === cronSecret;
+
+    if (!isAuthorized) {
+      return Response.json({ ok: false, error: "UNAUTHORIZED_CRON" }, { status: 401 });
+    }
+  }
+
   try {
     const now = new Date();
 
