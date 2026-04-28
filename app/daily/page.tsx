@@ -924,6 +924,7 @@ export default function DailyPage() {
       )}
 
       <div
+        className="daily-main-layout"
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(0, 1fr) minmax(420px, 560px)",
@@ -932,14 +933,18 @@ export default function DailyPage() {
         }}
       >
         <div
+          className="daily-table-scroll"
           style={{
             maxHeight: "calc(100vh - 220px)",
-            overflow: "auto",
-            border: "1px solid rgba(148, 163, 184, 0.16)",
-            borderRadius: 18,
-            background: "rgba(15, 23, 42, 0.54)",
-            backdropFilter: "blur(16px)",
-            boxShadow: "0 22px 60px rgba(0,0,0,0.35)",
+            overflowY: "auto",
+            overflowX: "auto",
+            border: "1px solid rgba(56, 189, 248, 0.18)",
+            borderRadius: 22,
+            background:
+              "linear-gradient(145deg, rgba(15,23,42,0.78), rgba(2,6,23,0.68))",
+            backdropFilter: "blur(18px)",
+            boxShadow:
+              "0 22px 70px rgba(0,0,0,0.46), inset 0 1px 0 rgba(255,255,255,0.04)",
           }}
         >
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
@@ -1006,6 +1011,7 @@ export default function DailyPage() {
         </div>
 
         <div
+          className="daily-chart-panel"
           style={{
             position: "sticky",
             top: 20,
@@ -1014,7 +1020,7 @@ export default function DailyPage() {
             gap: 16,
             minWidth: 0,
             maxWidth: "100%",
-            overflow: "hidden",
+            overflow: "visible",
           }}
         >
           <MiniChart
@@ -1069,6 +1075,44 @@ export default function DailyPage() {
           <SignalBox signals={signals} />
         </div>
       </div>
+
+      <style jsx global>{`
+        .daily-table-scroll::-webkit-scrollbar {
+          width: 7px;
+          height: 7px;
+        }
+
+        .daily-table-scroll::-webkit-scrollbar-track {
+          background: rgba(15, 23, 42, 0.34);
+          border-radius: 999px;
+        }
+
+        .daily-table-scroll::-webkit-scrollbar-thumb {
+          background: linear-gradient(180deg, #0ea5e9, #2563eb 55%, #7c3aed);
+          border-radius: 999px;
+          box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+        }
+
+        .daily-table-scroll::-webkit-scrollbar-thumb:hover {
+          background: linear-gradient(180deg, #38bdf8, #3b82f6 55%, #8b5cf6);
+        }
+
+        .daily-table-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: #2563eb rgba(15, 23, 42, 0.34);
+        }
+
+        @media (max-width: 1180px) {
+          .daily-main-layout {
+            grid-template-columns: 1fr !important;
+          }
+
+          .daily-chart-panel {
+            position: relative !important;
+            top: auto !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -1106,21 +1150,106 @@ function ModernTooltip({ active, payload, label }: any) {
   );
 }
 
+function reboundDot(props: any, data: any[], dataKey: string) {
+  const { cx, cy, payload, index } = props;
+
+  if (index < 2 || cx === undefined || cy === undefined || !payload) return null;
+
+  const prev = Number(data[index - 1]?.[dataKey]);
+  const prev2 = Number(data[index - 2]?.[dataKey]);
+  const curr = Number(payload[dataKey]);
+
+  if (!Number.isFinite(prev) || !Number.isFinite(prev2) || !Number.isFinite(curr)) {
+    return null;
+  }
+
+  // 직전 값이 저점을 만들고 현재 값이 다시 올라오는 구간을 노란 원형 포인트로 표시합니다.
+  if (prev < prev2 && curr > prev) {
+    return (
+      <circle
+        cx={cx}
+        cy={cy}
+        r={4.8}
+        fill="#facc15"
+        stroke="rgba(2, 6, 23, 0.98)"
+        strokeWidth={1.4}
+        style={{ filter: "drop-shadow(0 0 7px rgba(250, 204, 21, 0.95))" }}
+      />
+    );
+  }
+
+  return null;
+}
+
 function MiniChart({ title, data, lines, height = 200, domain, referenceLines = [] }: { title: string; data: any[]; lines: ChartLineConfig[]; height?: number; domain?: any; referenceLines?: number[] }) {
   return (
     <ChartBox title={title}>
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-          <CartesianGrid stroke="rgba(148, 163, 184, 0.10)" vertical={false} />
-          <XAxis dataKey="timeLabel" stroke="rgba(203, 213, 225, 0.58)" fontSize={10} tickLine={false} axisLine={{ stroke: "rgba(148, 163, 184, 0.16)" }} minTickGap={36} />
-          <YAxis stroke="rgba(203, 213, 225, 0.58)" fontSize={10} tickLine={false} axisLine={false} width={42} domain={domain ?? ["auto", "auto"]} />
+        <LineChart data={data} margin={{ top: 14, right: 28, left: 22, bottom: 2 }}>
+          <defs>
+            <filter id={`chartGlow-${title.replace(/[^a-zA-Z0-9]/g, "")}`} x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="2.3" result="coloredBlur" />
+              <feMerge>
+                <feMergeNode in="coloredBlur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          <CartesianGrid stroke="rgba(148, 163, 184, 0.11)" vertical={false} strokeDasharray="3 8" />
+          <XAxis
+            dataKey="timeLabel"
+            stroke="rgba(203, 213, 225, 0.62)"
+            fontSize={10}
+            tickLine={false}
+            axisLine={{ stroke: "rgba(148, 163, 184, 0.18)" }}
+            minTickGap={36}
+          />
+          <YAxis
+            stroke="rgba(203, 213, 225, 0.62)"
+            fontSize={10}
+            tickLine={false}
+            axisLine={false}
+            width={58}
+            domain={domain ?? ["auto", "auto"]}
+            tickMargin={8}
+          />
           <Tooltip content={<ModernTooltip />} />
-          <Legend iconType="plainline" wrapperStyle={{ color: "#cbd5e1", fontSize: 11, paddingTop: 2, fontWeight: 800 }} />
+          <Legend
+            iconType="plainline"
+            wrapperStyle={{
+              color: "#cbd5e1",
+              fontSize: 11,
+              paddingTop: 2,
+              fontWeight: 800,
+            }}
+          />
           {referenceLines.map((value) => (
-            <ReferenceLine key={value} y={value} stroke={value === 0 ? "rgba(148, 163, 184, 0.34)" : "rgba(148, 163, 184, 0.22)"} strokeDasharray="3 5" />
+            <ReferenceLine
+              key={value}
+              y={value}
+              stroke={value === 0 ? "rgba(226, 232, 240, 0.38)" : "rgba(148, 163, 184, 0.22)"}
+              strokeDasharray="4 6"
+            />
           ))}
           {lines.map((line) => (
-            <Line key={line.key} type="monotone" dataKey={line.key} name={line.name} stroke={line.color} strokeWidth={1.35} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} connectNulls />
+            <Line
+              key={line.key}
+              type="monotone"
+              dataKey={line.key}
+              name={line.name}
+              stroke={line.color}
+              strokeWidth={2.05}
+              dot={(props) => reboundDot(props, data, line.key)}
+              activeDot={{
+                r: 5,
+                strokeWidth: 2,
+                stroke: "rgba(255,255,255,0.9)",
+                fill: line.color,
+              }}
+              isAnimationActive={false}
+              connectNulls
+              style={{ filter: `drop-shadow(0 0 7px ${line.color}66)` }}
+            />
           ))}
         </LineChart>
       </ResponsiveContainer>
@@ -1166,15 +1295,28 @@ function ChartBox({
     <div
       style={{
         background:
-          "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.58))",
-        border: "1px solid rgba(148, 163, 184, 0.16)",
-        borderRadius: 18,
-        padding: 14,
-        boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
-        backdropFilter: "blur(16px)",
+          "radial-gradient(circle at top left, rgba(56,189,248,0.12), transparent 38%), radial-gradient(circle at bottom right, rgba(168,85,247,0.12), transparent 42%), linear-gradient(145deg, rgba(15,23,42,0.92), rgba(2,6,23,0.76))",
+        border: "1px solid rgba(255, 255, 255, 0.08)",
+        borderRadius: 22,
+        padding: 16,
+        boxShadow:
+          "0 20px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)",
+        backdropFilter: "blur(18px)",
+        overflow: "visible",
       }}
     >
-      <h3 style={{ fontSize: 13, color: "#e5e7eb", margin: "0 0 12px", fontWeight: 900, letterSpacing: 0.15 }}>{title}</h3>
+      <h3
+        style={{
+          fontSize: 13,
+          color: "#f8fafc",
+          margin: "0 0 12px",
+          fontWeight: 950,
+          letterSpacing: 0.15,
+          textShadow: "0 0 16px rgba(56,189,248,0.18)",
+        }}
+      >
+        {title}
+      </h3>
       {children}
     </div>
   );
