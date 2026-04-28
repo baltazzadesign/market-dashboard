@@ -922,16 +922,14 @@ export default function DailyPage() {
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center",
+          alignItems: "flex-start",
           gap: 12,
-          marginBottom: 20,
-          position: "sticky",
-          top: 0,
-          zIndex: 20,
-          background: "rgba(2, 6, 23, 0.84)",
-          backdropFilter: "blur(18px)",
-          borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
-          padding: "10px 0 14px",
+          marginBottom: 18,
+          position: "relative",
+          background: "transparent",
+          backdropFilter: "none",
+          borderBottom: "none",
+          padding: "0 0 2px",
         }}
       >
         <div>
@@ -941,7 +939,26 @@ export default function DailyPage() {
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div
+          className="daily-floating-date"
+          style={{
+            position: "fixed",
+            top: 18,
+            right: 24,
+            zIndex: 80,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px",
+            border: "1px solid rgba(56, 189, 248, 0.30)",
+            borderRadius: 999,
+            background:
+              "linear-gradient(145deg, rgba(15,23,42,0.62), rgba(2,6,23,0.46))",
+            backdropFilter: "blur(14px)",
+            boxShadow:
+              "0 12px 34px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05)",
+          }}
+        >
           {selectedDate && (
             <button
               onClick={() => setSelectedDate("")}
@@ -964,11 +981,11 @@ export default function DailyPage() {
               display: "flex",
               alignItems: "center",
               gap: 8,
-              border: "1px solid #38bdf8",
-              background: "rgba(56, 189, 248, 0.10)",
+              border: "1px solid rgba(56, 189, 248, 0.42)",
+              background: "rgba(56, 189, 248, 0.08)",
               color: "#e5e7eb",
               borderRadius: 999,
-              padding: "8px 12px",
+              padding: "7px 11px",
               fontSize: 13,
               fontWeight: 800,
               cursor: "pointer",
@@ -1533,6 +1550,15 @@ export default function DailyPage() {
         .daily-table-scroll {
           scrollbar-width: thin;
           scrollbar-color: #2563eb rgba(15, 23, 42, 0.34);
+        }
+
+        @media (max-width: 760px) {
+          .daily-floating-date {
+            right: 12px !important;
+            top: 12px !important;
+            transform: scale(0.92);
+            transform-origin: top right;
+          }
         }
 
         @media (max-width: 1180px) {
