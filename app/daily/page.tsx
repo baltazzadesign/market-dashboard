@@ -1173,7 +1173,7 @@ export default function DailyPage() {
         }}
       >
         <div>
-          <h1 style={{ margin: 0 }}>📊 DAILY LOG</h1>
+          <h1 style={{ margin: 0 }}>Baltazza DAILY LOG 1.0ver</h1>
           <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
             {selectedDate ? `${selectedDate} 저장 데이터 조회 중` : "오늘 실시간 데이터 조회 중"}
           </div>
