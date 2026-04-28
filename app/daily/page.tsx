@@ -1942,7 +1942,7 @@ function ChartLegend({ items }: { items: ChartLineConfig[] }) {
   );
 }
 
-function ModernTooltipfunction ModernTooltip({ active, payload, label }: any) {
+function ModernTooltip({ active, payload, label }: any) {
   if (!active || !payload || payload.length === 0) return null;
 
   const displayLabel = typeof label === "number" ? minuteToTimeLabel(label) : label;
@@ -2114,7 +2114,8 @@ function MiniChart({
           contain: "layout paint style",
         }}
         title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
-      >      <ResponsiveContainer width="100%" height={height}>
+      >
+        <ResponsiveContainer width="100%" height={height}>
         <ComposedChart
           data={data}
           margin={{ top: 12, right: 22, left: 20, bottom: 0 }}
@@ -2322,7 +2323,7 @@ function ChartBox({
   );
 }
 
-function FlowStatusPanelfunction FlowStatusPanel({
+function FlowStatusPanel({
   row,
   prev,
 }: {
