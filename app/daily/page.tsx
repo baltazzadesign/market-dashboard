@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
-  LineChart,
+  ComposedChart,
   Line,
   Area,
   XAxis,
@@ -701,6 +701,23 @@ function makeAlerts(rows: Row[]) {
   return alerts.slice(-8).reverse();
 }
 
+function getIndexChangeInfo(value?: number, prevValue?: number) {
+  const current = Number(value ?? 0);
+  const prev = Number(prevValue ?? 0);
+
+  if (!Number.isFinite(current) || !Number.isFinite(prev) || prev <= 0) {
+    return { diff: 0, pct: 0, color: "#94a3b8", icon: "▲" };
+  }
+
+  const diff = current - prev;
+  const pct = (diff / prev) * 100;
+
+  if (diff > 0) return { diff, pct, color: "#22c55e", icon: "▲" };
+  if (diff < 0) return { diff, pct, color: "#ef4444", icon: "▼" };
+
+  return { diff, pct, color: "#94a3b8", icon: "▲" };
+}
+
 function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
   return data.map((row, index) => {
     const prev = index > 0 ? data[index - 1] : null;
@@ -1162,8 +1179,8 @@ export default function DailyPage() {
                   <td style={{ ...td, color: "#f59e0b" }}>{row.accel ?? 0}</td>
                   <td style={td}>{(Number(row.upRatio) * 100).toFixed(2)}%</td>
                   <td style={td}>{(Number(row.downRatio) * 100).toFixed(2)}%</td>
-                  <td style={td}>{Number(row.kospi).toLocaleString()}</td>
-                  <td style={td}>{Number(row.kosdaq).toLocaleString()}</td>
+                  <IndexCell value={row.kospi} prevValue={flowDisplayRows[index - 1]?.kospi} />
+                  <IndexCell value={row.kosdaq} prevValue={flowDisplayRows[index - 1]?.kosdaq} />
                   <td style={{ ...td, color: Number(row.foreignFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa" }}>
                     {formatFlow(Number(row.foreignFlow ?? 0))}
                   </td>
@@ -1345,6 +1362,7 @@ export default function DailyPage() {
             title="2. Breadth Ratio · 상승/하락 비율"
             data={enhancedChartRows}
             height={220}
+            referenceLines={[0]}
             domain={[0, 80]}
             lines={[
               { key: "upRatioPct", name: "상승비율", color: "#ef4444" },
@@ -1376,6 +1394,7 @@ export default function DailyPage() {
             title="4. KOSPI 지수"
             data={enhancedChartRows}
             height={220}
+            referenceLines={[0]}
             domain={["auto", "auto"]}
             lines={[{ key: "kospi", name: "KOSPI", color: "#facc15" }]}
             showRebound={showRebound}
@@ -1388,6 +1407,7 @@ export default function DailyPage() {
             title="5. KOSDAQ 지수"
             data={enhancedChartRows}
             height={220}
+            referenceLines={[0]}
             domain={["auto", "auto"]}
             lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
             showRebound={showRebound}
@@ -1479,12 +1499,12 @@ export default function DailyPage() {
             </div>
 
             <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
-            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
+            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} referenceLines={[0]} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
             <div style={{ gridColumn: "1 / -1" }}>
               <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
             </div>
-            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
-            <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
+            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
+            <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
           </div>
         </div>
       )}
@@ -1691,8 +1711,15 @@ function MiniChart({
         title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
       >
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 12, right: 22, left: 20, bottom: 0 }}>
+        <ComposedChart data={data} margin={{ top: 12, right: 22, left: 20, bottom: 0 }}>
           <defs>
+            {lines.map((line) => (
+              <linearGradient key={`gradient-${line.key}`} id={`areaGradient-${chartId}-${line.key}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={line.color} stopOpacity={0.30} />
+                <stop offset="55%" stopColor={line.color} stopOpacity={0.10} />
+                <stop offset="100%" stopColor={line.color} stopOpacity={0.02} />
+              </linearGradient>
+            ))}
             <filter id={`chartGlow-${chartId}`} x="-30%" y="-30%" width="160%" height="160%">
               <feGaussianBlur stdDeviation="2.3" result="coloredBlur" />
               <feMerge>
@@ -1742,6 +1769,18 @@ function MiniChart({
               strokeDasharray="4 6"
             />
           ))}
+          {lines.map((line) => (
+            <Area
+              key={`area-${line.key}`}
+              type="monotone"
+              dataKey={line.key}
+              stroke="none"
+              fill={`url(#areaGradient-${chartId}-${line.key})`}
+              fillOpacity={1}
+              isAnimationActive={false}
+              connectNulls
+            />
+          ))}
           {lines.map((line, lineIndex) => (
             <Line
               key={line.key}
@@ -1772,7 +1811,7 @@ function MiniChart({
               connectNulls
             />
           ))}
-        </LineChart>
+        </ComposedChart>
       </ResponsiveContainer>
       </div>
     </ChartBox>
@@ -1957,6 +1996,34 @@ function FlowMiniCard({
         </div>
       )}
     </div>
+  );
+}
+
+function IndexCell({ value, prevValue }: { value: number; prevValue?: number }) {
+  const info = getIndexChangeInfo(value, prevValue);
+  const hasPrev = Number(prevValue ?? 0) > 0;
+
+  return (
+    <td style={td}>
+      <div style={{ fontWeight: 900, color: "#f8fafc" }}>
+        {Number(value ?? 0).toLocaleString()}
+      </div>
+      {hasPrev && (
+        <div
+          style={{
+            marginTop: 3,
+            fontSize: 10.5,
+            fontWeight: 900,
+            color: info.color,
+            lineHeight: 1.15,
+            textShadow: `0 0 10px ${info.color}33`,
+          }}
+        >
+          {info.icon} {Math.abs(info.diff).toFixed(2)} ({info.pct >= 0 ? "+" : "-"}
+          {Math.abs(info.pct).toFixed(2)}%)
+        </div>
+      )}
+    </td>
   );
 }
 
