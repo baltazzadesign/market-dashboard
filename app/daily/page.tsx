@@ -127,6 +127,51 @@ function minuteToTimeLabel(value: any) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+function clampMinuteDomain(start: number, end: number): [number, number] {
+  const totalRange = MARKET_CLOSE_MINUTE - MARKET_OPEN_MINUTE;
+  const minRange = 30;
+  let nextStart = Number(start);
+  let nextEnd = Number(end);
+
+  if (!Number.isFinite(nextStart) || !Number.isFinite(nextEnd)) {
+    return [MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE];
+  }
+
+  let range = nextEnd - nextStart;
+  if (range < minRange) {
+    const center = (nextStart + nextEnd) / 2;
+    nextStart = center - minRange / 2;
+    nextEnd = center + minRange / 2;
+    range = minRange;
+  }
+
+  if (range >= totalRange) {
+    return [MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE];
+  }
+
+  if (nextStart < MARKET_OPEN_MINUTE) {
+    nextEnd += MARKET_OPEN_MINUTE - nextStart;
+    nextStart = MARKET_OPEN_MINUTE;
+  }
+
+  if (nextEnd > MARKET_CLOSE_MINUTE) {
+    nextStart -= nextEnd - MARKET_CLOSE_MINUTE;
+    nextEnd = MARKET_CLOSE_MINUTE;
+  }
+
+  nextStart = Math.max(MARKET_OPEN_MINUTE, nextStart);
+  nextEnd = Math.min(MARKET_CLOSE_MINUTE, nextEnd);
+
+  return [Math.round(nextStart), Math.round(nextEnd)];
+}
+
+function getTicksForDomain(domain?: [number, number]) {
+  if (!domain) return MARKET_TIME_TICKS;
+  const ticks = MARKET_TIME_TICKS.filter((tick) => tick >= domain[0] && tick <= domain[1]);
+  if (ticks.length >= 2) return ticks;
+  return [Math.round(domain[0]), Math.round(domain[1])];
+}
+
 function clampChartValue(value: any, limit = 120000) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return 0;
@@ -712,6 +757,10 @@ export default function DailyPage() {
   const [showAccumulationDivergence, setShowAccumulationDivergence] = useState(true);
   const [showSignalMarker, setShowSignalMarker] = useState(true);
   const [chartPanelFullscreen, setChartPanelFullscreen] = useState(false);
+  const [chartZoomDomain, setChartZoomDomain] = useState<[number, number]>([
+    MARKET_OPEN_MINUTE,
+    MARKET_CLOSE_MINUTE,
+  ]);
 
   async function loadData(dateValue = selectedDate) {
     const dateQuery = dateValue ? `?date=${dateValue}` : "";
@@ -760,6 +809,33 @@ export default function DailyPage() {
 
     return () => clearInterval(interval);
   }, [selectedDate]);
+
+  const resetChartZoom = () => {
+    setChartZoomDomain([MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE]);
+  };
+
+  const handleFullscreenChartWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const [start, end] = chartZoomDomain;
+    const currentRange = end - start;
+    const totalRange = MARKET_CLOSE_MINUTE - MARKET_OPEN_MINUTE;
+
+    if (currentRange <= 0) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const rawRatio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
+    const anchorRatio = Math.max(0.05, Math.min(0.95, rawRatio));
+    const anchorMinute = start + currentRange * anchorRatio;
+
+    const zoomFactor = event.deltaY < 0 ? 0.82 : 1.22;
+    const nextRange = Math.max(30, Math.min(totalRange, currentRange * zoomFactor));
+    const nextStart = anchorMinute - nextRange * anchorRatio;
+    const nextEnd = nextStart + nextRange;
+
+    setChartZoomDomain(clampMinuteDomain(nextStart, nextEnd));
+  };
 
   const flowDisplayRows = buildRowsWithFlowFallback(rows);
 
@@ -1363,8 +1439,27 @@ export default function DailyPage() {
             >
               <div>
                 <div style={{ fontSize: 20, fontWeight: 950, color: "#f8fafc" }}>CHART PANEL 전체보기</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8" }}>반등 {showRebound ? "ON" : "OFF"} / 위험 {showDangerDivergence ? "ON" : "OFF"} / 매집 {showAccumulationDivergence ? "ON" : "OFF"} / SIGNAL {showSignalMarker ? "ON" : "OFF"}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8" }}>
+                  반등 {showRebound ? "ON" : "OFF"} / 위험 {showDangerDivergence ? "ON" : "OFF"} / 매집 {showAccumulationDivergence ? "ON" : "OFF"} / SIGNAL {showSignalMarker ? "ON" : "OFF"}
+                  <span style={{ color: "#38bdf8", marginLeft: 10 }}>휠 확대 {minuteToTimeLabel(chartZoomDomain[0])}~{minuteToTimeLabel(chartZoomDomain[1])}</span>
+                </div>
               </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  onClick={resetChartZoom}
+                  style={{
+                    border: "1px solid rgba(56,189,248,0.32)",
+                    background: "rgba(15,23,42,0.92)",
+                    color: "#bae6fd",
+                    borderRadius: 999,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  줌 초기화
+                </button>
               <button
                 onClick={() => setChartPanelFullscreen(false)}
                 style={{
@@ -1380,15 +1475,16 @@ export default function DailyPage() {
               >
                 닫기
               </button>
+              </div>
             </div>
 
-            <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
-            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
+            <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
+            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
             <div style={{ gridColumn: "1 / -1" }}>
-              <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
+              <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
             </div>
-            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
-            <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} />
+            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
+            <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} />
           </div>
         </div>
       )}
@@ -1564,6 +1660,8 @@ function MiniChart({
   showDangerDivergence = true,
   showAccumulationDivergence = true,
   showSignalMarker = true,
+  xDomain,
+  onChartWheel,
 }: {
   title: string;
   data: any[];
@@ -1575,11 +1673,23 @@ function MiniChart({
   showDangerDivergence?: boolean;
   showAccumulationDivergence?: boolean;
   showSignalMarker?: boolean;
+  xDomain?: [number, number];
+  onChartWheel?: (event: React.WheelEvent<HTMLDivElement>) => void;
 }) {
   const chartId = title.replace(/[^a-zA-Z0-9]/g, "");
+  const activeXDomain: [number, number] = xDomain ?? [MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE];
+  const activeXTicks = getTicksForDomain(activeXDomain);
 
   return (
     <ChartBox title={title}>
+      <div
+        onWheel={onChartWheel}
+        style={{
+          cursor: onChartWheel ? "zoom-in" : "default",
+          touchAction: onChartWheel ? "none" : "auto",
+        }}
+        title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
+      >
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={data} margin={{ top: 12, right: 22, left: 20, bottom: 0 }}>
           <defs>
@@ -1595,8 +1705,8 @@ function MiniChart({
           <XAxis
             dataKey="timeMinuteValue"
             type="number"
-            domain={[MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE]}
-            ticks={MARKET_TIME_TICKS}
+            domain={activeXDomain}
+            ticks={activeXTicks}
             tickFormatter={minuteToTimeLabel}
             interval={0}
             allowDataOverflow
@@ -1664,6 +1774,7 @@ function MiniChart({
           ))}
         </LineChart>
       </ResponsiveContainer>
+      </div>
     </ChartBox>
   );
 }
