@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, WheelEvent } from "react";
 import {
   ComposedChart,
@@ -774,6 +774,25 @@ function getIndexChangeInfo(value?: number, prevValue?: number) {
   return { diff, pct, color: "#94a3b8", icon: "▲" };
 }
 
+function downsampleChartRows<T extends { timeMinuteValue?: number; signalMarkerColor?: string; divergenceType?: string }>(data: T[], maxPoints = 520) {
+  if (data.length <= maxPoints) return data;
+
+  const keep = new Set<number>();
+  const step = Math.ceil(data.length / maxPoints);
+
+  keep.add(0);
+  keep.add(data.length - 1);
+
+  data.forEach((row, index) => {
+    if (index % step === 0) keep.add(index);
+    if (row.signalMarkerColor || row.divergenceType) keep.add(index);
+  });
+
+  return Array.from(keep)
+    .sort((a, b) => a - b)
+    .map((index) => data[index]);
+}
+
 function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
   return data.map((row, index) => {
     const prev = index > 0 ? data[index - 1] : null;
@@ -864,6 +883,7 @@ export default function DailyPage() {
   const [dragEndMinute, setDragEndMinute] = useState<number | null>(null);
   const [signalNotifyEnabled, setSignalNotifyEnabled] = useState(false);
   const notifiedSignalRef = useRef<string>("");
+  const chartHoverRafRef = useRef<number | null>(null);
 
   async function loadData(dateValue = selectedDate) {
     const dateQuery = dateValue ? `?date=${dateValue}` : "";
@@ -913,6 +933,14 @@ export default function DailyPage() {
     return () => clearInterval(interval);
   }, [selectedDate]);
 
+  useEffect(() => {
+    return () => {
+      if (chartHoverRafRef.current !== null) {
+        cancelAnimationFrame(chartHoverRafRef.current);
+      }
+    };
+  }, []);
+
   const resetChartZoom = () => {
     setChartZoomDomain([MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE]);
   };
@@ -943,10 +971,18 @@ export default function DailyPage() {
 
   const handleChartMouseMove = (event: any) => {
     const activeMinute = getActiveLabelFromChartEvent(event);
-    setHoverMinute((prev) => (prev === activeMinute ? prev : activeMinute));
-    if (dragStartMinute !== null && activeMinute !== null) {
-      setDragEndMinute((prev) => (prev === activeMinute ? prev : activeMinute));
+
+    if (chartHoverRafRef.current !== null) {
+      cancelAnimationFrame(chartHoverRafRef.current);
     }
+
+    chartHoverRafRef.current = requestAnimationFrame(() => {
+      setHoverMinute((prev) => (prev === activeMinute ? prev : activeMinute));
+
+      if (dragStartMinute !== null && activeMinute !== null) {
+        setDragEndMinute((prev) => (prev === activeMinute ? prev : activeMinute));
+      }
+    });
   };
 
   const handleChartMouseLeave = () => {
@@ -1065,17 +1101,21 @@ export default function DailyPage() {
     [dbSignals, localSignals]
   );
   const sigSummary = useMemo(() => signalSummary(signals), [signals]);
-  const enhancedChartRows = useMemo(
+  const enhancedChartRowsFull = useMemo(
     () => buildEnhancedChartRows(visibleChartRows, signals),
     [visibleChartRows, signals]
   );
+  const enhancedChartRows = useMemo(
+    () => downsampleChartRows(enhancedChartRowsFull, 520),
+    [enhancedChartRowsFull]
+  );
   const latestDivergence = useMemo(
-    () => [...enhancedChartRows].reverse().find((row) => row.divergenceType),
-    [enhancedChartRows]
+    () => [...enhancedChartRowsFull].reverse().find((row) => row.divergenceType),
+    [enhancedChartRowsFull]
   );
   const sessionSummary = useMemo(
-    () => buildSessionSummary(enhancedChartRows),
-    [enhancedChartRows]
+    () => buildSessionSummary(enhancedChartRowsFull),
+    [enhancedChartRowsFull]
   );
   const latestStrongSignal = useMemo(
     () => signals.find((signal) => signal.strength === "강") ?? signals[0],
@@ -1085,7 +1125,7 @@ export default function DailyPage() {
   useEffect(() => {
     if (!signalNotifyEnabled || !("Notification" in window) || Notification.permission !== "granted") return;
 
-    const latestDivergenceRow = [...enhancedChartRows].reverse().find((row) => row.divergenceType);
+    const latestDivergenceRow = [...enhancedChartRowsFull].reverse().find((row) => row.divergenceType);
     const target = latestStrongSignal
       ? {
           key: `signal-${latestStrongSignal.time}-${latestStrongSignal.type}-${latestStrongSignal.message}`,
@@ -1103,7 +1143,7 @@ export default function DailyPage() {
     if (!target || notifiedSignalRef.current === target.key) return;
     notifiedSignalRef.current = target.key;
     new Notification(target.title, { body: target.body });
-  }, [signalNotifyEnabled, latestStrongSignal, enhancedChartRows]);
+  }, [signalNotifyEnabled, latestStrongSignal, enhancedChartRowsFull]);
 
   return (
     <div
@@ -1594,7 +1634,7 @@ export default function DailyPage() {
             </div>
           ) : (
             <>
-          <MiniChart
+          <MemoMiniChart
             title="1. Net Breadth · 전체 상승-하락 폭"
             data={enhancedChartRows}
             height={220}
@@ -1609,7 +1649,7 @@ export default function DailyPage() {
             onHoverLeave={handleChartMouseLeave}
           />
 
-          <MiniChart
+          <MemoMiniChart
             title="2. Breadth Ratio · 상승/하락 비율"
             data={enhancedChartRows}
             height={220}
@@ -1628,7 +1668,7 @@ export default function DailyPage() {
             onHoverLeave={handleChartMouseLeave}
           />
 
-          <MiniChart
+          <MemoMiniChart
             title="3. Flow · 외국인 / 기관 / 개인 수급"
             data={enhancedChartRows}
             height={240}
@@ -1647,7 +1687,7 @@ export default function DailyPage() {
             onHoverLeave={handleChartMouseLeave}
           />
 
-          <MiniChart
+          <MemoMiniChart
             title="4. KOSPI 지수"
             data={enhancedChartRows}
             height={220}
@@ -1663,7 +1703,7 @@ export default function DailyPage() {
             onHoverLeave={handleChartMouseLeave}
           />
 
-          <MiniChart
+          <MemoMiniChart
             title="5. KOSDAQ 지수"
             data={enhancedChartRows}
             height={220}
@@ -1762,13 +1802,13 @@ export default function DailyPage() {
               </div>
             </div>
 
-            <MiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
-            <MiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} referenceLines={[0]} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+            <MemoMiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+            <MemoMiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} referenceLines={[0]} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
             <div style={{ gridColumn: "1 / -1" }}>
-              <MiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+              <MemoMiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
             </div>
-            <MiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
-            <MiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+            <MemoMiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+            <MemoMiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
           </div>
         </div>
       )}
@@ -1994,8 +2034,10 @@ function MiniChart({
         style={{
           cursor: onChartWheel ? "zoom-in" : "default",
           touchAction: onChartWheel ? "none" : "auto",
-          transform: "translateZ(0)",
+          transform: "translate3d(0, 0, 0)",
           willChange: "transform",
+          backfaceVisibility: "hidden",
+          contain: "layout paint style",
         }}
         title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
       >
@@ -2123,6 +2165,8 @@ function MiniChart({
     </ChartBox>
   );
 }
+
+const MemoMiniChart = memo(MiniChart);
 
 function SummaryCard({
   title,
