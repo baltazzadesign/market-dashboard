@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/market/live",
+      "schedule": "* * * * *"
+    }
+  ]
+}
