@@ -1843,6 +1843,11 @@ export default function DailyPage() {
           position: relative;
         }
 
+        .chart-header-legend button:hover {
+          transform: translateY(-1px);
+          border-color: rgba(226, 232, 240, 0.34) !important;
+        }
+
         @media (max-width: 760px) {
           .chart-box-header {
             align-items: flex-start !important;
@@ -1886,7 +1891,15 @@ type ChartLineConfig = {
   color: string;
 };
 
-function ChartLegend({ items }: { items: ChartLineConfig[] }) {
+function ChartLegend({
+  items,
+  hiddenLineKeys = [],
+  onToggleLine,
+}: {
+  items: ChartLineConfig[];
+  hiddenLineKeys?: string[];
+  onToggleLine?: (key: string) => void;
+}) {
   if (!items.length) return null;
 
   return (
@@ -1899,45 +1912,59 @@ function ChartLegend({ items }: { items: ChartLineConfig[] }) {
         gap: 8,
         flexWrap: "wrap",
         maxWidth: "58%",
-        pointerEvents: "none",
+        pointerEvents: "auto",
       }}
     >
-      {items.map((item) => (
-        <div
-          key={`${item.key}-${item.name}`}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "5px 9px",
-            borderRadius: 999,
-            border: "1px solid rgba(148, 163, 184, 0.24)",
-            background:
-              "linear-gradient(145deg, rgba(2,6,23,0.72), rgba(15,23,42,0.54))",
-            backdropFilter: "blur(12px)",
-            boxShadow:
-              "0 10px 24px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
-            color: "#e5e7eb",
-            fontSize: 10.5,
-            fontWeight: 950,
-            lineHeight: 1,
-            whiteSpace: "nowrap",
-          }}
-        >
-          <span
+      {items.map((item) => {
+        const isHidden = hiddenLineKeys.includes(item.key);
+
+        return (
+          <button
+            key={`${item.key}-${item.name}`}
+            type="button"
+            onClick={() => onToggleLine?.(item.key)}
+            title={`${item.name} ${isHidden ? "다시 표시" : "숨기기"}`}
             style={{
-              width: 8,
-              height: 8,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "5px 9px",
               borderRadius: 999,
-              background: item.color,
-              boxShadow: `0 0 12px ${item.color}99`,
-              display: "inline-block",
-              flex: "0 0 auto",
+              border: isHidden
+                ? "1px solid rgba(100, 116, 139, 0.24)"
+                : "1px solid rgba(148, 163, 184, 0.24)",
+              background: isHidden
+                ? "linear-gradient(145deg, rgba(15,23,42,0.54), rgba(2,6,23,0.44))"
+                : "linear-gradient(145deg, rgba(2,6,23,0.72), rgba(15,23,42,0.54))",
+              backdropFilter: "blur(12px)",
+              boxShadow: isHidden
+                ? "inset 0 1px 0 rgba(255,255,255,0.03)"
+                : "0 10px 24px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
+              color: isHidden ? "#64748b" : "#e5e7eb",
+              fontSize: 10.5,
+              fontWeight: 950,
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              cursor: "pointer",
+              opacity: isHidden ? 0.52 : 1,
+              transition: "opacity 0.16s ease, transform 0.16s ease, border-color 0.16s ease, color 0.16s ease",
             }}
-          />
-          <span>{item.name}</span>
-        </div>
-      ))}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: isHidden ? "#475569" : item.color,
+                boxShadow: isHidden ? "none" : `0 0 12px ${item.color}99`,
+                display: "inline-block",
+                flex: "0 0 auto",
+              }}
+            />
+            <span>{item.name}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -2099,9 +2126,28 @@ function MiniChart({
   const chartId = title.replace(/[^a-zA-Z0-9]/g, "");
   const activeXDomain: [number, number] = xDomain ?? [MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE];
   const activeXTicks = getTicksForDomain(activeXDomain);
+  const [hiddenLineKeys, setHiddenLineKeys] = useState<string[]>([]);
+
+  const visibleLines = useMemo(
+    () => lines.filter((line) => !hiddenLineKeys.includes(line.key)),
+    [lines, hiddenLineKeys]
+  );
+
+  const toggleLine = (key: string) => {
+    setHiddenLineKeys((prev) =>
+      prev.includes(key)
+        ? prev.filter((item) => item !== key)
+        : [...prev, key]
+    );
+  };
 
   return (
-    <ChartBox title={title} legend={lines}>
+    <ChartBox
+      title={title}
+      legend={lines}
+      hiddenLineKeys={hiddenLineKeys}
+      onToggleLine={toggleLine}
+    >
       <div
         onWheel={onChartWheel}
         style={{
@@ -2125,7 +2171,7 @@ function MiniChart({
           onMouseUp={onChartDragEnd}
         >
           <defs>
-            {lines.map((line) => (
+            {visibleLines.map((line) => (
               <linearGradient key={`gradient-${line.key}`} id={`areaGradient-${chartId}-${line.key}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={line.color} stopOpacity={0.30} />
                 <stop offset="55%" stopColor={line.color} stopOpacity={0.10} />
@@ -2189,7 +2235,7 @@ function MiniChart({
               ifOverflow="hidden"
             />
           )}
-          {lines.map((line) => (
+          {visibleLines.map((line) => (
             <Area
               key={`area-${line.key}`}
               type="monotone"
@@ -2201,7 +2247,10 @@ function MiniChart({
               connectNulls
             />
           ))}
-          {lines.map((line, lineIndex) => (
+          {visibleLines.map((line) => {
+            const originalLineIndex = lines.findIndex((item) => item.key === line.key);
+
+            return (
             <Line
               key={line.key}
               type="monotone"
@@ -2216,7 +2265,7 @@ function MiniChart({
                   props,
                   data,
                   line.key,
-                  lineIndex === 0,
+                  originalLineIndex === 0,
                   showRebound,
                   showDangerDivergence,
                   showAccumulationDivergence,
@@ -2232,7 +2281,8 @@ function MiniChart({
               isAnimationActive={false}
               connectNulls
             />
-          ))}
+            );
+          })}
         </ComposedChart>
       </ResponsiveContainer>
       </div>
@@ -2272,10 +2322,14 @@ function SummaryCard({
 function ChartBox({
   title,
   legend = [],
+  hiddenLineKeys = [],
+  onToggleLine,
   children,
 }: {
   title: string;
   legend?: ChartLineConfig[];
+  hiddenLineKeys?: string[];
+  onToggleLine?: (key: string) => void;
   children: ReactNode;
 }) {
   return (
@@ -2316,7 +2370,7 @@ function ChartBox({
         >
           {title}
         </h3>
-        <ChartLegend items={legend} />
+        <ChartLegend items={legend} hiddenLineKeys={hiddenLineKeys} onToggleLine={onToggleLine} />
       </div>
       {children}
     </div>
