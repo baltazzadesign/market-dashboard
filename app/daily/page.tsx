@@ -131,19 +131,19 @@ function clampChartNullable(value: any, limit = 120000) {
   return n;
 }
 
-function getSessionChartRows<T extends { timeLabel: string; up?: number; down?: number; kospi?: number; kosdaq?: number }>(rows: T[]) {
-  const regularRows = rows.filter((row) => {
-    const minute = timeToMinute(row.timeLabel);
-    return minute >= 8 * 60 + 50 && minute <= 15 * 60 + 40;
-  });
+function isRegularMarketTimeValue(time: string) {
+  const minute = timeToMinute(time);
+  return minute >= 9 * 60 && minute <= 15 * 60 + 30;
+}
 
-  const cleanRegularRows = regularRows.filter((row) => {
+function getSessionChartRows<T extends { timeLabel: string; up?: number; down?: number; kospi?: number; kosdaq?: number }>(rows: T[]) {
+  const regularRows = rows.filter((row) => isRegularMarketTimeValue(row.timeLabel));
+
+  return regularRows.filter((row) => {
     const hasBreadth = Number(row.up ?? 0) > 0 || Number(row.down ?? 0) > 0;
     const hasIndex = Number(row.kospi ?? 0) > 1000 || Number(row.kosdaq ?? 0) > 100;
     return hasBreadth && hasIndex;
   });
-
-  return cleanRegularRows.length > 3 ? cleanRegularRows : rows;
 }
 
 function getAlertColor(level?: string, fallback?: string) {
@@ -675,7 +675,10 @@ export default function DailyPage() {
     const json = await res.json();
 
     if (json.ok) {
-      setRows(json.rows ?? []);
+      const regularRows = (json.rows ?? []).filter((row: Row) =>
+        isRegularMarketTimeValue(row.time)
+      );
+      setRows(regularRows);
     }
 
     const alertRes = await fetch("/api/alerts", { cache: "no-store" });
@@ -782,7 +785,7 @@ export default function DailyPage() {
         <div>
           <h1 style={{ margin: 0 }}>📊 DAILY LOG</h1>
           <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
-            {selectedDate ? `${selectedDate} 저장 데이터 조회 중` : "오늘 실시간 데이터 조회 중"}
+            {selectedDate ? `${selectedDate} 정규장(09:00~15:30) 저장 데이터 조회 중` : "오늘 정규장(09:00~15:30) 실시간 데이터 조회 중"}
           </div>
         </div>
 

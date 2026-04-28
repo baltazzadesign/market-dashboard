@@ -38,6 +38,13 @@ type BreadthData = {
 const MIN_NORMAL_BREADTH_TOTAL = 1500;
 const BREADTH_DROP_FALLBACK_RATIO = 0.75;
 
+type BreadthSource = "LIVE" | "FALLBACK" | "SKIPPED";
+
+const MIN_NORMAL_BREADTH_TOTAL = 1500;
+const BREADTH_DROP_FALLBACK_RATIO = 0.75;
+const MARKET_OPEN_MINUTE = 9 * 60;
+const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
+
 type SignalLevel = "강" | "중" | "약";
 
 type SignalCategory = "FLOW" | "DIVERGENCE" | "ACCEL" | "SCORE" | "CROSS" | "TREND";
@@ -133,6 +140,33 @@ function normalizeMinuteValue(time: string) {
   const m = String(time).match(/(\d{1,2}):(\d{2})/);
   if (!m) return String(time);
   return `${m[1].padStart(2, "0")}:${m[2]}`;
+}
+
+function getMinutesFromHHmm(time: string) {
+  const normalized = normalizeMinuteValue(time);
+  const m = normalized.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return -1;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function isRegularMarketTime(time: string) {
+  const minutes = getMinutesFromHHmm(time);
+  return minutes >= MARKET_OPEN_MINUTE && minutes <= MARKET_CLOSE_MINUTE;
+}
+
+function getKstEightAmMs(date = new Date()) {
+  const kstDate = getKstDateString(date);
+  return new Date(`${kstDate}T08:00:00+09:00`).getTime();
+}
+
+function shouldRefreshTokenForToday(tokenRow: StoredKisToken | null, nowMs: number) {
+  const todayEightAmMs = getKstEightAmMs(new Date(nowMs));
+  if (nowMs < todayEightAmMs) return false;
+
+  const updatedAtMs = tokenRow?.updated_at ? new Date(tokenRow.updated_at).getTime() : 0;
+  const safeUpdatedAtMs = Number.isFinite(updatedAtMs) ? updatedAtMs : 0;
+
+  return safeUpdatedAtMs < todayEightAmMs;
 }
 
 type SavedLogRow = Partial<SupabaseLogPayload> & {
@@ -359,16 +393,19 @@ async function getAccessToken() {
 
   const now = Date.now();
 
+  const storedToken = await getStoredKisTokenFromSupabase();
+  const storedExpireMs = getStoredTokenExpireMs(storedToken);
+  const needsDailyRefresh = shouldRefreshTokenForToday(storedToken, now);
+
   // 1) 같은 서버리스 인스턴스 안에서는 메모리 캐시 재사용
-  if (cachedToken && now < cachedTokenExpireAt - KIS_TOKEN_REFRESH_BUFFER_MS) {
+  // 단, 한국시간 오전 8시 이후 오늘 발급 이력이 없으면 새 토큰을 발급합니다.
+  if (!needsDailyRefresh && cachedToken && now < cachedTokenExpireAt - KIS_TOKEN_REFRESH_BUFFER_MS) {
     return cachedToken;
   }
 
   // 2) Vercel 서버리스 인스턴스가 바뀌어도 Supabase 저장 토큰 재사용
-  const storedToken = await getStoredKisTokenFromSupabase();
-  const storedExpireMs = getStoredTokenExpireMs(storedToken);
-
   if (
+    !needsDailyRefresh &&
     storedToken?.access_token &&
     storedExpireMs &&
     now < storedExpireMs - KIS_TOKEN_REFRESH_BUFFER_MS
@@ -1116,6 +1153,7 @@ export async function GET() {
 
     const createdat = getKstDateString(now);
     const minuteKey = `${createdat} ${timeStr}`;
+    const isMarketTime = isRegularMarketTime(timeStr);
 
     const [kospiData, kosdaqData, rawFlowData, latestDbRow, latestNormalBreadthRow] = await Promise.all([
       fetchBreadth("0001"),
@@ -1252,7 +1290,7 @@ export async function GET() {
       id: null,
     };
 
-    if (isValidMarketSnapshot(rowToSave)) {
+    if (isMarketTime && isValidMarketSnapshot(rowToSave)) {
       lastSavedMinute = minuteKey;
 
       memoryRecentRows.push({
@@ -1273,8 +1311,9 @@ export async function GET() {
         indiv,
       });
     } else {
-      console.warn("⚠️ 비정상 데이터라 저장 생략:", {
+      console.warn(isMarketTime ? "⚠️ 비정상 데이터라 저장 생략:" : "⏸️ 정규장 시간이 아니라 저장 생략:", {
         time: timeStr,
+        marketSession: isMarketTime ? "REGULAR" : "OUT_OF_REGULAR_HOURS",
         up,
         down,
         flat,
@@ -1303,6 +1342,7 @@ export async function GET() {
       kospiDown: kospiData.down,
       kosdaqUp: kosdaqData.up,
       kosdaqDown: kosdaqData.down,
+      marketSession: isMarketTime ? "REGULAR" : "OUT_OF_REGULAR_HOURS",
       liveBreadthTotal: liveTotal,
       savedBreadthTotal: total,
       prevNormalBreadthTotal: prevNormalTotal,

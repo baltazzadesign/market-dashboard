@@ -39,6 +39,25 @@ async function supabaseRequest(path: string) {
   return res.json();
 }
 
+function normalizeMinuteValue(time: string) {
+  if (!time) return "";
+  const m = String(time).match(/(\d{1,2}):(\d{2})/);
+  if (!m) return String(time);
+  return `${m[1].padStart(2, "0")}:${m[2]}`;
+}
+
+function getMinutesFromHHmm(time: string) {
+  const normalized = normalizeMinuteValue(time);
+  const m = normalized.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return -1;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function isRegularMarketTime(time: string) {
+  const minutes = getMinutesFromHHmm(time);
+  return minutes >= 9 * 60 && minutes <= 15 * 60 + 30;
+}
+
 function normalizeRow(row: any) {
   const foreign = toNumber(row.foreign ?? row.foreignFlow ?? row.foreignflow ?? 0);
   const inst = toNumber(row.inst ?? row.instFlow ?? row.instflow ?? 0);
@@ -47,7 +66,7 @@ function normalizeRow(row: any) {
 
   return {
     id: row.id,
-    time: row.time ?? "",
+    time: normalizeMinuteValue(row.time ?? ""),
     up: toNumber(row.up),
     down: toNumber(row.down),
     flat: toNumber(row.flat),
@@ -96,17 +115,19 @@ export async function GET(req: Request) {
       rows = await supabaseRequest(
         `/rest/v1/logs?select=*&created_at=gte.${encodeURIComponent(
           start
-        )}&created_at=lte.${encodeURIComponent(end)}&order=id.asc&limit=420`
+        )}&created_at=lte.${encodeURIComponent(end)}&order=id.asc&limit=600`
       );
     } else {
       const latestRows = await supabaseRequest(
-        "/rest/v1/logs?select=*&order=id.desc&limit=420"
+        "/rest/v1/logs?select=*&order=id.desc&limit=600"
       );
 
       rows = Array.isArray(latestRows) ? latestRows.reverse() : [];
     }
 
-    const data = Array.isArray(rows) ? rows.map(normalizeRow) : [];
+    const data = Array.isArray(rows)
+      ? rows.map(normalizeRow).filter((row) => isRegularMarketTime(row.time))
+      : [];
 
     return Response.json({
       ok: true,
@@ -114,6 +135,7 @@ export async function GET(req: Request) {
       rows: data,
       latest: data[data.length - 1] ?? null,
       selectedDate: date ?? null,
+      session: "09:00~15:30",
     });
   } catch (error: any) {
     return Response.json(
