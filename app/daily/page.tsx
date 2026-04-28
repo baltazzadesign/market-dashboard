@@ -869,6 +869,7 @@ export default function DailyPage() {
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [chartsCollapsed, setChartsCollapsed] = useState(false);
+  const [showTopDetails, setShowTopDetails] = useState(false);
   const [showRebound, setShowRebound] = useState(true);
   const [showDangerDivergence, setShowDangerDivergence] = useState(true);
   const [showAccumulationDivergence, setShowAccumulationDivergence] = useState(true);
@@ -1249,43 +1250,23 @@ export default function DailyPage() {
         </div>
       </div>
 
-      {summary && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: 12,
-            marginBottom: 20,
-          }}
-        >
-          <SummaryCard title="오늘 ALERT" value={summary.total ?? 0} color="#facc15" />
-          <SummaryCard title="강" value={summary.strong ?? 0} color="#ef4444" />
-          <SummaryCard title="중" value={summary.medium ?? 0} color="#f97316" />
-          <SummaryCard title="약" value={summary.weak ?? 0} color="#eab308" />
-        </div>
-      )}
-
       {last && (
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
             gap: 12,
-            marginBottom: 20,
+            marginBottom: 14,
           }}
         >
-          <SummaryCard title="시장점수" value={marketScore(last)} color="#facc15" />
-          <SummaryCard
-            title="차이"
-            value={last.diff}
-            color={last.diff >= 0 ? "#22c55e" : "#60a5fa"}
-          />
+          <SummaryCard title="시장상태" value={marketTone(last)} color={last.diff >= 0 ? "#22c55e" : "#60a5fa"} />
+          <SummaryCard title="시장점수" value={marketScore(last)} color={marketScore(last) >= 0 ? "#22c55e" : "#60a5fa"} />
+          <SummaryCard title="Diff" value={last.diff} color={last.diff >= 0 ? "#22c55e" : "#60a5fa"} />
           <SummaryCard
             title="상승비율"
-            value={`${(last.upRatio * 100).toFixed(2)}%`}
+            value={`${(Number(last.upRatio) * 100).toFixed(2)}%`}
             color="#22c55e"
           />
-          <SummaryCard title="시장상태" value={marketTone(last)} color="#e5e7eb" />
         </div>
       )}
 
@@ -1293,94 +1274,135 @@ export default function DailyPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
+            gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 0.85fr)",
             gap: 12,
-            marginBottom: 20,
+            marginBottom: 14,
           }}
         >
-          <SummaryCard
-            title="수급 파워(외인+기관)"
-            value={formatFlow(getFlowPower(last))}
-            color={getFlowPower(last) >= 0 ? "#ef4444" : "#60a5fa"}
-          />
-          <SummaryCard
-            title="수급 추세"
-            value={formatFlow(getFlowTrend(last, prevLast))}
-            color={getFlowTrend(last, prevLast) >= 0 ? "#ef4444" : "#60a5fa"}
-          />
-          <SummaryCard
-            title="수급 모멘텀"
-            value={formatFlow(Number(last.flowMomentum ?? getFlowPower(last)))}
-            color={Number(last.flowMomentum ?? getFlowPower(last)) >= 0 ? "#ef4444" : "#60a5fa"}
-          />
-          <SummaryCard
-            title="수급상태"
-            value={getCleanMarketState(String(last.marketState ?? flowTone(last, prevLast)))}
-            color="#e5e7eb"
-          />
+          <div
+            style={{
+              border: "1px solid rgba(56, 189, 248, 0.22)",
+              borderRadius: 22,
+              padding: 18,
+              background:
+                "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(2,6,23,0.64))",
+              boxShadow: "0 18px 48px rgba(0,0,0,0.28)",
+              backdropFilter: "blur(18px)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: 12,
+                marginBottom: 14,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 12, color: "#93c5fd", fontWeight: 900, marginBottom: 6 }}>
+                  MARKET BRIEF
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 950, color: sigSummary.color }}>
+                  {sigSummary.bias}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 13, color: "#cbd5e1", fontWeight: 800 }}>
+                  {latestDivergence ? latestDivergence.divergenceLabel : getFlowNarrative(last, prevLast)}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowTopDetails((value) => !value)}
+                style={{
+                  border: "1px solid rgba(56,189,248,0.32)",
+                  background: showTopDetails ? "rgba(56,189,248,0.18)" : "rgba(15,23,42,0.72)",
+                  color: "#bae6fd",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {showTopDetails ? "상세 접기" : "상세 보기"}
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                gap: 10,
+              }}
+            >
+              <CompactMetric title="외국인" value={formatFlow(Number(last.foreignFlow ?? 0))} color={getFlowColor(Number(last.foreignFlow ?? 0))} />
+              <CompactMetric title="기관" value={formatFlow(Number(last.instFlow ?? 0))} color={getFlowColor(Number(last.instFlow ?? 0))} />
+              <CompactMetric title="개인" value={formatFlow(Number(last.indivFlow ?? 0))} color={getFlowColor(Number(last.indivFlow ?? 0))} />
+              <CompactMetric title="수급합" value={formatFlow(getFlowPower(last))} color={getFlowPower(last) >= 0 ? "#ef4444" : "#60a5fa"} />
+            </div>
+          </div>
+
+          <div
+            style={{
+              border: "1px solid rgba(148, 163, 184, 0.16)",
+              borderRadius: 22,
+              padding: 18,
+              background:
+                "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(30,41,59,0.54))",
+              boxShadow: "0 18px 48px rgba(0,0,0,0.28)",
+              backdropFilter: "blur(18px)",
+            }}
+          >
+            <div style={{ fontSize: 12, color: "#93c5fd", fontWeight: 900, marginBottom: 12 }}>
+              SIGNAL / FLOW
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+              <CompactMetric title="상방" value={sigSummary.upCount} color="#22c55e" />
+              <CompactMetric title="하방" value={sigSummary.downCount} color="#60a5fa" />
+              <CompactMetric title="강함" value={sigSummary.strongCount} color="#ef4444" />
+              <CompactMetric
+                title="다이버전스"
+                value={latestDivergence ? latestDivergence.timeLabel : "-"}
+                color={latestDivergence?.divergenceColor ?? "#94a3b8"}
+              />
+            </div>
+          </div>
         </div>
       )}
 
-      {last && (
-        <FlowStatusPanel row={last} prev={prevLast} />
-      )}
-
-      {signals.length > 0 && (
+      {showTopDetails && last && (
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: 12,
+            border: "1px solid rgba(148, 163, 184, 0.16)",
+            borderRadius: 22,
+            padding: 14,
             marginBottom: 20,
+            background:
+              "linear-gradient(145deg, rgba(15,23,42,0.70), rgba(2,6,23,0.56))",
+            boxShadow: "0 14px 34px rgba(0,0,0,0.22)",
+            backdropFilter: "blur(16px)",
           }}
         >
-          <SummaryCard title="SIGNAL 방향" value={sigSummary.bias} color={sigSummary.color} />
-          <SummaryCard title="상방 SIGNAL" value={sigSummary.upCount} color="#22c55e" />
-          <SummaryCard title="하방 SIGNAL" value={sigSummary.downCount} color="#60a5fa" />
-          <SummaryCard title="강한 SIGNAL" value={sigSummary.strongCount} color="#ef4444" />
-        </div>
-      )}
-
-      {latestDivergence && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 12,
-            marginBottom: 20,
-          }}
-        >
-          <SummaryCard
-            title="FLOW 다이버전스"
-            value={latestDivergence.divergenceLabel}
-            color={latestDivergence.divergenceColor}
-          />
-          <SummaryCard
-            title="발생 시간"
-            value={latestDivergence.timeLabel}
-            color="#e5e7eb"
-          />
-          <SummaryCard
-            title="수급 변화"
-            value={formatFlow(latestDivergence.flowMoveValue)}
-            color={latestDivergence.flowMoveValue >= 0 ? "#22c55e" : "#ef4444"}
-          />
-        </div>
-      )}
-
-      {enhancedChartRows.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: 12,
-            marginBottom: 20,
-          }}
-        >
-          <SummaryCard title="세션 최고 Diff" value={`${sessionSummary.highDiff.toLocaleString()} / ${sessionSummary.highDiffTime}`} color="#22c55e" />
-          <SummaryCard title="세션 최저 Diff" value={`${sessionSummary.lowDiff.toLocaleString()} / ${sessionSummary.lowDiffTime}`} color="#60a5fa" />
-          <SummaryCard title="다이버전스" value={`위험 ${sessionSummary.dangerCount} / 매집 ${sessionSummary.accumulationCount}`} color="#facc15" />
-          <SummaryCard title="수급 범위" value={`${formatFlow(sessionSummary.flowLow)} ~ ${formatFlow(sessionSummary.flowPeak)}`} color="#38bdf8" />
+          <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 900, marginBottom: 12 }}>
+            DETAIL METRICS
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gap: 12,
+            }}
+          >
+            <SummaryCard title="수급 추세" value={formatFlow(getFlowTrend(last, prevLast))} color={getFlowTrend(last, prevLast) >= 0 ? "#ef4444" : "#60a5fa"} />
+            <SummaryCard title="수급 모멘텀" value={formatFlow(Number(last.flowMomentum ?? getFlowPower(last)))} color={Number(last.flowMomentum ?? getFlowPower(last)) >= 0 ? "#ef4444" : "#60a5fa"} />
+            <SummaryCard title="세션 최고 Diff" value={`${sessionSummary.highDiff.toLocaleString()} / ${sessionSummary.highDiffTime}`} color="#22c55e" />
+            <SummaryCard title="세션 최저 Diff" value={`${sessionSummary.lowDiff.toLocaleString()} / ${sessionSummary.lowDiffTime}`} color="#60a5fa" />
+            <SummaryCard title="다이버전스" value={`위험 ${sessionSummary.dangerCount} / 매집 ${sessionSummary.accumulationCount}`} color="#facc15" />
+            <SummaryCard title="수급 범위" value={`${formatFlow(sessionSummary.flowLow)} ~ ${formatFlow(sessionSummary.flowPeak)}`} color="#38bdf8" />
+            <SummaryCard title="ALERT" value={summary?.total ?? 0} color="#facc15" />
+            <SummaryCard title="최근 발생" value={latestDivergence?.timeLabel ?? sessionSummary.latestTime} color="#e5e7eb" />
+          </div>
         </div>
       )}
 
@@ -1843,11 +1865,6 @@ export default function DailyPage() {
           position: relative;
         }
 
-        .chart-header-legend button:hover {
-          transform: translateY(-1px);
-          border-color: rgba(226, 232, 240, 0.34) !important;
-        }
-
         @media (max-width: 760px) {
           .chart-box-header {
             align-items: flex-start !important;
@@ -1891,15 +1908,7 @@ type ChartLineConfig = {
   color: string;
 };
 
-function ChartLegend({
-  items,
-  hiddenLineKeys = [],
-  onToggleLine,
-}: {
-  items: ChartLineConfig[];
-  hiddenLineKeys?: string[];
-  onToggleLine?: (key: string) => void;
-}) {
+function ChartLegend({ items }: { items: ChartLineConfig[] }) {
   if (!items.length) return null;
 
   return (
@@ -1911,61 +1920,46 @@ function ChartLegend({
         justifyContent: "flex-end",
         gap: 8,
         flexWrap: "wrap",
-        maxWidth: "72%",
-        flex: "0 0 auto",
-        pointerEvents: "auto",
+        maxWidth: "58%",
+        pointerEvents: "none",
       }}
     >
-      {items.map((item) => {
-        const isHidden = hiddenLineKeys.includes(item.key);
-
-        return (
-          <button
-            key={`${item.key}-${item.name}`}
-            type="button"
-            onClick={() => onToggleLine?.(item.key)}
-            title={`${item.name} ${isHidden ? "다시 표시" : "숨기기"}`}
+      {items.map((item) => (
+        <div
+          key={`${item.key}-${item.name}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "5px 9px",
+            borderRadius: 999,
+            border: "1px solid rgba(148, 163, 184, 0.24)",
+            background:
+              "linear-gradient(145deg, rgba(2,6,23,0.72), rgba(15,23,42,0.54))",
+            backdropFilter: "blur(12px)",
+            boxShadow:
+              "0 10px 24px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
+            color: "#e5e7eb",
+            fontSize: 10.5,
+            fontWeight: 950,
+            lineHeight: 1,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "6px 10px",
+              width: 8,
+              height: 8,
               borderRadius: 999,
-              border: isHidden
-                ? "1px solid rgba(100, 116, 139, 0.24)"
-                : "1px solid rgba(148, 163, 184, 0.24)",
-              background: isHidden
-                ? "linear-gradient(145deg, rgba(15,23,42,0.54), rgba(2,6,23,0.44))"
-                : "linear-gradient(145deg, rgba(2,6,23,0.72), rgba(15,23,42,0.54))",
-              backdropFilter: "blur(12px)",
-              boxShadow: isHidden
-                ? "inset 0 1px 0 rgba(255,255,255,0.03)"
-                : "0 10px 24px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
-              color: isHidden ? "#64748b" : "#e5e7eb",
-              fontSize: 11,
-              fontWeight: 950,
-              lineHeight: 1,
-              whiteSpace: "nowrap",
-              cursor: "pointer",
-              opacity: isHidden ? 0.52 : 1,
-              transition: "opacity 0.16s ease, transform 0.16s ease, border-color 0.16s ease, color 0.16s ease",
+              background: item.color,
+              boxShadow: `0 0 12px ${item.color}99`,
+              display: "inline-block",
+              flex: "0 0 auto",
             }}
-          >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 999,
-                background: isHidden ? "#475569" : item.color,
-                boxShadow: isHidden ? "none" : `0 0 12px ${item.color}99`,
-                display: "inline-block",
-                flex: "0 0 auto",
-              }}
-            />
-            <span>{item.name}</span>
-          </button>
-        );
-      })}
+          />
+          <span>{item.name}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -2127,28 +2121,9 @@ function MiniChart({
   const chartId = title.replace(/[^a-zA-Z0-9]/g, "");
   const activeXDomain: [number, number] = xDomain ?? [MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE];
   const activeXTicks = getTicksForDomain(activeXDomain);
-  const [hiddenLineKeys, setHiddenLineKeys] = useState<string[]>([]);
-
-  const visibleLines = useMemo(
-    () => lines.filter((line) => !hiddenLineKeys.includes(line.key)),
-    [lines, hiddenLineKeys]
-  );
-
-  const toggleLine = (key: string) => {
-    setHiddenLineKeys((prev) =>
-      prev.includes(key)
-        ? prev.filter((item) => item !== key)
-        : [...prev, key]
-    );
-  };
 
   return (
-    <ChartBox
-      title={title}
-      legend={lines}
-      hiddenLineKeys={hiddenLineKeys}
-      onToggleLine={toggleLine}
-    >
+    <ChartBox title={title} legend={lines}>
       <div
         onWheel={onChartWheel}
         style={{
@@ -2161,8 +2136,7 @@ function MiniChart({
           contain: "layout paint style",
         }}
         title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
-      >
-        <ResponsiveContainer width="100%" height={height}>
+      >      <ResponsiveContainer width="100%" height={height}>
         <ComposedChart
           data={data}
           margin={{ top: 12, right: 22, left: 20, bottom: 0 }}
@@ -2172,7 +2146,7 @@ function MiniChart({
           onMouseUp={onChartDragEnd}
         >
           <defs>
-            {visibleLines.map((line) => (
+            {lines.map((line) => (
               <linearGradient key={`gradient-${line.key}`} id={`areaGradient-${chartId}-${line.key}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={line.color} stopOpacity={0.30} />
                 <stop offset="55%" stopColor={line.color} stopOpacity={0.10} />
@@ -2236,7 +2210,7 @@ function MiniChart({
               ifOverflow="hidden"
             />
           )}
-          {visibleLines.map((line) => (
+          {lines.map((line) => (
             <Area
               key={`area-${line.key}`}
               type="monotone"
@@ -2248,10 +2222,7 @@ function MiniChart({
               connectNulls
             />
           ))}
-          {visibleLines.map((line) => {
-            const originalLineIndex = lines.findIndex((item) => item.key === line.key);
-
-            return (
+          {lines.map((line, lineIndex) => (
             <Line
               key={line.key}
               type="monotone"
@@ -2266,7 +2237,7 @@ function MiniChart({
                   props,
                   data,
                   line.key,
-                  originalLineIndex === 0,
+                  lineIndex === 0,
                   showRebound,
                   showDangerDivergence,
                   showAccumulationDivergence,
@@ -2282,8 +2253,7 @@ function MiniChart({
               isAnimationActive={false}
               connectNulls
             />
-            );
-          })}
+          ))}
         </ComposedChart>
       </ResponsiveContainer>
       </div>
@@ -2292,6 +2262,33 @@ function MiniChart({
 }
 
 const MemoMiniChart = memo(MiniChart);
+
+
+function CompactMetric({
+  title,
+  value,
+  color,
+}: {
+  title: string;
+  value: string | number;
+  color: string;
+}) {
+  return (
+    <div
+      style={{
+        minHeight: 64,
+        border: "1px solid rgba(148, 163, 184, 0.14)",
+        borderRadius: 16,
+        padding: "10px 12px",
+        background: "rgba(15, 23, 42, 0.46)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+      }}
+    >
+      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6, fontWeight: 800 }}>{title}</div>
+      <div style={{ fontSize: 18, fontWeight: 950, color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
+    </div>
+  );
+}
 
 function SummaryCard({
   title,
@@ -2323,14 +2320,10 @@ function SummaryCard({
 function ChartBox({
   title,
   legend = [],
-  hiddenLineKeys = [],
-  onToggleLine,
   children,
 }: {
   title: string;
   legend?: ChartLineConfig[];
-  hiddenLineKeys?: string[];
-  onToggleLine?: (key: string) => void;
   children: ReactNode;
 }) {
   return (
@@ -2355,8 +2348,7 @@ function ChartBox({
           alignItems: "center",
           gap: 12,
           marginBottom: 12,
-          minHeight: 30,
-          flexWrap: "nowrap",
+          minHeight: 26,
         }}
       >
         <h3
@@ -2367,13 +2359,12 @@ function ChartBox({
             fontWeight: 900,
             letterSpacing: 0.15,
             minWidth: 0,
-            flex: "1 1 auto",
             lineHeight: 1.35,
           }}
         >
           {title}
         </h3>
-        <ChartLegend items={legend} hiddenLineKeys={hiddenLineKeys} onToggleLine={onToggleLine} />
+        <ChartLegend items={legend} />
       </div>
       {children}
     </div>
