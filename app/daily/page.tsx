@@ -11,7 +11,6 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
-  Legend,
   ReferenceLine,
   ReferenceArea,
 } from "recharts";
@@ -2016,15 +2015,6 @@ function MiniChart({
             tickMargin={8}
           />
           <Tooltip content={<ModernTooltip />} />
-          <Legend
-            iconType="plainline"
-            wrapperStyle={{
-              color: "#cbd5e1",
-              fontSize: 11,
-              paddingTop: 2,
-              fontWeight: 800,
-            }}
-          />
           {referenceLines.map((value) => (
             <ReferenceLine
               key={value}
