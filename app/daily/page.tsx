@@ -36,8 +36,6 @@ type Row = {
   flowsource?: string;
   flowStatus?: string;
   flowstatus?: string;
-  breadthSource?: string;
-  breadthsource?: string;
   marketState?: string;
   signals?: any[];
 };
@@ -131,19 +129,19 @@ function clampChartNullable(value: any, limit = 120000) {
   return n;
 }
 
-function isRegularMarketTimeValue(time: string) {
-  const minute = timeToMinute(time);
-  return minute >= 9 * 60 && minute <= 15 * 60 + 30;
-}
-
 function getSessionChartRows<T extends { timeLabel: string; up?: number; down?: number; kospi?: number; kosdaq?: number }>(rows: T[]) {
-  const regularRows = rows.filter((row) => isRegularMarketTimeValue(row.timeLabel));
+  const regularRows = rows.filter((row) => {
+    const minute = timeToMinute(row.timeLabel);
+    return minute >= 8 * 60 + 50 && minute <= 15 * 60 + 40;
+  });
 
-  return regularRows.filter((row) => {
+  const cleanRegularRows = regularRows.filter((row) => {
     const hasBreadth = Number(row.up ?? 0) > 0 || Number(row.down ?? 0) > 0;
     const hasIndex = Number(row.kospi ?? 0) > 1000 || Number(row.kosdaq ?? 0) > 100;
     return hasBreadth && hasIndex;
   });
+
+  return cleanRegularRows.length > 3 ? cleanRegularRows : rows;
 }
 
 function getAlertColor(level?: string, fallback?: string) {
@@ -267,18 +265,40 @@ function isLiveFlowRow(row?: Row | any) {
 }
 
 function getCleanMarketState(value?: string) {
-  return String(value ?? "")
-    .replace(/\|FLOW_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED)/gi, "")
-    .replace(/\|BREADTH_(LIVE|FALLBACK|SKIPPED)/gi, "");
+  const text = String(value ?? "").trim();
+  if (!text) return "정보 없음";
+
+  const parts = text.split("|").filter(Boolean);
+  const map: Record<string, string> = {
+    BULL: "상승 우위",
+    STRONG_BULL: "강한 상승",
+    BEAR: "하락 우위",
+    STRONG_BEAR: "강한 하락",
+    NEUTRAL: "보합/중립",
+    FLOW_LIVE: "수급 정상",
+    FLOW_FALLBACK: "수급 보정 중",
+    FLOW_EMPTY: "수급 대기",
+    FLOW_ERROR: "수급 오류",
+    FLOW_FILTERED: "수급 필터링",
+    BREADTH_LIVE: "종목수 정상",
+    BREADTH_FALLBACK: "종목수 보정 중",
+    BREADTH_SKIPPED: "종목수 저장 제외",
+  };
+
+  return parts.map((part) => map[part] ?? part).join(" · ");
 }
 
-function getBreadthSource(row?: Row | any) {
-  const explicit = String(row?.breadthSource ?? row?.breadthsource ?? "").toUpperCase();
-  if (explicit) return explicit;
+function hasFallbackState(value?: string) {
+  const text = String(value ?? "").toUpperCase();
+  return text.includes("FALLBACK") || text.includes("ERROR") || text.includes("SKIPPED");
+}
 
-  const state = String(row?.marketState ?? row?.marketstate ?? "");
-  const match = state.match(/BREADTH_(LIVE|FALLBACK|SKIPPED)/i);
-  return match ? match[1].toUpperCase() : "";
+function getStateBadge(value?: string) {
+  const text = String(value ?? "").toUpperCase();
+  if (hasFallbackState(text)) return { label: "⚠ 데이터 보정 중", color: "#facc15", bg: "rgba(250, 204, 21, 0.12)", border: "rgba(250, 204, 21, 0.35)" };
+  if (text.includes("BULL")) return { label: "🟢 상승 우위", color: "#22c55e", bg: "rgba(34, 197, 94, 0.12)", border: "rgba(34, 197, 94, 0.35)" };
+  if (text.includes("BEAR")) return { label: "🔴 하락 우위", color: "#60a5fa", bg: "rgba(96, 165, 250, 0.12)", border: "rgba(96, 165, 250, 0.35)" };
+  return { label: "🟡 보합/중립", color: "#facc15", bg: "rgba(250, 204, 21, 0.12)", border: "rgba(250, 204, 21, 0.35)" };
 }
 
 function getFlowSource(row?: Row | any) {
@@ -661,6 +681,7 @@ export default function DailyPage() {
   const [alertFilter, setAlertFilter] = useState<AlertFilter>("전체");
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
+  const [chartPanelMode, setChartPanelMode] = useState<"expanded" | "compact">("expanded");
 
   async function loadData(dateValue = selectedDate) {
     const dateQuery = dateValue ? `?date=${dateValue}` : "";
@@ -675,10 +696,7 @@ export default function DailyPage() {
     const json = await res.json();
 
     if (json.ok) {
-      const regularRows = (json.rows ?? []).filter((row: Row) =>
-        isRegularMarketTimeValue(row.time)
-      );
-      setRows(regularRows);
+      setRows(json.rows ?? []);
     }
 
     const alertRes = await fetch("/api/alerts", { cache: "no-store" });
@@ -724,6 +742,7 @@ export default function DailyPage() {
       upRatioPct: Number(r.upRatio) * 100,
       downRatioPct: Number(r.downRatio) * 100,
       score: marketScore(r),
+      fallbackFlag: hasFallbackState(String(r.marketState ?? "")),
 
       // GAS 방식과 동일하게 수급 실패 구간은 직전 정상값으로 표시합니다.
       foreignFlowValue: Number(r.foreignFlow ?? 0),
@@ -778,14 +797,20 @@ export default function DailyPage() {
           justifyContent: "space-between",
           alignItems: "center",
           gap: 12,
-          marginBottom: 22,
-          padding: "4px 2px 8px",
+          marginBottom: 20,
+          position: "sticky",
+          top: 0,
+          zIndex: 20,
+          background: "rgba(2, 6, 23, 0.84)",
+          backdropFilter: "blur(18px)",
+          borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
+          padding: "10px 0 14px",
         }}
       >
         <div>
           <h1 style={{ margin: 0 }}>📊 DAILY LOG</h1>
           <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
-            {selectedDate ? `${selectedDate} 정규장(09:00~15:30) 저장 데이터 조회 중` : "오늘 정규장(09:00~15:30) 실시간 데이터 조회 중"}
+            {selectedDate ? `${selectedDate} 저장 데이터 조회 중` : "오늘 실시간 데이터 조회 중"}
           </div>
         </div>
 
@@ -850,7 +875,7 @@ export default function DailyPage() {
             marginBottom: 20,
           }}
         >
-          <SummaryCard title="오늘 ALERT" value={summary.total ?? 0} color="#facc15" />
+          <SummaryCard title="오늘 알림" value={summary.total ?? 0} color="#facc15" />
           <SummaryCard title="강" value={summary.strong ?? 0} color="#ef4444" />
           <SummaryCard title="중" value={summary.medium ?? 0} color="#f97316" />
           <SummaryCard title="약" value={summary.weak ?? 0} color="#eab308" />
@@ -926,10 +951,10 @@ export default function DailyPage() {
             marginBottom: 20,
           }}
         >
-          <SummaryCard title="SIGNAL 방향" value={sigSummary.bias} color={sigSummary.color} />
-          <SummaryCard title="상방 SIGNAL" value={sigSummary.upCount} color="#22c55e" />
-          <SummaryCard title="하방 SIGNAL" value={sigSummary.downCount} color="#60a5fa" />
-          <SummaryCard title="강한 SIGNAL" value={sigSummary.strongCount} color="#ef4444" />
+          <SummaryCard title="신호 방향" value={sigSummary.bias} color={sigSummary.color} />
+          <SummaryCard title="상방 신호" value={sigSummary.upCount} color="#22c55e" />
+          <SummaryCard title="하방 신호" value={sigSummary.downCount} color="#60a5fa" />
+          <SummaryCard title="강한 신호" value={sigSummary.strongCount} color="#ef4444" />
         </div>
       )}
 
@@ -1022,9 +1047,42 @@ export default function DailyPage() {
             display: "flex",
             flexDirection: "column",
             gap: 16,
+            maxHeight: chartPanelMode === "compact" ? 178 : "calc(100vh - 40px)",
+            overflow: "hidden",
+            transition: "max-height 240ms ease",
           }}
         >
-          <ChartBox title="핵심 통합 흐름 · Diff / Flow / Score">
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              background: "linear-gradient(135deg, rgba(15,23,42,0.86), rgba(30,41,59,0.58))",
+              border: "1px solid rgba(148,163,184,0.16)",
+              borderRadius: 18,
+              padding: "10px 12px",
+              backdropFilter: "blur(16px)",
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 900, color: "#e5e7eb" }}>차트 패널</div>
+            <button
+              onClick={() => setChartPanelMode((prev) => (prev === "expanded" ? "compact" : "expanded"))}
+              style={{
+                border: "1px solid rgba(56,189,248,0.45)",
+                background: "rgba(56,189,248,0.14)",
+                color: "#7dd3fc",
+                borderRadius: 999,
+                padding: "7px 12px",
+                fontSize: 12,
+                fontWeight: 900,
+                cursor: "pointer",
+              }}
+            >
+              {chartPanelMode === "expanded" ? "축소" : "펼치기"}
+            </button>
+          </div>
+          <ChartBox title="핵심 통합 흐름 · 차이 / 수급 / 점수">
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={visibleChartRows} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
                 <defs>
@@ -1041,9 +1099,9 @@ export default function DailyPage() {
                 <Tooltip content={<ModernTooltip />} />
                 <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 11, paddingTop: 4 }} iconType="plainline" />
                 <ReferenceLine yAxisId="diff" y={0} stroke="rgba(148, 163, 184, 0.36)" strokeDasharray="3 5" />
-                <Area yAxisId="diff" type="monotone" dataKey="diff" name="차이(Diff)" stroke="#22c55e" fill="url(#modernDiffArea)" strokeWidth={1.55} dot={false} activeDot={{ r: 3 }} />
-                <Line yAxisId="flow" type="monotone" dataKey="flowPowerValue" name="수급파워" stroke="#f59e0b" strokeWidth={1.45} dot={false} activeDot={{ r: 3 }} />
-                <Line yAxisId="score" type="monotone" dataKey="score" name="시장점수" stroke="#38bdf8" strokeWidth={1.45} dot={false} activeDot={{ r: 3 }} />
+                <Area yAxisId="diff" type="monotone" dataKey="diff" name="차이(Diff)" stroke="#22c55e" fill="url(#modernDiffArea)" strokeWidth={2.1} dot={false} activeDot={{ r: 4 }} style={{ filter: "drop-shadow(0 0 8px rgba(34,197,94,0.38))" }} />
+                <Line yAxisId="flow" type="monotone" dataKey="flowPowerValue" name="수급파워" stroke="#f59e0b" strokeWidth={2.1} dot={false} activeDot={{ r: 4 }} style={{ filter: "drop-shadow(0 0 8px rgba(245,158,11,0.45))" }} />
+                <Line yAxisId="score" type="monotone" dataKey="score" name="시장점수" stroke="#38bdf8" strokeWidth={2.1} dot={(props: any) => props?.payload?.fallbackFlag ? <circle cx={props.cx} cy={props.cy} r={3.5} fill="#facc15" stroke="#020617" strokeWidth={1.5} /> : <></>} activeDot={{ r: 4 }} style={{ filter: "drop-shadow(0 0 8px rgba(56,189,248,0.45))" }} />
               </LineChart>
             </ResponsiveContainer>
           </ChartBox>
@@ -1056,7 +1114,7 @@ export default function DailyPage() {
 
           <MiniChart title="시장 차이 추이" data={visibleChartRows} height={190} referenceLines={[0]} lines={[{ key: "diff", name: "차이", color: "#22c55e" }]} />
 
-          <MiniChart title="FLOW 고급 상태" data={visibleChartRows} height={220} referenceLines={[0]} lines={[{ key: "foreignInstFlowValue", name: "외인+기관", color: "#facc15" }, { key: "flowMomentumValue", name: "모멘텀", color: "#22c55e" }, { key: "flowTrendValue", name: "추세변화", color: "#a78bfa" }]} />
+          <MiniChart title="수급 고급 상태" data={visibleChartRows} height={220} referenceLines={[0]} lines={[{ key: "foreignInstFlowValue", name: "외인+기관", color: "#facc15" }, { key: "flowMomentumValue", name: "모멘텀", color: "#22c55e" }, { key: "flowTrendValue", name: "추세변화", color: "#a78bfa" }]} />
 
           <MiniChart title="외국인 / 기관 / 개인 수급" data={visibleChartRows} height={220} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#ef4444" }, { key: "instFlowValue", name: "기관", color: "#f97316" }, { key: "indivFlowValue", name: "개인", color: "#38bdf8" }]} />
 
@@ -1122,7 +1180,7 @@ function MiniChart({ title, data, lines, height = 200, domain, referenceLines = 
             <ReferenceLine key={value} y={value} stroke={value === 0 ? "rgba(148, 163, 184, 0.34)" : "rgba(148, 163, 184, 0.22)"} strokeDasharray="3 5" />
           ))}
           {lines.map((line) => (
-            <Line key={line.key} type="monotone" dataKey={line.key} name={line.name} stroke={line.color} strokeWidth={1.35} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} connectNulls />
+            <Line key={line.key} type="monotone" dataKey={line.key} name={line.name} stroke={line.color} strokeWidth={2.05} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} style={{ filter: `drop-shadow(0 0 7px ${line.color}66)` }} isAnimationActive={false} connectNulls />
           ))}
         </LineChart>
       </ResponsiveContainer>
@@ -1147,8 +1205,9 @@ function SummaryCard({
         border: "1px solid rgba(148, 163, 184, 0.16)",
         borderRadius: 18,
         padding: 18,
-        boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
+        boxShadow: "0 18px 40px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.03)",
         backdropFilter: "blur(16px)",
+        transition: "transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease",
       }}
     >
       <div style={{ fontSize: 12, color: "#93c5fd", marginBottom: 10, fontWeight: 800, letterSpacing: 0.2 }}>{title}</div>
@@ -1220,7 +1279,7 @@ function FlowStatusPanel({
         }}
       >
         <div>
-          <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 5 }}>FLOW STATUS</div>
+          <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 5 }}>수급 상태</div>
           <div style={{ fontSize: 18, fontWeight: 900, color: "#e5e7eb" }}>
             {getFlowNarrative(row, prev)}
           </div>
@@ -1331,7 +1390,7 @@ function AlertBox({
         }}
       >
         <h3 style={{ fontSize: 14, color: "#cbd5e1", margin: 0 }}>
-          ALERT
+          알림
         </h3>
 
         <div style={{ display: "flex", gap: 6 }}>
@@ -1365,7 +1424,7 @@ function AlertBox({
             borderRadius: 10,
           }}
         >
-          현재 발생한 ALERT 없음
+          현재 발생한 알림 없음
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1477,7 +1536,7 @@ function SignalBox({ signals }: { signals: SignalItem[] }) {
             borderRadius: 10,
           }}
         >
-          최근 3분 내 강한 SIGNAL 없음
+          최근 3분 내 강한 신호 없음
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
