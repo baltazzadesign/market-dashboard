@@ -95,11 +95,31 @@ function normalizeRow(row: any) {
   };
 }
 
-function getDateRange(date: string) {
+function getRegularMarketDateRange(date: string) {
   return {
-    start: `${date}T00:00:00+09:00`,
-    end: `${date}T23:59:59+09:00`,
+    start: `${date}T09:00:00+09:00`,
+    end: `${date}T15:30:59+09:00`,
   };
+}
+
+function dedupeByMinuteKeepLatest(rows: any[]) {
+  const map = new Map<string, any>();
+
+  for (const row of rows) {
+    if (!row.time) continue;
+
+    const prev = map.get(row.time);
+    if (!prev || toNumber(row.id) > toNumber(prev.id)) {
+      map.set(row.time, row);
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    const ma = getMinutesFromHHmm(a.time);
+    const mb = getMinutesFromHHmm(b.time);
+    if (ma !== mb) return ma - mb;
+    return toNumber(a.id) - toNumber(b.id);
+  });
 }
 
 export async function GET(req: Request) {
@@ -110,24 +130,34 @@ export async function GET(req: Request) {
     let rows: any[] = [];
 
     if (date) {
-      const { start, end } = getDateRange(date);
+      const { start, end } = getRegularMarketDateRange(date);
 
       rows = await supabaseRequest(
         `/rest/v1/logs?select=*&created_at=gte.${encodeURIComponent(
           start
-        )}&created_at=lte.${encodeURIComponent(end)}&order=id.asc&limit=600`
+        )}&created_at=lte.${encodeURIComponent(end)}&order=id.asc&limit=800`
       );
     } else {
-      const latestRows = await supabaseRequest(
-        "/rest/v1/logs?select=*&order=id.desc&limit=600"
-      );
+      const todayKst = new Date(
+        new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" })
+      )
+        .toISOString()
+        .slice(0, 10);
 
-      rows = Array.isArray(latestRows) ? latestRows.reverse() : [];
+      const { start, end } = getRegularMarketDateRange(todayKst);
+
+      rows = await supabaseRequest(
+        `/rest/v1/logs?select=*&created_at=gte.${encodeURIComponent(
+          start
+        )}&created_at=lte.${encodeURIComponent(end)}&order=id.asc&limit=800`
+      );
     }
 
-    const data = Array.isArray(rows)
+    const normalized = Array.isArray(rows)
       ? rows.map(normalizeRow).filter((row) => isRegularMarketTime(row.time))
       : [];
+
+    const data = dedupeByMinuteKeepLatest(normalized);
 
     return Response.json({
       ok: true,
