@@ -1839,6 +1839,23 @@ export default function DailyPage() {
           scrollbar-color: #2563eb rgba(15, 23, 42, 0.34);
         }
 
+        .chart-box-header {
+          position: relative;
+        }
+
+        @media (max-width: 760px) {
+          .chart-box-header {
+            align-items: flex-start !important;
+            flex-direction: column !important;
+            gap: 8px !important;
+          }
+
+          .chart-header-legend {
+            max-width: 100% !important;
+            justify-content: flex-start !important;
+          }
+        }
+
         @media (max-width: 760px) {
           .daily-floating-date {
             right: 12px !important;
@@ -1874,17 +1891,14 @@ function ChartLegend({ items }: { items: ChartLineConfig[] }) {
 
   return (
     <div
+      className="chart-header-legend"
       style={{
-        position: "absolute",
-        top: 6,
-        right: 8,
-        zIndex: 10,
         display: "flex",
         alignItems: "center",
         justifyContent: "flex-end",
-        gap: 7,
+        gap: 8,
         flexWrap: "wrap",
-        maxWidth: "78%",
+        maxWidth: "58%",
         pointerEvents: "none",
       }}
     >
@@ -1894,16 +1908,18 @@ function ChartLegend({ items }: { items: ChartLineConfig[] }) {
           style={{
             display: "inline-flex",
             alignItems: "center",
-            gap: 5,
-            padding: "3px 7px",
+            gap: 6,
+            padding: "5px 9px",
             borderRadius: 999,
-            border: "1px solid rgba(148, 163, 184, 0.22)",
-            background: "rgba(2, 6, 23, 0.68)",
-            backdropFilter: "blur(10px)",
-            boxShadow: "0 8px 18px rgba(0,0,0,0.22)",
+            border: "1px solid rgba(148, 163, 184, 0.24)",
+            background:
+              "linear-gradient(145deg, rgba(2,6,23,0.72), rgba(15,23,42,0.54))",
+            backdropFilter: "blur(12px)",
+            boxShadow:
+              "0 10px 24px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06)",
             color: "#e5e7eb",
             fontSize: 10.5,
-            fontWeight: 900,
+            fontWeight: 950,
             lineHeight: 1,
             whiteSpace: "nowrap",
           }}
@@ -1914,7 +1930,7 @@ function ChartLegend({ items }: { items: ChartLineConfig[] }) {
               height: 8,
               borderRadius: 999,
               background: item.color,
-              boxShadow: `0 0 10px ${item.color}88`,
+              boxShadow: `0 0 12px ${item.color}99`,
               display: "inline-block",
               flex: "0 0 auto",
             }}
@@ -1926,7 +1942,7 @@ function ChartLegend({ items }: { items: ChartLineConfig[] }) {
   );
 }
 
-function ModernTooltip({ active, payload, label }: any) {
+function ModernTooltipfunction ModernTooltip({ active, payload, label }: any) {
   if (!active || !payload || payload.length === 0) return null;
 
   const displayLabel = typeof label === "number" ? minuteToTimeLabel(label) : label;
@@ -2085,7 +2101,7 @@ function MiniChart({
   const activeXTicks = getTicksForDomain(activeXDomain);
 
   return (
-    <ChartBox title={title}>
+    <ChartBox title={title} legend={lines}>
       <div
         onWheel={onChartWheel}
         style={{
@@ -2098,9 +2114,7 @@ function MiniChart({
           contain: "layout paint style",
         }}
         title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
-      >
-      <ChartLegend items={lines} />
-      <ResponsiveContainer width="100%" height={height}>
+      >      <ResponsiveContainer width="100%" height={height}>
         <ComposedChart
           data={data}
           margin={{ top: 12, right: 22, left: 20, bottom: 0 }}
@@ -2256,9 +2270,11 @@ function SummaryCard({
 
 function ChartBox({
   title,
+  legend = [],
   children,
 }: {
   title: string;
+  legend?: ChartLineConfig[];
   children: ReactNode;
 }) {
   return (
@@ -2275,23 +2291,38 @@ function ChartBox({
         overflow: "visible",
       }}
     >
-      <h3
+      <div
+        className="chart-box-header"
         style={{
-          fontSize: 13,
-          color: "#e5e7eb",
-          margin: "0 0 12px",
-          fontWeight: 900,
-          letterSpacing: 0.15,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 12,
+          minHeight: 26,
         }}
       >
-        {title}
-      </h3>
+        <h3
+          style={{
+            fontSize: 13,
+            color: "#e5e7eb",
+            margin: 0,
+            fontWeight: 900,
+            letterSpacing: 0.15,
+            minWidth: 0,
+            lineHeight: 1.35,
+          }}
+        >
+          {title}
+        </h3>
+        <ChartLegend items={legend} />
+      </div>
       {children}
     </div>
   );
 }
 
-function FlowStatusPanel({
+function FlowStatusPanelfunction FlowStatusPanel({
   row,
   prev,
 }: {
