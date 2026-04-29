@@ -526,9 +526,43 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
 }
 
 function normalizeFlowUnit(value: number) {
-  // DB에는 KIS에서 받은 실제 수급 원본값을 저장합니다.
-  // 억원 변환은 app/daily/page.tsx 화면 표시 단계에서만 처리합니다.
-  return value;
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+
+  // TR_074의 *_tr_pbmn 값은 보통 백만원 단위입니다.
+  // DB 저장 기준은 백만원 원본값으로 유지하고, 화면에서만 /100 해서 억원 표시합니다.
+  // 혹시 원 단위 값이 들어오는 예외 응답은 백만원 단위로 보정합니다.
+  if (Math.abs(n) >= 1_000_000_000) {
+    return Math.round(n / 1_000_000);
+  }
+
+  return n;
+}
+
+function pickNumberByKeysAndPattern(obj: any, keys: string[], patterns: RegExp[]) {
+  const byKey = pickNumber(obj, keys);
+  if (byKey !== 0) return byKey;
+  return pickNumberByPattern(obj, patterns);
+}
+
+function parseFlowMinute(row: any) {
+  const raw = String(
+    row?.stck_cntg_hour ??
+      row?.cntg_hour ??
+      row?.bsop_hour ??
+      row?.trd_hour ??
+      row?.time ??
+      row?.hour ??
+      ""
+  ).replace(/[^0-9]/g, "");
+
+  if (raw.length >= 4) {
+    const hour = Number(raw.slice(0, 2));
+    const minute = Number(raw.slice(2, 4));
+    if (Number.isFinite(hour) && Number.isFinite(minute)) return hour * 60 + minute;
+  }
+
+  return -1;
 }
 
 function flattenObjects(value: any): any[] {
@@ -580,14 +614,14 @@ function pickNumberByPattern(obj: any, patterns: RegExp[]) {
 function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
   const rows = getRows(data);
 
+  // 수량(qty/vol)이 아니라 순매수 금액 계열만 사용합니다.
+  // 현재 화면은 코스피+코스닥 당일 순매수 금액을 증권사처럼 억원으로 보여주는 구조입니다.
   const directKeyGroups = {
     foreign: [
       "frgn_ntby_tr_pbmn",
       "frgn_ntby_amt",
       "frgn_ntby_val",
-      "frgn_ntby_qty",
       "frgn_seln_buy_amt",
-      "frgn_ntby_tr_pbmn_1",
       "frgn",
       "foreign",
       "foreignFlow",
@@ -599,8 +633,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       "inst_ntby_amt",
       "orgn_ntby_val",
       "inst_ntby_val",
-      "orgn_ntby_qty",
-      "inst_ntby_qty",
       "orgn",
       "inst",
       "instFlow",
@@ -612,8 +644,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       "indv_ntby_amt",
       "prsn_ntby_val",
       "indv_ntby_val",
-      "prsn_ntby_qty",
-      "indv_ntby_qty",
       "individual",
       "indiv",
       "indivFlow",
@@ -621,36 +651,53 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
   };
 
   const patternGroups = {
-    foreign: [/frgn.*ntby/i, /foreign.*net/i, /frgn.*net/i],
-    inst: [/orgn.*ntby/i, /inst.*ntby/i, /organ.*net/i, /inst.*net/i],
-    indiv: [/prsn.*ntby/i, /indv.*ntby/i, /individual.*net/i, /person.*net/i],
+    foreign: [/frgn.*ntby.*(tr|amt|val|pbmn)/i, /foreign.*net.*(tr|amt|val|pbmn)/i],
+    inst: [/orgn.*ntby.*(tr|amt|val|pbmn)/i, /inst.*ntby.*(tr|amt|val|pbmn)/i],
+    indiv: [/prsn.*ntby.*(tr|amt|val|pbmn)/i, /indv.*ntby.*(tr|amt|val|pbmn)/i],
   };
 
+  const candidates: Array<{
+    minute: number;
+    foreign: number;
+    inst: number;
+    indiv: number;
+  }> = [];
+
   for (const row of rows) {
-    const foreign =
-      pickNumber(row, directKeyGroups.foreign) ||
-      pickNumberByPattern(row, patternGroups.foreign);
-
-    const inst =
-      pickNumber(row, directKeyGroups.inst) ||
-      pickNumberByPattern(row, patternGroups.inst);
-
-    const indiv =
-      pickNumber(row, directKeyGroups.indiv) ||
-      pickNumberByPattern(row, patternGroups.indiv);
+    const foreign = pickNumberByKeysAndPattern(row, directKeyGroups.foreign, patternGroups.foreign);
+    const inst = pickNumberByKeysAndPattern(row, directKeyGroups.inst, patternGroups.inst);
+    const indiv = pickNumberByKeysAndPattern(row, directKeyGroups.indiv, patternGroups.indiv);
 
     if (foreign !== 0 || inst !== 0 || indiv !== 0) {
-      return {
+      candidates.push({
+        minute: parseFlowMinute(row),
         foreign: normalizeFlowUnit(foreign),
         inst: normalizeFlowUnit(inst),
         indiv: normalizeFlowUnit(indiv),
-      };
+      });
     }
   }
 
-  let foreign = 0;
-  let inst = 0;
-  let indiv = 0;
+  if (candidates.length > 0) {
+    // 시간대별 누적 데이터가 여러 개 오는 경우, 전부 더하지 말고 가장 최근 행만 사용합니다.
+    // 시간 필드가 없으면 응답 순서상 마지막 유효 행을 최신값으로 봅니다.
+    const latest = candidates.reduce((best, current) => {
+      if (current.minute > best.minute) return current;
+      if (current.minute === best.minute) return current;
+      if (best.minute < 0 && current.minute < 0) return current;
+      return best;
+    }, candidates[0]);
+
+    return {
+      foreign: latest.foreign,
+      inst: latest.inst,
+      indiv: latest.indiv,
+    };
+  }
+
+  // 예외 응답: 투자자별 행으로 내려오는 경우만 투자자명 기준으로 1회 합산합니다.
+  // 이 경우도 시간대 행 전체를 누적하지 않도록 동일 투자자별 최신 행만 사용합니다.
+  const byInvestor = new Map<string, { minute: number; amount: number }>();
 
   for (const row of rows) {
     const name = String(
@@ -663,25 +710,29 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
         ""
     );
 
-    const amount = pickNumber(row, [
-      "ntby_tr_pbmn",
-      "ntby_amt",
-      "net_buy_amt",
-      "smtl_ntby_tr_pbmn",
-      "tr_pbmn",
-      "ntby_qty",
-      "amount",
-    ]);
+    const amount = pickNumberByKeysAndPattern(
+      row,
+      [
+        "ntby_tr_pbmn",
+        "ntby_amt",
+        "net_buy_amt",
+        "smtl_ntby_tr_pbmn",
+        "tr_pbmn",
+        "amount",
+      ],
+      [/ntby.*(tr|amt|val|pbmn)/i, /net.*buy.*(tr|amt|val|pbmn)/i]
+    );
 
     if (!amount) continue;
 
-    if (name.includes("외국") || name.toLowerCase().includes("foreign")) {
-      foreign += amount;
-    }
+    let key = "";
+    const lowerName = name.toLowerCase();
 
-    if (
+    if (name.includes("외국") || lowerName.includes("foreign")) {
+      key = "foreign";
+    } else if (
       name.includes("기관") ||
-      name.toLowerCase().includes("inst") ||
+      lowerName.includes("inst") ||
       name.includes("금융투자") ||
       name.includes("투신") ||
       name.includes("연기금") ||
@@ -689,18 +740,24 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       name.includes("은행") ||
       name.includes("기타금융")
     ) {
-      inst += amount;
+      key = "inst";
+    } else if (name.includes("개인") || lowerName.includes("individual")) {
+      key = "indiv";
     }
 
-    if (name.includes("개인") || name.toLowerCase().includes("individual")) {
-      indiv += amount;
+    if (!key) continue;
+
+    const minute = parseFlowMinute(row);
+    const prev = byInvestor.get(key);
+    if (!prev || minute >= prev.minute || (minute < 0 && prev.minute < 0)) {
+      byInvestor.set(key, { minute, amount: normalizeFlowUnit(amount) });
     }
   }
 
   return {
-    foreign: normalizeFlowUnit(foreign),
-    inst: normalizeFlowUnit(inst),
-    indiv: normalizeFlowUnit(indiv),
+    foreign: byInvestor.get("foreign")?.amount ?? 0,
+    inst: byInvestor.get("inst")?.amount ?? 0,
+    indiv: byInvestor.get("indiv")?.amount ?? 0,
   };
 }
 
@@ -709,9 +766,12 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
   const appsecret = process.env.KIS_APPSECRET!;
   const token = await getAccessToken();
 
+  const marketCode = market === "KOSPI" ? "0001" : "1001";
+
   const qs = new URLSearchParams({
-    fid_input_iscd: market === "KOSPI" ? "KSP" : "KSQ",
-    fid_input_iscd_2: market === "KOSPI" ? "0001" : "1001",
+    // 한국투자 TR_074 시장코드: KOSPI=0001, KOSDAQ=1001
+    fid_input_iscd: marketCode,
+    fid_input_iscd_2: marketCode,
   });
 
   const res = await fetch(
