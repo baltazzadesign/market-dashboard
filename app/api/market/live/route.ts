@@ -12,13 +12,13 @@ function getKstTime() {
 
 let cachedToken: string | null = null;
 let cachedTokenExpireAt = 0;
-let tokenIssuePromise: Promise<string> | null = null;
-let lastTokenIssueAttemptAt = 0;
 let lastSavedMinute = "";
 let memoryPrevDiff = 0;
 let memoryPrevFlowPower = 0;
 let memoryRecentRows: Array<{ diff: number; foreignFlow: number; instFlow: number }> = [];
+let memoryLastFlow: { foreign: number; inst: number; indiv: number; updatedAt: number } | null = null;
 
+const FLOW_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
 const KIS_BASE = process.env.KIS_BASE ?? "https://openapi.koreainvestment.com:9443";
 const CUSTTYPE = process.env.KIS_CUSTTYPE ?? "P";
 
@@ -245,18 +245,76 @@ function hasSavedFlow(prevRow: SavedLogRow | null) {
   );
 }
 
-function applyGasStyleFlowFallback(flowData: FlowData, prevRow: SavedLogRow | null): FlowData {
-  if (flowData.source === "LIVE") return flowData;
+function hasFlowValue(flow: Pick<FlowData, "foreign" | "inst" | "indiv"> | null | undefined) {
+  if (!flow) return false;
+  return toNumber(flow.foreign) !== 0 || toNumber(flow.inst) !== 0 || toNumber(flow.indiv) !== 0;
+}
 
+function rememberFlow(flowData: FlowData) {
+  if (flowData.source !== "LIVE" || !hasFlowValue(flowData)) return;
+
+  memoryLastFlow = {
+    foreign: toNumber(flowData.foreign),
+    inst: toNumber(flowData.inst),
+    indiv: toNumber(flowData.indiv),
+    updatedAt: Date.now(),
+  };
+}
+
+function getMemoryFlowFallback(raw?: any): FlowData | null {
+  if (!memoryLastFlow) return null;
+
+  const age = Date.now() - memoryLastFlow.updatedAt;
+  if (age > FLOW_FALLBACK_MAX_AGE_MS) return null;
+
+  return {
+    foreign: memoryLastFlow.foreign,
+    inst: memoryLastFlow.inst,
+    indiv: memoryLastFlow.indiv,
+    source: "FALLBACK",
+    raw: {
+      fallbackFrom: "memoryLastFlow",
+      ageMs: age,
+      raw,
+    },
+  };
+}
+
+function applyGasStyleFlowFallback(flowData: FlowData, prevRow: SavedLogRow | null): FlowData {
+  // LIVE 값이 정상으로 들어오면 그 값을 즉시 메모리에 저장해서,
+  // 이후 TR 074가 일시적으로 전부 0을 반환해도 직전 정상값으로 버틸 수 있게 합니다.
+  if (flowData.source === "LIVE" && hasFlowValue(flowData)) {
+    rememberFlow(flowData);
+    return flowData;
+  }
+
+  // 1순위: DB에 저장된 직전 정상 수급값 사용
   if (hasSavedFlow(prevRow)) {
-    return {
+    const fallback = {
       foreign: toNumber(prevRow?.foreignflow),
       inst: toNumber(prevRow?.instflow),
       indiv: toNumber(prevRow?.indivflow),
-      source: "FALLBACK",
-      raw: flowData.raw,
+      source: "FALLBACK" as const,
+      raw: {
+        fallbackFrom: "latestDbRow",
+        raw: flowData.raw,
+      },
     };
+
+    // DB fallback도 다음 요청에서 다시 사용할 수 있게 메모리에 저장합니다.
+    memoryLastFlow = {
+      foreign: fallback.foreign,
+      inst: fallback.inst,
+      indiv: fallback.indiv,
+      updatedAt: Date.now(),
+    };
+
+    return fallback;
   }
+
+  // 2순위: 같은 서버 인스턴스의 메모리에 남아 있는 직전 정상 수급값 사용
+  const memoryFallback = getMemoryFlowFallback(flowData.raw);
+  if (memoryFallback) return memoryFallback;
 
   return flowData;
 }
@@ -386,9 +444,40 @@ async function saveKisTokenToSupabase(accessToken: string, expiresAtMs: number) 
   }
 }
 
-async function requestNewAccessToken(appkey: string, appsecret: string) {
+async function getAccessToken() {
+  const appkey = process.env.KIS_APPKEY;
+  const appsecret = process.env.KIS_APPSECRET;
+
+  if (!appkey || !appsecret) {
+    throw new Error("KIS_APPKEY 또는 KIS_APPSECRET 없음");
+  }
+
   const now = Date.now();
 
+  const storedToken = await getStoredKisTokenFromSupabase();
+  const storedExpireMs = getStoredTokenExpireMs(storedToken);
+  const needsDailyRefresh = shouldRefreshTokenForToday(storedToken, now);
+
+  // 1) 같은 서버리스 인스턴스 안에서는 메모리 캐시 재사용
+  // 단, 한국시간 오전 8시 이후 오늘 발급 이력이 없으면 새 토큰을 발급합니다.
+  if (!needsDailyRefresh && cachedToken && now < cachedTokenExpireAt - KIS_TOKEN_REFRESH_BUFFER_MS) {
+    return cachedToken;
+  }
+
+  // 2) Vercel 서버리스 인스턴스가 바뀌어도 Supabase 저장 토큰 재사용
+  if (
+    !needsDailyRefresh &&
+    storedToken?.access_token &&
+    storedExpireMs &&
+    now < storedExpireMs - KIS_TOKEN_REFRESH_BUFFER_MS
+  ) {
+    const storedAccessToken = String(storedToken.access_token);
+    cachedToken = storedAccessToken;
+    cachedTokenExpireAt = storedExpireMs;
+    return storedAccessToken;
+  }
+
+  // 3) 저장 토큰이 없거나 만료 임박이면 새로 발급
   const res = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -416,6 +505,7 @@ async function requestNewAccessToken(appkey: string, appsecret: string) {
   const expiresInSec = Number(json.expires_in ?? 86400);
   const safeExpiresInSec = Number.isFinite(expiresInSec) && expiresInSec > 0 ? expiresInSec : 86400;
   const expiresAtMs = now + safeExpiresInSec * 1000;
+
   const accessToken = String(json.access_token);
 
   cachedToken = accessToken;
@@ -424,61 +514,6 @@ async function requestNewAccessToken(appkey: string, appsecret: string) {
   await saveKisTokenToSupabase(accessToken, expiresAtMs);
 
   return accessToken;
-}
-
-async function getAccessToken() {
-  const appkey = process.env.KIS_APPKEY;
-  const appsecret = process.env.KIS_APPSECRET;
-
-  if (!appkey || !appsecret) {
-    throw new Error("KIS_APPKEY 또는 KIS_APPSECRET 없음");
-  }
-
-  const now = Date.now();
-
-  // 1) 같은 서버/로컬 실행 중에는 메모리 캐시를 최우선으로 재사용합니다.
-  //    Supabase 설정이 없거나 DB 토큰 조회가 실패해도, 이미 발급받은 토큰이 있으면 새로 발급하지 않습니다.
-  if (cachedToken && now < cachedTokenExpireAt - KIS_TOKEN_REFRESH_BUFFER_MS) {
-    return cachedToken;
-  }
-
-  // 2) Vercel 서버리스 인스턴스가 바뀌어도 Supabase에 저장된 토큰을 재사용합니다.
-  //    토큰 발급은 1분 제한이 있으므로, 유효한 저장 토큰이 있으면 오늘 8시 이후 발급 여부와 무관하게 우선 사용합니다.
-  const storedToken = await getStoredKisTokenFromSupabase();
-  const storedExpireMs = getStoredTokenExpireMs(storedToken);
-
-  if (
-    storedToken?.access_token &&
-    storedExpireMs &&
-    now < storedExpireMs - KIS_TOKEN_REFRESH_BUFFER_MS
-  ) {
-    const storedAccessToken = String(storedToken.access_token);
-    cachedToken = storedAccessToken;
-    cachedTokenExpireAt = storedExpireMs;
-    return storedAccessToken;
-  }
-
-  // 3) 같은 요청 안에서 fetchBreadth / fetchInvestorFlow 등이 동시에 토큰을 요구해도
-  //    tokenP는 딱 한 번만 호출되도록 Promise를 공유합니다.
-  if (tokenIssuePromise) {
-    return tokenIssuePromise;
-  }
-
-  // 4) KIS tokenP는 1분 1회 제한이 있으므로 실패 직후 연속 재시도를 막습니다.
-  const retryCooldownMs = 70 * 1000;
-  if (lastTokenIssueAttemptAt && now - lastTokenIssueAttemptAt < retryCooldownMs) {
-    const waitSec = Math.ceil((retryCooldownMs - (now - lastTokenIssueAttemptAt)) / 1000);
-    throw new Error(`KIS 토큰 발급 재시도 대기 중입니다. ${waitSec}초 후 다시 시도하세요.`);
-  }
-
-  lastTokenIssueAttemptAt = now;
-  tokenIssuePromise = requestNewAccessToken(appkey, appsecret);
-
-  try {
-    return await tokenIssuePromise;
-  } finally {
-    tokenIssuePromise = null;
-  }
 }
 
 function pickOutput(data: any) {
@@ -1337,7 +1372,17 @@ export async function GET(req: Request) {
               marketstate: latestDbRow.marketstate,
             }
           : null,
+        memoryLastFlow,
       });
+    }
+
+    if (hasFlowValue(flowData)) {
+      memoryLastFlow = {
+        foreign: toNumber(flowData.foreign),
+        inst: toNumber(flowData.inst),
+        indiv: toNumber(flowData.indiv),
+        updatedAt: Date.now(),
+      };
     }
 
     const foreign = flowData.foreign;
@@ -1419,6 +1464,9 @@ export async function GET(req: Request) {
 
       memoryPrevDiff = diff;
       memoryPrevFlowPower = flowPower;
+      if (hasFlowValue({ foreign, inst, indiv })) {
+        memoryLastFlow = { foreign, inst, indiv, updatedAt: Date.now() };
+      }
 
       saveResult = await saveLogToSupabase(rowToSave);
 
