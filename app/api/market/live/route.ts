@@ -1312,18 +1312,33 @@ export async function GET(req: Request) {
 
     const kospi = kospiData.price > 0 ? kospiData.price : toNumber(prevNormalRow?.kospi ?? latestDbRow?.kospi);
     const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(prevNormalRow?.kosdaq ?? latestDbRow?.kosdaq);
-    if (req.nextUrl.searchParams.get("debug") === "flow") {
-  return Response.json({
-    kospi,
-    kosdaq,
-    rawKospi: kospiData,
-    rawKosdaq: kosdaqData,
-  });
-}
 
     // GAS 방식과 동일하게 074 LIVE 실패 시에는 직전 정상 수급값을 대체 표시/저장합니다.
     // 대신 marketstate에 FLOW_FALLBACK 마커를 남겨 page.tsx에서 상태를 구분할 수 있게 합니다.
     const flowData = applyGasStyleFlowFallback(rawFlowData, latestDbRow);
+
+    // 수급 필드 확인용 디버그입니다.
+    // /api/market/live?debug=flow 호출 시 066 지수 원본 + 074 수급 원본 + fallback 적용 후 값을 함께 확인합니다.
+    if (req.nextUrl.searchParams.get("debug") === "flow") {
+      return Response.json({
+        kospi,
+        kosdaq,
+        rawKospi: kospiData,
+        rawKosdaq: kosdaqData,
+        rawFlowData,
+        flowData,
+        latestDbRow: latestDbRow
+          ? {
+              time: latestDbRow.time,
+              foreignflow: latestDbRow.foreignflow,
+              instflow: latestDbRow.instflow,
+              indivflow: latestDbRow.indivflow,
+              flowpower: latestDbRow.flowpower,
+              marketstate: latestDbRow.marketstate,
+            }
+          : null,
+      });
+    }
 
     const foreign = flowData.foreign;
     const inst = flowData.inst;
