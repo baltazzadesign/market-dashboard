@@ -407,7 +407,7 @@ function formatFlow(value?: number) {
 function toFlowEok(value?: number) {
   // DB 저장값은 KIS 원본 수급값(백만원 기준)을 유지하고,
   // 화면에서는 억원 단위로만 변환해서 표시합니다.
-  return Number(value ?? 0) / 100;
+  return Number(value ?? 0);
 }
 
 function formatFlowEok(value?: number) {
