@@ -19,6 +19,14 @@ let memoryPrevDiff = 0;
 let memoryPrevFlowPower = 0;
 let memoryRecentRows: Array<{ diff: number; foreignFlow: number; instFlow: number }> = [];
 let memoryLastFlow: { foreign: number; inst: number; indiv: number; updatedAt: number } | null = null;
+let memoryLastBreadth: {
+  up: number;
+  down: number;
+  flat: number;
+  kospi: number;
+  kosdaq: number;
+  updatedAt: number;
+} | null = null;
 
 const FLOW_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
 const KIS_BASE = process.env.KIS_BASE ?? "https://openapi.koreainvestment.com:9443";
@@ -382,11 +390,11 @@ async function getLatestNormalBreadthRowFromSupabase(createdat?: string) {
 }
 
 function shouldFallbackBreadth(currentTotal: number, prevNormalTotal: number) {
-  if (prevNormalTotal < MIN_NORMAL_BREADTH_TOTAL) return false;
-
-  // 066이 일시적으로 0/결측/부분 집계로 내려오면 그대로 저장하지 않고 직전 정상값을 유지합니다.
   if (currentTotal <= 0) return true;
   if (currentTotal < MIN_NORMAL_BREADTH_TOTAL) return true;
+  if (currentTotal >= MAX_NORMAL_BREADTH_TOTAL) return true;
+
+  if (prevNormalTotal < MIN_NORMAL_BREADTH_TOTAL) return false;
 
   // 직전 정상 총합 대비 25% 이상 줄면 API 부분 응답 가능성이 높으므로 fallback 처리합니다.
   if (currentTotal < Math.round(prevNormalTotal * BREADTH_DROP_FALLBACK_RATIO)) return true;
@@ -395,6 +403,46 @@ function shouldFallbackBreadth(currentTotal: number, prevNormalTotal: number) {
   if (currentTotal < Math.round(prevNormalTotal * BREADTH_HARD_DROP_FALLBACK_RATIO)) return true;
 
   return false;
+}
+
+function getMemoryBreadthFallbackRow(): SavedLogRow | null {
+  if (!memoryLastBreadth) return null;
+
+  const age = Date.now() - memoryLastBreadth.updatedAt;
+  // 066은 1분 단위로 저장되므로, 메모리 fallback은 장중 일시 장애 방어용으로 10분까지만 사용합니다.
+  if (age > 10 * 60 * 1000) return null;
+
+  return {
+    up: memoryLastBreadth.up,
+    down: memoryLastBreadth.down,
+    flat: memoryLastBreadth.flat,
+    kospi: memoryLastBreadth.kospi,
+    kosdaq: memoryLastBreadth.kosdaq,
+    time: normalizeMinuteValue(getKstTime()),
+  };
+}
+
+function rememberBreadthSnapshot(up: number, down: number, flat: number, kospi: number, kosdaq: number) {
+  const total = up + down + flat;
+  if (
+    total < MIN_NORMAL_BREADTH_TOTAL ||
+    total >= MAX_NORMAL_BREADTH_TOTAL ||
+    up <= 0 ||
+    down <= 0 ||
+    kospi <= MIN_VALID_INDEX_KOSPI ||
+    kosdaq <= MIN_VALID_INDEX_KOSDAQ
+  ) {
+    return;
+  }
+
+  memoryLastBreadth = {
+    up,
+    down,
+    flat,
+    kospi,
+    kosdaq,
+    updatedAt: Date.now(),
+  };
 }
 
 async function saveLogToSupabase(row: SupabaseLogPayload) {
@@ -601,10 +649,10 @@ function normalizeFlowDisplayUnit(value: any) {
   const n = toNumber(value);
   if (!Number.isFinite(n) || n === 0) return 0;
 
-  // 현재 TR_074 parseFlowFromJson은 이미 억 단위로 변환해서 저장/반환합니다.
-  // 다만 기존 DB에 백만원 단위로 저장된 과거 로그(-67,860 등)가 섞여 있으면
-  // 화면/차트/폴백에서 과대 표시되므로 읽을 때만 억 단위로 보정합니다.
-  // 예: -67,860(백만원) -> -679억, -8,942(억원) -> -8,942 유지
+  // 표시/저장 단위는 억원으로 통일합니다.
+  // 현재 TR_074의 *_ntby_tr_pbmn은 normalizeFlowUnit에서 이미 /100 처리되어 억원 단위입니다.
+  // 다만 기존 DB/폴백에 과거 백만원 단위 값(-67,860, -118,404 등)이 섞여 있으면
+  // 화면/차트/폴백에서 과대 표시되므로 읽을 때만 /100으로 보정합니다.
   if (Math.abs(n) >= 30000) return Math.round(n / 100);
   return Math.round(n);
 }
@@ -1396,7 +1444,11 @@ export async function GET(req: Request) {
     const liveFlat = kospiData.flat + kosdaqData.flat;
     const liveTotal = liveUp + liveDown + liveFlat;
 
-    const prevNormalRow = latestNormalBreadthRow ?? (isNormalBreadthRow(latestDbRow) ? latestDbRow : null);
+    const memoryBreadthRow = getMemoryBreadthFallbackRow();
+    const prevNormalRow =
+      latestNormalBreadthRow ??
+      (isNormalBreadthRow(latestDbRow) ? latestDbRow : null) ??
+      (isNormalBreadthRow(memoryBreadthRow) ? memoryBreadthRow : null);
     const prevNormalTotal = getBreadthTotal(prevNormalRow);
 
     let breadthSource: BreadthSource = "LIVE";
@@ -1450,6 +1502,10 @@ export async function GET(req: Request) {
     const kospi = kospiData.price > 0 ? kospiData.price : toNumber(prevNormalRow?.kospi ?? latestDbRow?.kospi);
     const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(prevNormalRow?.kosdaq ?? latestDbRow?.kosdaq);
 
+    if (breadthSource === "LIVE") {
+      rememberBreadthSnapshot(up, down, flat, kospi, kosdaq);
+    }
+
     // GAS 방식과 동일하게 074 LIVE 실패 시에는 직전 정상 수급값을 대체 표시/저장합니다.
     // 대신 marketstate에 FLOW_FALLBACK 마커를 남겨 page.tsx에서 상태를 구분할 수 있게 합니다.
     const flowData = applyGasStyleFlowFallback(rawFlowData, latestDbRow);
@@ -1475,6 +1531,7 @@ export async function GET(req: Request) {
             }
           : null,
         memoryLastFlow,
+        memoryLastBreadth,
       });
     }
 
