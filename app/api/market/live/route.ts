@@ -1512,7 +1512,7 @@ export async function GET(req: Request) {
 
     // 수급 필드 확인용 디버그입니다.
     // /api/market/live?debug=flow 호출 시 066 지수 원본 + 074 수급 원본 + fallback 적용 후 값을 함께 확인합니다.
-    if (req.nextUrl.searchParams.get("debug") === "flow") {
+    if (new URL(req.url).searchParams.get("debug") === "flow") {
       return Response.json({
         kospi,
         kosdaq,
