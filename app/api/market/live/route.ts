@@ -862,15 +862,15 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
   const appsecret = process.env.KIS_APPSECRET!;
   const token = await getAccessToken();
 
-  // 한국투자 TR_074(inquire-investor-time-by-market)는
-  // 지수코드만 넣으면 정상처리(rt_cd=0)여도 모든 수급값이 0으로 내려올 수 있습니다.
-  // 시장구분을 KOSPI=J / KOSDAQ=Q로 명확히 넣어 수급 row를 분리합니다.
+  // 한국투자 TR_074(inquire-investor-time-by-market)는 FID_INPUT_ISCD_2가 필수입니다.
+  // J/Q + fid_input_iscd만 쓰면 ERROR INPUT FIELD NOT FOUND [FID_INPUT_ISCD_2]가 발생합니다.
+  // 안정적으로 동작했던 조합: KOSPI = KSP + 0001, KOSDAQ = KSQ + 1001
+  const marketKey = market === "KOSPI" ? "KSP" : "KSQ";
   const marketCode = market === "KOSPI" ? "0001" : "1001";
-  const marketDivCode = market === "KOSPI" ? "J" : "Q";
 
   const qs = new URLSearchParams({
-    fid_cond_mrkt_div_code: marketDivCode,
-    fid_input_iscd: marketCode,
+    fid_input_iscd: marketKey,
+    fid_input_iscd_2: marketCode,
   });
 
   const res = await fetch(
@@ -900,7 +900,7 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
       indiv: 0,
       source: "ERROR",
       raw: {
-        request: { market, marketCode, marketDivCode },
+        request: { market, marketKey, marketCode },
         response: data,
       },
     };
@@ -910,7 +910,7 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
   const hasValue = parsed.foreign !== 0 || parsed.inst !== 0 || parsed.indiv !== 0;
 
   console.log("074 RESULT", market, {
-    request: { marketCode, marketDivCode },
+    request: { marketKey, marketCode },
     source: hasValue ? "LIVE" : "EMPTY",
     foreign: parsed.foreign,
     inst: parsed.inst,
@@ -921,7 +921,7 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
     ...parsed,
     source: hasValue ? "LIVE" : "EMPTY",
     raw: {
-      request: { market, marketCode, marketDivCode },
+      request: { market, marketKey, marketCode },
       response: data,
     },
   };
