@@ -12,6 +12,8 @@ function getKstTime() {
 
 let cachedToken: string | null = null;
 let cachedTokenExpireAt = 0;
+let tokenPromise: Promise<string> | null = null;
+let tokenCooldownUntil = 0;
 let lastSavedMinute = "";
 let memoryPrevDiff = 0;
 let memoryPrevFlowPower = 0;
@@ -401,6 +403,7 @@ async function saveLogToSupabase(row: SupabaseLogPayload) {
 
 const KIS_TOKEN_ROW_ID = "default";
 const KIS_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const KIS_TOKEN_COOLDOWN_MS = 70 * 1000;
 
 function getStoredTokenExpireMs(tokenRow: StoredKisToken | null) {
   if (!tokenRow?.expires_at) return 0;
@@ -454,15 +457,14 @@ async function getAccessToken() {
 
   const now = Date.now();
 
+  // 1) 같은 서버리스 인스턴스 안에서는 메모리 캐시를 최우선 재사용합니다.
+  if (cachedToken && now < cachedTokenExpireAt - KIS_TOKEN_REFRESH_BUFFER_MS) {
+    return cachedToken;
+  }
+
   const storedToken = await getStoredKisTokenFromSupabase();
   const storedExpireMs = getStoredTokenExpireMs(storedToken);
   const needsDailyRefresh = shouldRefreshTokenForToday(storedToken, now);
-
-  // 1) 같은 서버리스 인스턴스 안에서는 메모리 캐시 재사용
-  // 단, 한국시간 오전 8시 이후 오늘 발급 이력이 없으면 새 토큰을 발급합니다.
-  if (!needsDailyRefresh && cachedToken && now < cachedTokenExpireAt - KIS_TOKEN_REFRESH_BUFFER_MS) {
-    return cachedToken;
-  }
 
   // 2) Vercel 서버리스 인스턴스가 바뀌어도 Supabase 저장 토큰 재사용
   if (
@@ -477,43 +479,79 @@ async function getAccessToken() {
     return storedAccessToken;
   }
 
-  // 3) 저장 토큰이 없거나 만료 임박이면 새로 발급
-  const res = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "client_credentials",
-      appkey,
-      appsecret,
-    }),
-    cache: "no-store",
-  });
+  // 3) EGW00133 이후에는 tokenP 재시도를 막는 쿨다운을 둡니다.
+  if (now < tokenCooldownUntil) {
+    if (cachedToken) return cachedToken;
 
-  const text = await res.text();
-  let json: any = null;
+    if (storedToken?.access_token) {
+      const storedAccessToken = String(storedToken.access_token);
+      cachedToken = storedAccessToken;
+      cachedTokenExpireAt = storedExpireMs || now + KIS_TOKEN_COOLDOWN_MS;
+      return storedAccessToken;
+    }
+
+    const remainSec = Math.ceil((tokenCooldownUntil - now) / 1000);
+    throw new Error(`KIS 토큰 발급 쿨다운 중입니다. ${remainSec}초 후 다시 시도하세요.`);
+  }
+
+  // 4) 동시에 여러 요청이 들어오면 tokenP는 1번만 호출합니다.
+  if (tokenPromise) {
+    return tokenPromise;
+  }
+
+  tokenPromise = (async () => {
+    const res = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "client_credentials",
+        appkey,
+        appsecret,
+      }),
+      cache: "no-store",
+    });
+
+    const text = await res.text();
+    let json: any = null;
+
+    try {
+      json = JSON.parse(text);
+    } catch {
+      tokenCooldownUntil = Date.now() + KIS_TOKEN_COOLDOWN_MS;
+      throw new Error(`KIS 토큰 응답 JSON 파싱 실패: ${text}`);
+    }
+
+    if (!res.ok || !json.access_token) {
+      const errorCode = String(json?.error_code ?? "");
+      const errorDescription = String(json?.error_description ?? text ?? "");
+
+      if (errorCode === "EGW00133" || res.status === 403) {
+        tokenCooldownUntil = Date.now() + KIS_TOKEN_COOLDOWN_MS;
+      }
+
+      throw new Error(`KIS 토큰 발급 실패 ${res.status}: ${errorDescription || text}`);
+    }
+
+    const expiresInSec = Number(json.expires_in ?? 86400);
+    const safeExpiresInSec = Number.isFinite(expiresInSec) && expiresInSec > 0 ? expiresInSec : 86400;
+    const expiresAtMs = Date.now() + safeExpiresInSec * 1000;
+
+    const accessToken = String(json.access_token);
+
+    cachedToken = accessToken;
+    cachedTokenExpireAt = expiresAtMs;
+    tokenCooldownUntil = 0;
+
+    await saveKisTokenToSupabase(accessToken, expiresAtMs);
+
+    return accessToken;
+  })();
 
   try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`KIS 토큰 응답 JSON 파싱 실패: ${text}`);
+    return await tokenPromise;
+  } finally {
+    tokenPromise = null;
   }
-
-  if (!res.ok || !json.access_token) {
-    throw new Error(`KIS 토큰 발급 실패 ${res.status}: ${text}`);
-  }
-
-  const expiresInSec = Number(json.expires_in ?? 86400);
-  const safeExpiresInSec = Number.isFinite(expiresInSec) && expiresInSec > 0 ? expiresInSec : 86400;
-  const expiresAtMs = now + safeExpiresInSec * 1000;
-
-  const accessToken = String(json.access_token);
-
-  cachedToken = accessToken;
-  cachedTokenExpireAt = expiresAtMs;
-
-  await saveKisTokenToSupabase(accessToken, expiresAtMs);
-
-  return accessToken;
 }
 
 function pickOutput(data: any) {
