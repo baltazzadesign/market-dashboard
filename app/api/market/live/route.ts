@@ -203,12 +203,12 @@ function normalizeSavedRow(row: any): SavedLogRow | null {
     downratio: toNumber(row.downratio ?? row.downRatio),
     kospi: toNumber(row.kospi),
     kosdaq: toNumber(row.kosdaq),
-    foreignflow: toNumber(row.foreignflow ?? row.foreignFlow),
-    instflow: toNumber(row.instflow ?? row.instFlow),
-    indivflow: toNumber(row.indivflow ?? row.indivFlow),
-    flowpower: toNumber(row.flowpower ?? row.flowPower),
-    flowtrend: toNumber(row.flowtrend ?? row.flowTrend),
-    flowmomentum: toNumber(row.flowmomentum ?? row.flowMomentum),
+    foreignflow: normalizeFlowDisplayUnit(row.foreignflow ?? row.foreignFlow),
+    instflow: normalizeFlowDisplayUnit(row.instflow ?? row.instFlow),
+    indivflow: normalizeFlowDisplayUnit(row.indivflow ?? row.indivFlow),
+    flowpower: normalizeFlowDisplayUnit(row.flowpower ?? row.flowPower),
+    flowtrend: normalizeFlowDisplayUnit(row.flowtrend ?? row.flowTrend),
+    flowmomentum: normalizeFlowDisplayUnit(row.flowmomentum ?? row.flowMomentum),
     alert: row.alert ?? "",
     markettone: row.markettone ?? row.marketTone ?? "",
     marketscore: toNumber(row.marketscore ?? row.marketScore),
@@ -260,9 +260,9 @@ function rememberFlow(flowData: FlowData) {
   if (flowData.source !== "LIVE" || !hasFlowValue(flowData)) return;
 
   memoryLastFlow = {
-    foreign: toNumber(flowData.foreign),
-    inst: toNumber(flowData.inst),
-    indiv: toNumber(flowData.indiv),
+    foreign: normalizeFlowDisplayUnit(flowData.foreign),
+    inst: normalizeFlowDisplayUnit(flowData.inst),
+    indiv: normalizeFlowDisplayUnit(flowData.indiv),
     updatedAt: Date.now(),
   };
 }
@@ -297,9 +297,9 @@ function applyGasStyleFlowFallback(flowData: FlowData, prevRow: SavedLogRow | nu
   // 1순위: DB에 저장된 직전 정상 수급값 사용
   if (hasSavedFlow(prevRow)) {
     const fallback = {
-      foreign: toNumber(prevRow?.foreignflow),
-      inst: toNumber(prevRow?.instflow),
-      indiv: toNumber(prevRow?.indivflow),
+      foreign: normalizeFlowDisplayUnit(prevRow?.foreignflow),
+      inst: normalizeFlowDisplayUnit(prevRow?.instflow),
+      indiv: normalizeFlowDisplayUnit(prevRow?.indivflow),
       source: "FALLBACK" as const,
       raw: {
         fallbackFrom: "latestDbRow",
@@ -597,6 +597,18 @@ function toNumber(value: any) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function normalizeFlowDisplayUnit(value: any) {
+  const n = toNumber(value);
+  if (!Number.isFinite(n) || n === 0) return 0;
+
+  // 현재 TR_074 parseFlowFromJson은 이미 억 단위로 변환해서 저장/반환합니다.
+  // 다만 기존 DB에 백만원 단위로 저장된 과거 로그(-67,860 등)가 섞여 있으면
+  // 화면/차트/폴백에서 과대 표시되므로 읽을 때만 억 단위로 보정합니다.
+  // 예: -67,860(백만원) -> -679억, -8,942(억원) -> -8,942 유지
+  if (Math.abs(n) >= 30000) return Math.round(n / 100);
+  return Math.round(n);
+}
+
 function pickNumber(obj: any, keys: string[]) {
   for (const key of keys) {
     if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
@@ -740,7 +752,7 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
   // - qty/수량 필드는 절대 사용하지 않습니다.
   // - tr_pbmn/amt/val 등 순매수 "금액" 필드만 사용합니다.
   // - 시간대별 행이 여러 개 내려오면 합산하지 않고 가장 최근 행 1개만 사용합니다.
-  // - DB에는 KIS 원본 금액 단위(대체로 백만원)를 저장하고, 화면에서만 억원으로 변환합니다.
+  // - route.ts에서 KOSPI/KOSDAQ 합산 후 화면/DB 모두 억원 단위로 통일합니다.
   const directKeyGroups = {
     foreign: [
       "frgn_ntby_tr_pbmn",
@@ -1468,16 +1480,19 @@ export async function GET(req: Request) {
 
     if (hasFlowValue(flowData)) {
       memoryLastFlow = {
-        foreign: toNumber(flowData.foreign),
-        inst: toNumber(flowData.inst),
-        indiv: toNumber(flowData.indiv),
+        foreign: normalizeFlowDisplayUnit(flowData.foreign),
+        inst: normalizeFlowDisplayUnit(flowData.inst),
+        indiv: normalizeFlowDisplayUnit(flowData.indiv),
         updatedAt: Date.now(),
       };
     }
 
-    const foreign = flowData.foreign;
-    const inst = flowData.inst;
-    const indiv = flowData.indiv;
+    // 화면/DB 저장 단위는 억원으로 통일합니다.
+    // LIVE 수급은 parseFlowFromJson에서 이미 억원 단위로 변환되고,
+    // DB/메모리 폴백 값은 normalizeFlowDisplayUnit으로 과거 백만원 단위 로그를 보정합니다.
+    const foreign = normalizeFlowDisplayUnit(flowData.foreign);
+    const inst = normalizeFlowDisplayUnit(flowData.inst);
+    const indiv = normalizeFlowDisplayUnit(flowData.indiv);
 
     const flowPower = foreign + inst;
     const prevFlowPower = toNumber(latestDbRow?.flowpower ?? memoryPrevFlowPower);
