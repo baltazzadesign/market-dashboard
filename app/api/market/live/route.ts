@@ -50,7 +50,11 @@ type BreadthData = {
 };
 
 const MIN_NORMAL_BREADTH_TOTAL = 1500;
+const MAX_NORMAL_BREADTH_TOTAL = 5000;
 const BREADTH_DROP_FALLBACK_RATIO = 0.75;
+const BREADTH_HARD_DROP_FALLBACK_RATIO = 0.7;
+const MIN_VALID_INDEX_KOSPI = 1000;
+const MIN_VALID_INDEX_KOSDAQ = 300;
 const MARKET_OPEN_MINUTE = 9 * 60;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 
@@ -321,9 +325,24 @@ function applyGasStyleFlowFallback(flowData: FlowData, prevRow: SavedLogRow | nu
   return flowData;
 }
 
+function getMarketSnapshotInvalidReason(row: SupabaseLogPayload) {
+  const up = toNumber(row.up);
+  const down = toNumber(row.down);
+  const flat = toNumber(row.flat);
+  const total = up + down + flat;
+
+  if (total <= 0) return `breadth total is zero: total=${total}`;
+  if (total < MIN_NORMAL_BREADTH_TOTAL) return `breadth total too small: total=${total}`;
+  if (total >= MAX_NORMAL_BREADTH_TOTAL) return `breadth total too large: total=${total}`;
+  if (up <= 0 || down <= 0) return `breadth up/down invalid: up=${up}, down=${down}`;
+  if (toNumber(row.kospi) <= MIN_VALID_INDEX_KOSPI) return `kospi invalid: kospi=${row.kospi}`;
+  if (toNumber(row.kosdaq) <= MIN_VALID_INDEX_KOSDAQ) return `kosdaq invalid: kosdaq=${row.kosdaq}`;
+
+  return "";
+}
+
 function isValidMarketSnapshot(row: SupabaseLogPayload) {
-  const total = row.up + row.down + row.flat;
-  return total >= MIN_NORMAL_BREADTH_TOTAL && total < 5000 && row.kospi > 1000 && row.kosdaq > 300;
+  return getMarketSnapshotInvalidReason(row) === "";
 }
 
 function getBreadthTotal(row: Pick<SavedLogRow, "up" | "down" | "flat"> | null | undefined) {
@@ -364,7 +383,18 @@ async function getLatestNormalBreadthRowFromSupabase(createdat?: string) {
 
 function shouldFallbackBreadth(currentTotal: number, prevNormalTotal: number) {
   if (prevNormalTotal < MIN_NORMAL_BREADTH_TOTAL) return false;
-  return currentTotal < Math.round(prevNormalTotal * BREADTH_DROP_FALLBACK_RATIO);
+
+  // 066이 일시적으로 0/결측/부분 집계로 내려오면 그대로 저장하지 않고 직전 정상값을 유지합니다.
+  if (currentTotal <= 0) return true;
+  if (currentTotal < MIN_NORMAL_BREADTH_TOTAL) return true;
+
+  // 직전 정상 총합 대비 25% 이상 줄면 API 부분 응답 가능성이 높으므로 fallback 처리합니다.
+  if (currentTotal < Math.round(prevNormalTotal * BREADTH_DROP_FALLBACK_RATIO)) return true;
+
+  // 더 강한 급락 기준도 명시적으로 남겨 향후 조정하기 쉽게 합니다.
+  if (currentTotal < Math.round(prevNormalTotal * BREADTH_HARD_DROP_FALLBACK_RATIO)) return true;
+
+  return false;
 }
 
 async function saveLogToSupabase(row: SupabaseLogPayload) {
@@ -1366,7 +1396,10 @@ export async function GET(req: Request) {
 
     if (shouldFallbackBreadth(liveTotal, prevNormalTotal) && prevNormalRow) {
       breadthSource = "FALLBACK";
-      breadthFallbackReason = `066 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
+      breadthFallbackReason =
+        liveTotal < MIN_NORMAL_BREADTH_TOTAL
+          ? `066 합산 총합 비정상/결측: current=${liveTotal}, prev=${prevNormalTotal}`
+          : `066 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
       up = toNumber(prevNormalRow.up);
       down = toNumber(prevNormalRow.down);
       flat = toNumber(prevNormalRow.flat);
@@ -1508,8 +1541,11 @@ export async function GET(req: Request) {
       action: "skipped",
       id: null,
     };
+    const snapshotInvalidReason = getMarketSnapshotInvalidReason(rowToSave);
+    let saveSkipReason = isMarketTime ? snapshotInvalidReason : "OUT_OF_REGULAR_HOURS";
 
-    if (isMarketTime && isValidMarketSnapshot(rowToSave)) {
+    if (isMarketTime && !snapshotInvalidReason) {
+      saveSkipReason = "";
       lastSavedMinute = minuteKey;
 
       memoryRecentRows.push({
@@ -1547,6 +1583,8 @@ export async function GET(req: Request) {
         flowSource: flowData.source,
         breadthSource,
         breadthFallbackReason,
+        snapshotInvalidReason,
+        saveSkipReason,
       });
     }
 
@@ -1591,6 +1629,8 @@ export async function GET(req: Request) {
       signals,
       saved: saveResult.action !== "skipped",
       saveAction: saveResult.action,
+      snapshotInvalidReason,
+      saveSkipReason,
     });
   } catch (error: any) {
     return Response.json(
