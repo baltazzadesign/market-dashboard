@@ -526,11 +526,8 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
 }
 
 function normalizeFlowUnit(value: number) {
-  const abs = Math.abs(value);
-
-  if (abs >= 100_000_000) return Math.round(value / 1_000_000);
-  if (abs >= 100_000) return Math.round(value / 1_000);
-
+  // DB에는 KIS에서 받은 실제 수급 원본값을 저장합니다.
+  // 억원 변환은 app/daily/page.tsx 화면 표시 단계에서만 처리합니다.
   return value;
 }
 

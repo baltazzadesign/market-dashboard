@@ -404,6 +404,19 @@ function formatFlow(value?: number) {
   return Number(value ?? 0).toLocaleString();
 }
 
+function toFlowEok(value?: number) {
+  // DB 저장값은 KIS 원본 수급값(백만원 기준)을 유지하고,
+  // 화면에서는 억원 단위로만 변환해서 표시합니다.
+  return Number(value ?? 0) / 100;
+}
+
+function formatFlowEok(value?: number) {
+  const eok = toFlowEok(value);
+  const abs = Math.abs(eok);
+  const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
+  return `${eok.toLocaleString(undefined, { maximumFractionDigits: digits })}억`;
+}
+
 function flowTone(row?: Row, prev?: Row) {
   const power = getFlowPower(row);
   const trend = getFlowTrend(row, prev);
@@ -1054,6 +1067,10 @@ export default function DailyPage() {
           flowTrendValue: getFlowTrend(r, prev),
           flowMomentumValue: Number(r.flowMomentum ?? getFlowPower(r)),
           foreignInstFlowValue: Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0),
+          foreignFlowEokValue: toFlowEok(Number(r.foreignFlow ?? 0)),
+          instFlowEokValue: toFlowEok(Number(r.instFlow ?? 0)),
+          indivFlowEokValue: toFlowEok(Number(r.indivFlow ?? 0)),
+          foreignInstFlowEokValue: toFlowEok(Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0)),
         };
       }),
     [flowDisplayRows]
@@ -1076,6 +1093,10 @@ export default function DailyPage() {
           flowTrendValue: clampChartNullable(row.flowTrendValue),
           flowMomentumValue: clampChartNullable(row.flowMomentumValue),
           foreignInstFlowValue: clampChartNullable(row.foreignInstFlowValue),
+          foreignFlowEokValue: clampChartNullable(row.foreignFlowEokValue, 1200),
+          instFlowEokValue: clampChartNullable(row.instFlowEokValue, 1200),
+          indivFlowEokValue: clampChartNullable(row.indivFlowEokValue, 1200),
+          foreignInstFlowEokValue: clampChartNullable(row.foreignInstFlowEokValue, 1200),
         })),
     [chartRows]
   );
@@ -1134,7 +1155,7 @@ export default function DailyPage() {
         ? {
             key: `divergence-${latestDivergenceRow.timeLabel}-${latestDivergenceRow.divergenceType}`,
             title: latestDivergenceRow.divergenceLabel,
-            body: `${latestDivergenceRow.timeLabel} / 수급 변화 ${formatFlow(latestDivergenceRow.flowMoveValue)}`,
+            body: `${latestDivergenceRow.timeLabel} / 수급 변화 ${formatFlowEok(latestDivergenceRow.flowMoveValue)}`,
           }
         : null;
 
@@ -1355,10 +1376,10 @@ export default function DailyPage() {
                 gap: 10,
               }}
             >
-              <CompactMetric title="외국인" value={formatFlow(Number(last.foreignFlow ?? 0))} color={getFlowColor(Number(last.foreignFlow ?? 0))} />
-              <CompactMetric title="기관" value={formatFlow(Number(last.instFlow ?? 0))} color={getFlowColor(Number(last.instFlow ?? 0))} />
-              <CompactMetric title="개인" value={formatFlow(Number(last.indivFlow ?? 0))} color={getFlowColor(Number(last.indivFlow ?? 0))} />
-              <CompactMetric title="수급합" value={formatFlow(getFlowPower(last))} color={getFlowPower(last) >= 0 ? "#ef4444" : "#60a5fa"} />
+              <CompactMetric title="외국인" value={formatFlowEok(Number(last.foreignFlow ?? 0))} color={getFlowColor(Number(last.foreignFlow ?? 0))} />
+              <CompactMetric title="기관" value={formatFlowEok(Number(last.instFlow ?? 0))} color={getFlowColor(Number(last.instFlow ?? 0))} />
+              <CompactMetric title="개인" value={formatFlowEok(Number(last.indivFlow ?? 0))} color={getFlowColor(Number(last.indivFlow ?? 0))} />
+              <CompactMetric title="수급합" value={formatFlowEok(getFlowPower(last))} color={getFlowPower(last) >= 0 ? "#ef4444" : "#60a5fa"} />
             </div>
           </div>
 
@@ -1413,12 +1434,12 @@ export default function DailyPage() {
               gap: 12,
             }}
           >
-            <SummaryCard title="수급 추세" value={formatFlow(getFlowTrend(last, prevLast))} color={getFlowTrend(last, prevLast) >= 0 ? "#ef4444" : "#60a5fa"} />
-            <SummaryCard title="수급 모멘텀" value={formatFlow(Number(last.flowMomentum ?? getFlowPower(last)))} color={Number(last.flowMomentum ?? getFlowPower(last)) >= 0 ? "#ef4444" : "#60a5fa"} />
+            <SummaryCard title="수급 추세" value={formatFlowEok(getFlowTrend(last, prevLast))} color={getFlowTrend(last, prevLast) >= 0 ? "#ef4444" : "#60a5fa"} />
+            <SummaryCard title="수급 모멘텀" value={formatFlowEok(Number(last.flowMomentum ?? getFlowPower(last)))} color={Number(last.flowMomentum ?? getFlowPower(last)) >= 0 ? "#ef4444" : "#60a5fa"} />
             <SummaryCard title="세션 최고 Diff" value={`${sessionSummary.highDiff.toLocaleString()} / ${sessionSummary.highDiffTime}`} color="#22c55e" />
             <SummaryCard title="세션 최저 Diff" value={`${sessionSummary.lowDiff.toLocaleString()} / ${sessionSummary.lowDiffTime}`} color="#60a5fa" />
             <SummaryCard title="다이버전스" value={`위험 ${sessionSummary.dangerCount} / 매집 ${sessionSummary.accumulationCount}`} color="#facc15" />
-            <SummaryCard title="수급 범위" value={`${formatFlow(sessionSummary.flowLow)} ~ ${formatFlow(sessionSummary.flowPeak)}`} color="#38bdf8" />
+            <SummaryCard title="수급 범위" value={`${formatFlowEok(sessionSummary.flowLow)} ~ ${formatFlowEok(sessionSummary.flowPeak)}`} color="#38bdf8" />
             <SummaryCard title="ALERT" value={summary?.total ?? 0} color="#facc15" />
             <SummaryCard title="최근 발생" value={latestDivergence?.timeLabel ?? sessionSummary.latestTime} color="#e5e7eb" />
           </div>
@@ -1495,16 +1516,16 @@ export default function DailyPage() {
                   <IndexCell value={row.kospi} prevValue={flowDisplayRows[index - 1]?.kospi} />
                   <IndexCell value={row.kosdaq} prevValue={flowDisplayRows[index - 1]?.kosdaq} />
                   <td style={{ ...td, color: Number(row.foreignFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa" }}>
-                    {formatFlow(Number(row.foreignFlow ?? 0))}
+                    {formatFlowEok(Number(row.foreignFlow ?? 0))}
                   </td>
                   <td style={{ ...td, color: Number(row.instFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa" }}>
-                    {formatFlow(Number(row.instFlow ?? 0))}
+                    {formatFlowEok(Number(row.instFlow ?? 0))}
                   </td>
                   <td style={{ ...td, color: Number(row.indivFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa" }}>
-                    {formatFlow(Number(row.indivFlow ?? 0))}
+                    {formatFlowEok(Number(row.indivFlow ?? 0))}
                   </td>
                   <td style={{ ...td, color: getFlowPower(row) >= 0 ? "#ef4444" : "#60a5fa" }}>
-                    {formatFlow(getFlowPower(row))}
+                    {formatFlowEok(getFlowPower(row))}
                   </td>
                 </tr>
               ))}
@@ -1715,9 +1736,9 @@ export default function DailyPage() {
             height={240}
             referenceLines={[0]}
             lines={[
-              { key: "foreignFlowValue", name: "외국인", color: "#60a5fa" },
-              { key: "instFlowValue", name: "기관", color: "#ef4444" },
-              { key: "indivFlowValue", name: "개인", color: "#facc15" },
+              { key: "foreignFlowEokValue", name: "외국인(억)", color: "#60a5fa" },
+              { key: "instFlowEokValue", name: "기관(억)", color: "#ef4444" },
+              { key: "indivFlowEokValue", name: "개인(억)", color: "#facc15" },
             ]}
             showRebound={showRebound}
             showDangerDivergence={showDangerDivergence}
@@ -1846,7 +1867,7 @@ export default function DailyPage() {
             <MemoMiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
             <MemoMiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} referenceLines={[0]} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
             <div style={{ gridColumn: "1 / -1" }}>
-              <MemoMiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowValue", name: "외국인", color: "#60a5fa" }, { key: "instFlowValue", name: "기관", color: "#ef4444" }, { key: "indivFlowValue", name: "개인", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+              <MemoMiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowEokValue", name: "외국인(억)", color: "#60a5fa" }, { key: "instFlowEokValue", name: "기관(억)", color: "#ef4444" }, { key: "indivFlowEokValue", name: "개인(억)", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
             </div>
             <MemoMiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
             <MemoMiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
@@ -2034,7 +2055,11 @@ function ModernTooltip({ active, payload, label }: any) {
       {payload.map((item: any) => (
         <div key={`${item.name}-${item.dataKey}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", fontSize: 12, lineHeight: 1.7 }}>
           <span style={{ color: item.color, fontWeight: 800 }}>{item.name}</span>
-          <strong style={{ color: "#f8fafc", fontWeight: 900 }}>{Number(item.value ?? 0).toLocaleString()}</strong>
+          <strong style={{ color: "#f8fafc", fontWeight: 900 }}>
+            {String(item.dataKey ?? "").includes("Eok")
+              ? `${Number(item.value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}억`
+              : Number(item.value ?? 0).toLocaleString()}
+          </strong>
         </div>
       ))}
     </div>
@@ -2555,7 +2580,7 @@ function FlowMiniCard({
     >
       <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>{title}</div>
       <div style={{ fontSize: strong ? 19 : 16, fontWeight: 900, color }}>
-        {isNumber ? formatFlow(value) : value}
+        {isNumber ? formatFlowEok(value) : value}
       </div>
       {isNumber && (
         <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
