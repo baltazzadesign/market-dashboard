@@ -649,11 +649,9 @@ function normalizeFlowDisplayUnit(value: any) {
   const n = toNumber(value);
   if (!Number.isFinite(n) || n === 0) return 0;
 
-  // 표시/저장 단위는 억원으로 통일합니다.
-  // 현재 TR_074의 *_ntby_tr_pbmn은 normalizeFlowUnit에서 이미 /100 처리되어 억원 단위입니다.
-  // 다만 기존 DB/폴백에 과거 백만원 단위 값(-67,860, -118,404 등)이 섞여 있으면
-  // 화면/차트/폴백에서 과대 표시되므로 읽을 때만 /100으로 보정합니다.
-  if (Math.abs(n) >= 30000) return Math.round(n / 100);
+  // 표시/저장 단위는 증권사 화면과 같은 억원 단위로 통일합니다.
+  // TR_074에서 선택한 순매수 금액 필드는 현재 증권사 화면의 억원 단위 값과 직접 대응하므로
+  // 여기서 추가로 /100 보정하지 않습니다.
   return Math.round(n);
 }
 
@@ -714,11 +712,10 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
 }
 
 function normalizeFlowUnit(value: number) {
-  // TR_074의 *_ntby_tr_pbmn 값은 HTS의 억원 단위와 비교할 때
-  // 100으로 나눠야 KOSPI/KOSDAQ 합산 수급이 증권사 화면과 맞습니다.
-  // 예: -798,781 -> -7,988억 수준
+  // TR_074에서 선택한 순매수 금액 필드는 증권사 화면의 억원 단위 값과 직접 대응합니다.
+  // 기존처럼 /100을 하면 -7,414억이 -74.1억처럼 100배 작게 표시되므로 나누지 않습니다.
   if (!Number.isFinite(value) || value === 0) return 0;
-  return Math.round(value / 100);
+  return Math.round(value);
 }
 
 function parseFlowMinute(row: any) {
@@ -1544,9 +1541,9 @@ export async function GET(req: Request) {
       };
     }
 
-    // 화면/DB 저장 단위는 억원으로 통일합니다.
-    // LIVE 수급은 parseFlowFromJson에서 이미 억원 단위로 변환되고,
-    // DB/메모리 폴백 값은 normalizeFlowDisplayUnit으로 과거 백만원 단위 로그를 보정합니다.
+    // 화면/DB 저장 단위는 증권사 화면과 같은 억원 단위로 통일합니다.
+    // LIVE 수급은 parseFlowFromJson에서 이미 억원 단위로 정리되고,
+    // DB/메모리 폴백 값도 추가 나눗셈 없이 같은 단위로 유지합니다.
     const foreign = normalizeFlowDisplayUnit(flowData.foreign);
     const inst = normalizeFlowDisplayUnit(flowData.inst);
     const indiv = normalizeFlowDisplayUnit(flowData.indiv);
