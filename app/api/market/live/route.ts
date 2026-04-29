@@ -526,23 +526,12 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
 }
 
 function normalizeFlowUnit(value: number) {
-  const n = Number(value ?? 0);
-  if (!Number.isFinite(n)) return 0;
+  const abs = Math.abs(value);
 
-  // TR_074의 *_tr_pbmn 값은 보통 백만원 단위입니다.
-  // DB 저장 기준은 백만원 원본값으로 유지하고, 화면에서만 /100 해서 억원 표시합니다.
-  // 혹시 원 단위 값이 들어오는 예외 응답은 백만원 단위로 보정합니다.
-  if (Math.abs(n) >= 1_000_000_000) {
-    return Math.round(n / 1_000_000);
-  }
+  if (abs >= 100_000_000) return Math.round(value / 1_000_000);
+  if (abs >= 100_000) return Math.round(value / 1_000);
 
-  return n;
-}
-
-function pickNumberByKeysAndPattern(obj: any, keys: string[], patterns: RegExp[]) {
-  const byKey = pickNumber(obj, keys);
-  if (byKey !== 0) return byKey;
-  return pickNumberByPattern(obj, patterns);
+  return value;
 }
 
 function parseFlowMinute(row: any) {
@@ -611,20 +600,27 @@ function pickNumberByPattern(obj: any, patterns: RegExp[]) {
   return 0;
 }
 
+function pickNumberByKeysAndPattern(obj: any, keys: string[], patterns: RegExp[]) {
+  const byKey = pickNumber(obj, keys);
+  if (byKey !== 0) return byKey;
+  return pickNumberByPattern(obj, patterns);
+}
+
 function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
   const rows = getRows(data);
 
-  // 수량(qty/vol)이 아니라 순매수 금액 계열만 사용합니다.
-  // 현재 화면은 코스피+코스닥 당일 순매수 금액을 증권사처럼 억원으로 보여주는 구조입니다.
+  // 핵심 수정:
+  // - qty/수량 필드는 절대 사용하지 않습니다.
+  // - tr_pbmn/amt/val 등 순매수 "금액" 필드만 사용합니다.
+  // - 시간대별 행이 여러 개 내려오면 합산하지 않고 가장 최근 행 1개만 사용합니다.
+  // - DB에는 KIS 원본 금액 단위(대체로 백만원)를 저장하고, 화면에서만 억원으로 변환합니다.
   const directKeyGroups = {
     foreign: [
       "frgn_ntby_tr_pbmn",
       "frgn_ntby_amt",
       "frgn_ntby_val",
       "frgn_seln_buy_amt",
-      "frgn",
-      "foreign",
-      "foreignFlow",
+      "frgn_ntby_tr_pbmn_1",
     ],
     inst: [
       "orgn_ntby_tr_pbmn",
@@ -633,9 +629,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       "inst_ntby_amt",
       "orgn_ntby_val",
       "inst_ntby_val",
-      "orgn",
-      "inst",
-      "instFlow",
     ],
     indiv: [
       "prsn_ntby_tr_pbmn",
@@ -644,16 +637,24 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       "indv_ntby_amt",
       "prsn_ntby_val",
       "indv_ntby_val",
-      "individual",
-      "indiv",
-      "indivFlow",
     ],
   };
 
   const patternGroups = {
-    foreign: [/frgn.*ntby.*(tr|amt|val|pbmn)/i, /foreign.*net.*(tr|amt|val|pbmn)/i],
-    inst: [/orgn.*ntby.*(tr|amt|val|pbmn)/i, /inst.*ntby.*(tr|amt|val|pbmn)/i],
-    indiv: [/prsn.*ntby.*(tr|amt|val|pbmn)/i, /indv.*ntby.*(tr|amt|val|pbmn)/i],
+    foreign: [
+      /^frgn.*ntby.*(tr|amt|val|pbmn)/i,
+      /^foreign.*net.*(tr|amt|val|pbmn)/i,
+    ],
+    inst: [
+      /^orgn.*ntby.*(tr|amt|val|pbmn)/i,
+      /^inst.*ntby.*(tr|amt|val|pbmn)/i,
+      /^organ.*net.*(tr|amt|val|pbmn)/i,
+    ],
+    indiv: [
+      /^prsn.*ntby.*(tr|amt|val|pbmn)/i,
+      /^indv.*ntby.*(tr|amt|val|pbmn)/i,
+      /^individual.*net.*(tr|amt|val|pbmn)/i,
+    ],
   };
 
   const candidates: Array<{
@@ -679,8 +680,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
   }
 
   if (candidates.length > 0) {
-    // 시간대별 누적 데이터가 여러 개 오는 경우, 전부 더하지 말고 가장 최근 행만 사용합니다.
-    // 시간 필드가 없으면 응답 순서상 마지막 유효 행을 최신값으로 봅니다.
     const latest = candidates.reduce((best, current) => {
       if (current.minute > best.minute) return current;
       if (current.minute === best.minute) return current;
@@ -695,8 +694,8 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
     };
   }
 
-  // 예외 응답: 투자자별 행으로 내려오는 경우만 투자자명 기준으로 1회 합산합니다.
-  // 이 경우도 시간대 행 전체를 누적하지 않도록 동일 투자자별 최신 행만 사용합니다.
+  // 예외 응답: 투자자별 행으로 내려오는 경우만 투자자명 기준으로 처리합니다.
+  // 이때도 qty/수량은 제외하고 금액 필드만 사용하며, 동일 투자자별 최신 행만 사용합니다.
   const byInvestor = new Map<string, { minute: number; amount: number }>();
 
   for (const row of rows) {
@@ -760,7 +759,6 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
     indiv: byInvestor.get("indiv")?.amount ?? 0,
   };
 }
-
 async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<FlowData> {
   const appkey = process.env.KIS_APPKEY!;
   const appsecret = process.env.KIS_APPSECRET!;
