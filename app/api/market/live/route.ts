@@ -12,6 +12,8 @@ function getKstTime() {
 
 let cachedToken: string | null = null;
 let cachedTokenExpireAt = 0;
+let tokenPromise: Promise<string> | null = null;
+let lastTokenIssueAttemptAt = 0;
 let lastSavedMinute = "";
 let memoryPrevDiff = 0;
 let memoryPrevFlowPower = 0;
@@ -401,6 +403,7 @@ async function saveLogToSupabase(row: SupabaseLogPayload) {
 
 const KIS_TOKEN_ROW_ID = "default";
 const KIS_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const KIS_TOKEN_ISSUE_MIN_INTERVAL_MS = 70 * 1000;
 
 function getStoredTokenExpireMs(tokenRow: StoredKisToken | null) {
   if (!tokenRow?.expires_at) return 0;
@@ -454,66 +457,104 @@ async function getAccessToken() {
 
   const now = Date.now();
 
-  const storedToken = await getStoredKisTokenFromSupabase();
-  const storedExpireMs = getStoredTokenExpireMs(storedToken);
-  const needsDailyRefresh = shouldRefreshTokenForToday(storedToken, now);
-
-  // 1) 같은 서버리스 인스턴스 안에서는 메모리 캐시 재사용
-  // 단, 한국시간 오전 8시 이후 오늘 발급 이력이 없으면 새 토큰을 발급합니다.
-  if (!needsDailyRefresh && cachedToken && now < cachedTokenExpireAt - KIS_TOKEN_REFRESH_BUFFER_MS) {
+  // 1) 같은 서버리스 인스턴스 안에서는 메모리 토큰을 최우선 재사용합니다.
+  // Supabase 조회보다 먼저 확인해야, /api/market/live가 여러 번 호출돼도 토큰 재발급 제한에 걸리지 않습니다.
+  if (cachedToken && now < cachedTokenExpireAt - KIS_TOKEN_REFRESH_BUFFER_MS) {
     return cachedToken;
   }
 
-  // 2) Vercel 서버리스 인스턴스가 바뀌어도 Supabase 저장 토큰 재사용
-  if (
-    !needsDailyRefresh &&
-    storedToken?.access_token &&
-    storedExpireMs &&
-    now < storedExpireMs - KIS_TOKEN_REFRESH_BUFFER_MS
-  ) {
-    const storedAccessToken = String(storedToken.access_token);
-    cachedToken = storedAccessToken;
-    cachedTokenExpireAt = storedExpireMs;
-    return storedAccessToken;
+  // 2) 이미 토큰 발급 요청이 진행 중이면 그 요청을 같이 기다립니다.
+  // KOSPI/KOSDAQ 수급을 동시에 호출할 때 tokenP가 2번 호출되는 문제를 막습니다.
+  if (tokenPromise) {
+    return tokenPromise;
   }
 
-  // 3) 저장 토큰이 없거나 만료 임박이면 새로 발급
-  const res = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "client_credentials",
-      appkey,
-      appsecret,
-    }),
-    cache: "no-store",
-  });
+  tokenPromise = (async () => {
+    const requestStartedAt = Date.now();
 
-  const text = await res.text();
-  let json: any = null;
+    try {
+      const storedToken = await getStoredKisTokenFromSupabase();
+      const storedExpireMs = getStoredTokenExpireMs(storedToken);
+      const needsDailyRefresh = shouldRefreshTokenForToday(storedToken, requestStartedAt);
 
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`KIS 토큰 응답 JSON 파싱 실패: ${text}`);
-  }
+      // 3) Supabase에 저장된 토큰이 살아 있으면 재사용합니다.
+      // 단, 한국시간 08시 이후 오늘 발급 이력이 없을 때만 새 토큰 발급을 시도합니다.
+      if (
+        !needsDailyRefresh &&
+        storedToken?.access_token &&
+        storedExpireMs &&
+        requestStartedAt < storedExpireMs - KIS_TOKEN_REFRESH_BUFFER_MS
+      ) {
+        const storedAccessToken = String(storedToken.access_token);
+        cachedToken = storedAccessToken;
+        cachedTokenExpireAt = storedExpireMs;
+        return storedAccessToken;
+      }
 
-  if (!res.ok || !json.access_token) {
-    throw new Error(`KIS 토큰 발급 실패 ${res.status}: ${text}`);
-  }
+      // 4) tokenP는 1분 1회 제한이 있으므로, 직전 발급 시도 직후에는 무리하게 재시도하지 않습니다.
+      if (lastTokenIssueAttemptAt && requestStartedAt - lastTokenIssueAttemptAt < KIS_TOKEN_ISSUE_MIN_INTERVAL_MS) {
+        if (cachedToken) return cachedToken;
+        throw new Error("KIS 토큰 발급 제한 대기 중: 잠시 후 다시 시도 필요");
+      }
 
-  const expiresInSec = Number(json.expires_in ?? 86400);
-  const safeExpiresInSec = Number.isFinite(expiresInSec) && expiresInSec > 0 ? expiresInSec : 86400;
-  const expiresAtMs = now + safeExpiresInSec * 1000;
+      lastTokenIssueAttemptAt = requestStartedAt;
 
-  const accessToken = String(json.access_token);
+      const res = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "client_credentials",
+          appkey,
+          appsecret,
+        }),
+        cache: "no-store",
+      });
 
-  cachedToken = accessToken;
-  cachedTokenExpireAt = expiresAtMs;
+      const text = await res.text();
+      let json: any = null;
 
-  await saveKisTokenToSupabase(accessToken, expiresAtMs);
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error(`KIS 토큰 응답 JSON 파싱 실패: ${text}`);
+      }
 
-  return accessToken;
+      if (!res.ok || !json.access_token) {
+        // EGW00133 등 tokenP 제한이 걸렸더라도 기존 메모리 토큰이 있으면 우선 재사용합니다.
+        if (cachedToken && Date.now() < cachedTokenExpireAt - 10_000) {
+          console.warn("KIS 토큰 신규 발급 실패, 기존 메모리 토큰 재사용:", text);
+          return cachedToken;
+        }
+
+        if (storedToken?.access_token && storedExpireMs && Date.now() < storedExpireMs - 10_000) {
+          const storedAccessToken = String(storedToken.access_token);
+          cachedToken = storedAccessToken;
+          cachedTokenExpireAt = storedExpireMs;
+          console.warn("KIS 토큰 신규 발급 실패, Supabase 저장 토큰 재사용:", text);
+          return storedAccessToken;
+        }
+
+        throw new Error(`KIS 토큰 발급 실패 ${res.status}: ${text}`);
+      }
+
+      const expiresInSec = Number(json.expires_in ?? 86400);
+      const safeExpiresInSec = Number.isFinite(expiresInSec) && expiresInSec > 0 ? expiresInSec : 86400;
+      const expiresAtMs = requestStartedAt + safeExpiresInSec * 1000;
+
+      const accessToken = String(json.access_token);
+
+      cachedToken = accessToken;
+      cachedTokenExpireAt = expiresAtMs;
+
+      await saveKisTokenToSupabase(accessToken, expiresAtMs);
+
+      return accessToken;
+    } finally {
+      tokenPromise = null;
+    }
+  })();
+
+  return tokenPromise;
 }
 
 function pickOutput(data: any) {
@@ -911,11 +952,15 @@ async function fetchInvestorFlow(): Promise<FlowData> {
   } catch (error) {
     console.warn("수급 API 요청 실패:", error);
 
+    const memoryFallback = getMemoryFlowFallback({ error: String(error) });
+    if (memoryFallback) return memoryFallback;
+
     return {
       foreign: 0,
       inst: 0,
       indiv: 0,
       source: "ERROR",
+      raw: { error: String(error) },
     };
   }
 }
