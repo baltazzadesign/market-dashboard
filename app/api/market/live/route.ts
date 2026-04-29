@@ -624,12 +624,11 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
 }
 
 function normalizeFlowUnit(value: number) {
-  const abs = Math.abs(value);
-
-  if (abs >= 100_000_000) return Math.round(value / 1_000_000);
-  if (abs >= 100_000) return Math.round(value / 1_000);
-
-  return value;
+  // TR_074의 *_ntby_tr_pbmn 값은 HTS의 억원 단위와 비교할 때
+  // 100으로 나눠야 KOSPI/KOSDAQ 합산 수급이 증권사 화면과 맞습니다.
+  // 예: -798,781 -> -7,988억 수준
+  if (!Number.isFinite(value) || value === 0) return 0;
+  return Math.round(value / 100);
 }
 
 function parseFlowMinute(row: any) {
