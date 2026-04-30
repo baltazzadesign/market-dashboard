@@ -649,10 +649,13 @@ function normalizeFlowDisplayUnit(value: any) {
   const n = toNumber(value);
   if (!Number.isFinite(n) || n === 0) return 0;
 
-  // 표시/저장 단위는 증권사 화면과 같은 억원 단위로 통일합니다.
-  // TR_074에서 선택한 순매수 금액 필드는 현재 증권사 화면의 억원 단위 값과 직접 대응하므로
-  // 여기서 추가로 /100 보정하지 않습니다.
-  return Math.round(n);
+  // 수급 표시/저장 단위는 증권사 화면과 같은 억원 단위로 통일합니다.
+  // TR_074 원본 금액 필드는 화면 표시 억원 대비 100배 크게 내려오는 케이스가 있어
+  // LIVE 파싱에서는 normalizeFlowUnit()에서 /100 처리합니다.
+  // 단, 이미 DB에 잘못 저장된 100배 수급값이 FALLBACK으로 재사용되는 것을 막기 위해
+  // 과도하게 큰 기존값은 여기서 한 번 보정합니다.
+  const fixed = Math.abs(n) >= 50000 ? n / 100 : n;
+  return Math.round(fixed);
 }
 
 function pickNumber(obj: any, keys: string[]) {
@@ -712,10 +715,11 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
 }
 
 function normalizeFlowUnit(value: number) {
-  // TR_074에서 선택한 순매수 금액 필드는 증권사 화면의 억원 단위 값과 직접 대응합니다.
-  // 기존처럼 /100을 하면 -7,414억이 -74.1억처럼 100배 작게 표시되므로 나누지 않습니다.
+  // TR_074 금액 필드는 실제 증권사 화면의 억원 단위보다 100배 크게 내려옵니다.
+  // 예: 원본 416,200 -> 화면 4,162억.
+  // 따라서 KOSPI/KOSDAQ 합산 전에 각 시장 값을 /100으로 보정합니다.
   if (!Number.isFinite(value) || value === 0) return 0;
-  return Math.round(value);
+  return Math.round(value / 100);
 }
 
 function parseFlowMinute(row: any) {
@@ -1542,8 +1546,8 @@ export async function GET(req: Request) {
     }
 
     // 화면/DB 저장 단위는 증권사 화면과 같은 억원 단위로 통일합니다.
-    // LIVE 수급은 parseFlowFromJson에서 이미 억원 단위로 정리되고,
-    // DB/메모리 폴백 값도 추가 나눗셈 없이 같은 단위로 유지합니다.
+    // LIVE 수급은 parseFlowFromJson -> normalizeFlowUnit에서 /100 보정 후 억원 단위로 정리됩니다.
+    // DB/메모리 폴백 중 과거에 100배로 잘못 저장된 값은 normalizeFlowDisplayUnit에서 보정합니다.
     const foreign = normalizeFlowDisplayUnit(flowData.foreign);
     const inst = normalizeFlowDisplayUnit(flowData.inst);
     const indiv = normalizeFlowDisplayUnit(flowData.indiv);
