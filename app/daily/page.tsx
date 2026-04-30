@@ -1093,10 +1093,10 @@ export default function DailyPage() {
           flowTrendValue: clampChartNullable(row.flowTrendValue),
           flowMomentumValue: clampChartNullable(row.flowMomentumValue),
           foreignInstFlowValue: clampChartNullable(row.foreignInstFlowValue),
-          foreignFlowEokValue: clampChartNullable(row.foreignFlowEokValue, 1200),
-          instFlowEokValue: clampChartNullable(row.instFlowEokValue, 1200),
-          indivFlowEokValue: clampChartNullable(row.indivFlowEokValue, 1200),
-          foreignInstFlowEokValue: clampChartNullable(row.foreignInstFlowEokValue, 1200),
+          foreignFlowEokValue: clampChartNullable(row.foreignFlowEokValue),
+          instFlowEokValue: clampChartNullable(row.instFlowEokValue),
+          indivFlowEokValue: clampChartNullable(row.indivFlowEokValue),
+          foreignInstFlowEokValue: clampChartNullable(row.foreignInstFlowEokValue),
         })),
     [chartRows]
   );
@@ -2037,6 +2037,20 @@ function ModernTooltip({ active, payload, label }: any) {
   if (!active || !payload || payload.length === 0) return null;
 
   const displayLabel = typeof label === "number" ? minuteToTimeLabel(label) : label;
+  const cleanPayload = payload.reduce((acc: any[], item: any) => {
+    const dataKey = String(item?.dataKey ?? "");
+    const name = String(item?.name ?? "");
+
+    // Area와 Line이 같은 dataKey를 함께 쓰면서 Area 쪽 원본 key가
+    // tooltip에 foreignFlowEokValue처럼 노출되는 것을 제거합니다.
+    if (!dataKey || !name || name === dataKey) return acc;
+    if (acc.some((prev) => String(prev?.dataKey ?? "") === dataKey)) return acc;
+
+    acc.push(item);
+    return acc;
+  }, []);
+
+  if (cleanPayload.length === 0) return null;
 
   return (
     <div
@@ -2052,7 +2066,7 @@ function ModernTooltip({ active, payload, label }: any) {
       }}
     >
       <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 7, fontWeight: 800 }}>{displayLabel}</div>
-      {payload.map((item: any) => (
+      {cleanPayload.map((item: any) => (
         <div key={`${item.name}-${item.dataKey}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", fontSize: 12, lineHeight: 1.7 }}>
           <span style={{ color: item.color, fontWeight: 800 }}>{item.name}</span>
           <strong style={{ color: "#f8fafc", fontWeight: 900 }}>
