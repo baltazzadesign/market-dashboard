@@ -665,12 +665,14 @@ function normalizeFlowDisplayUnit(value: any) {
   if (!Number.isFinite(n) || n === 0) return 0;
 
   // 수급 표시/저장 단위는 증권사 화면과 같은 억원 단위로 통일합니다.
-  // TR_074 원본 금액 필드는 화면 표시 억원 대비 100배 크게 내려오는 케이스가 있어
-  // LIVE 파싱에서는 normalizeFlowUnit()에서 /100 처리합니다.
-  // 단, 이미 DB에 잘못 저장된 100배 수급값이 FALLBACK으로 재사용되는 것을 막기 위해
-  // 과도하게 큰 기존값은 여기서 한 번 보정합니다.
-  const fixed = Math.abs(n) >= 50000 ? n / 100 : n;
-  return Math.round(fixed);
+  // LIVE 파싱 단계(parseFlowFromJson -> normalizeFlowUnit)에서 이미 /100 보정이 끝납니다.
+  //
+  // 중요 수정:
+  // 기존에는 abs(n) >= 50,000이면 과거 DB 오저장값으로 보고 다시 /100 처리했는데,
+  // 장중 개인 수급은 실제로 -50,000억 수준까지 정상적으로 커질 수 있습니다.
+  // 그래서 개인 수급이 -50,000억을 넘는 순간 -500억대로 깨져 보였습니다.
+  // 화면/저장 단계에서는 추가 단위 변환을 하지 않고 반올림만 합니다.
+  return Math.round(n);
 }
 
 function pickNumber(obj: any, keys: string[]) {
