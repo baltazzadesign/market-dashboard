@@ -29,6 +29,7 @@ let memoryLastBreadth: {
 } | null = null;
 
 const FLOW_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
+const KIS_FETCH_TIMEOUT_MS = Number(process.env.KIS_FETCH_TIMEOUT_MS ?? 8000);
 const KIS_BASE = process.env.KIS_BASE ?? "https://openapi.koreainvestment.com:9443";
 const CUSTTYPE = process.env.KIS_CUSTTYPE ?? "P";
 
@@ -117,6 +118,20 @@ return {
     .replace(/\/rest\/v1$/, ""),
   key,
 };
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = KIS_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: init.signal ?? controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function getKstDateString(date = new Date()) {
@@ -578,7 +593,7 @@ async function getAccessToken() {
   }
 
   tokenPromise = (async () => {
-    const res = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
+    const res = await fetchWithTimeout(`${KIS_BASE}/oauth2/tokenP`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -668,50 +683,64 @@ function pickNumber(obj: any, keys: string[]) {
 }
 
 async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
-  const appkey = process.env.KIS_APPKEY!;
-  const appsecret = process.env.KIS_APPSECRET!;
-  const token = await getAccessToken();
+  try {
+    const appkey = process.env.KIS_APPKEY!;
+    const appsecret = process.env.KIS_APPSECRET!;
+    const token = await getAccessToken();
 
-  const qs = new URLSearchParams({
-    fid_cond_mrkt_div_code: "U",
-    fid_input_iscd: code,
-    fid_cond_scr_div_code: "20214",
-    fid_mrkt_cls_code: "K2",
-    fid_blng_cls_code: "0",
-  });
+    const qs = new URLSearchParams({
+      fid_cond_mrkt_div_code: "U",
+      fid_input_iscd: code,
+      fid_cond_scr_div_code: "20214",
+      fid_mrkt_cls_code: "K2",
+      fid_blng_cls_code: "0",
+    });
 
-  const res = await fetch(
-    `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-category-price?${qs.toString()}`,
-    {
-      method: "GET",
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        authorization: `Bearer ${token}`,
-        appkey,
-        appsecret,
-        tr_id: "FHPUP02140000",
-        custtype: CUSTTYPE,
-      },
-      cache: "no-store",
+    const res = await fetchWithTimeout(
+      `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-category-price?${qs.toString()}`,
+      {
+        method: "GET",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          authorization: `Bearer ${token}`,
+          appkey,
+          appsecret,
+          tr_id: "FHPUP02140000",
+          custtype: CUSTTYPE,
+        },
+        cache: "no-store",
+      }
+    );
+
+    const data = await res.json().catch((error) => ({
+      rt_cd: "JSON_PARSE_ERROR",
+      msg1: String(error),
+    }));
+
+    if (!res.ok || String(data?.rt_cd ?? "0") !== "0") {
+      console.warn("066 ERROR", code, JSON.stringify(data).slice(0, 1000));
+      return { up: 0, down: 0, flat: 0, price: 0, raw: data };
     }
-  );
 
-  const data = await res.json();
+    const out = pickOutput(data);
 
-  if (!res.ok || String(data?.rt_cd ?? "0") !== "0") {
-    console.warn("066 ERROR", code, JSON.stringify(data).slice(0, 1000));
-    return { up: 0, down: 0, flat: 0, price: 0, raw: data };
+    return {
+      up: toNumber(out.ascn_issu_cnt ?? out.up_cnt),
+      down: toNumber(out.down_issu_cnt ?? out.down_cnt),
+      flat: toNumber(out.stnr_issu_cnt ?? out.flat_cnt),
+      price: toNumber(out.bstp_nmix_prpr ?? out.stck_prpr ?? out.prpr),
+      raw: data,
+    };
+  } catch (error) {
+    console.warn("066 API 요청 실패 → breadth fallback 대상으로 처리:", code, error);
+    return {
+      up: 0,
+      down: 0,
+      flat: 0,
+      price: 0,
+      raw: { error: String(error), code },
+    };
   }
-
-  const out = pickOutput(data);
-
-  return {
-    up: toNumber(out.ascn_issu_cnt ?? out.up_cnt),
-    down: toNumber(out.down_issu_cnt ?? out.down_cnt),
-    flat: toNumber(out.stnr_issu_cnt ?? out.flat_cnt),
-    price: toNumber(out.bstp_nmix_prpr ?? out.stck_prpr ?? out.prpr),
-    raw: data,
-  };
 }
 
 function normalizeFlowUnit(value: number) {
@@ -948,41 +977,79 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
   };
 }
 async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<FlowData> {
-  const appkey = process.env.KIS_APPKEY!;
-  const appsecret = process.env.KIS_APPSECRET!;
-  const token = await getAccessToken();
+  try {
+    const appkey = process.env.KIS_APPKEY!;
+    const appsecret = process.env.KIS_APPSECRET!;
+    const token = await getAccessToken();
 
-  // 한국투자 TR_074(inquire-investor-time-by-market)는 FID_INPUT_ISCD_2가 필수입니다.
-  // J/Q + fid_input_iscd만 쓰면 ERROR INPUT FIELD NOT FOUND [FID_INPUT_ISCD_2]가 발생합니다.
-  // 안정적으로 동작했던 조합: KOSPI = KSP + 0001, KOSDAQ = KSQ + 1001
-  const marketKey = market === "KOSPI" ? "KSP" : "KSQ";
-  const marketCode = market === "KOSPI" ? "0001" : "1001";
+    // 한국투자 TR_074(inquire-investor-time-by-market)는 FID_INPUT_ISCD_2가 필수입니다.
+    // 안정적으로 동작했던 조합: KOSPI = KSP + 0001, KOSDAQ = KSQ + 1001
+    const marketKey = market === "KOSPI" ? "KSP" : "KSQ";
+    const marketCode = market === "KOSPI" ? "0001" : "1001";
 
-  const qs = new URLSearchParams({
-    fid_input_iscd: marketKey,
-    fid_input_iscd_2: marketCode,
-  });
+    const qs = new URLSearchParams({
+      fid_input_iscd: marketKey,
+      fid_input_iscd_2: marketCode,
+    });
 
-  const res = await fetch(
-    `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market?${qs.toString()}`,
-    {
-      method: "GET",
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        authorization: `Bearer ${token}`,
-        appkey,
-        appsecret,
-        tr_id: "FHPTJ04030000",
-        custtype: CUSTTYPE,
-      },
-      cache: "no-store",
+    const res = await fetchWithTimeout(
+      `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market?${qs.toString()}`,
+      {
+        method: "GET",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          authorization: `Bearer ${token}`,
+          appkey,
+          appsecret,
+          tr_id: "FHPTJ04030000",
+          custtype: CUSTTYPE,
+        },
+        cache: "no-store",
+      }
+    );
+
+    const data = await res.json().catch((error) => ({
+      rt_cd: "JSON_PARSE_ERROR",
+      msg1: String(error),
+    }));
+
+    if (!res.ok || String(data?.rt_cd ?? "") !== "0") {
+      console.log("074 ERROR", market, JSON.stringify(data).slice(0, 3000));
+
+      return {
+        foreign: 0,
+        inst: 0,
+        indiv: 0,
+        source: "ERROR",
+        raw: {
+          request: { market, marketKey, marketCode },
+          response: data,
+          httpStatus: res.status,
+        },
+      };
     }
-  );
 
-  const data = await res.json();
+    const parsed = parseFlowFromJson(data);
+    const hasValue = parsed.foreign !== 0 || parsed.inst !== 0 || parsed.indiv !== 0;
 
-  if (String(data?.rt_cd ?? "") !== "0") {
-    console.log("074 ERROR", market, JSON.stringify(data).slice(0, 3000));
+    console.log("074 RESULT", market, {
+      request: { marketKey, marketCode },
+      source: hasValue ? "LIVE" : "EMPTY",
+      foreign: parsed.foreign,
+      inst: parsed.inst,
+      indiv: parsed.indiv,
+    });
+
+    return {
+      ...parsed,
+      source: hasValue ? "LIVE" : "EMPTY",
+      raw: {
+        request: { market, marketKey, marketCode },
+        response: data,
+      },
+    };
+  } catch (error) {
+    console.warn("074 API 요청 실패 → flow fallback 대상으로 처리:", market, error);
 
     return {
       foreign: 0,
@@ -990,31 +1057,11 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
       indiv: 0,
       source: "ERROR",
       raw: {
-        request: { market, marketKey, marketCode },
-        response: data,
+        request: { market },
+        error: String(error),
       },
     };
   }
-
-  const parsed = parseFlowFromJson(data);
-  const hasValue = parsed.foreign !== 0 || parsed.inst !== 0 || parsed.indiv !== 0;
-
-  console.log("074 RESULT", market, {
-    request: { marketKey, marketCode },
-    source: hasValue ? "LIVE" : "EMPTY",
-    foreign: parsed.foreign,
-    inst: parsed.inst,
-    indiv: parsed.indiv,
-  });
-
-  return {
-    ...parsed,
-    source: hasValue ? "LIVE" : "EMPTY",
-    raw: {
-      request: { market, marketKey, marketCode },
-      response: data,
-    },
-  };
 }
 
 async function fetchInvestorFlow(): Promise<FlowData> {
@@ -1706,12 +1753,28 @@ export async function GET(req: Request) {
       saveSkipReason,
     });
   } catch (error: any) {
-    return Response.json(
-      {
-        error: "KIS 요청 실패",
-        detail: error.message,
-      },
-      { status: 500 }
+    console.error("/api/market/live 전체 처리 실패:", error);
+
+    const now = new Date();
+    const timeStr = normalizeMinuteValue(
+      new Intl.DateTimeFormat("ko-KR", {
+        timeZone: "Asia/Seoul",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(now)
     );
+
+    return Response.json({
+      ok: false,
+      error: "LIVE_PROCESS_FAILED",
+      detail: error?.message ?? String(error),
+      time: timeStr,
+      flowSource: "ERROR",
+      breadthSource: "SKIPPED",
+      saved: false,
+      saveAction: "skipped",
+      saveSkipReason: "LIVE_PROCESS_FAILED",
+    });
   }
 }
