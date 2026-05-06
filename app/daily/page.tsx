@@ -117,7 +117,7 @@ const MARKET_OPEN_MINUTE = 9 * 60;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 const MARKET_TIME_TICKS = Array.from(
   { length: Math.floor((MARKET_CLOSE_MINUTE - MARKET_OPEN_MINUTE) / 30) + 1 },
-  (_, index) => MARKET_OPEN_MINUTE + index * 30
+  (_, index) => MARKET_OPEN_MINUTE + index * 30,
 );
 
 function minuteToTimeLabel(value: any) {
@@ -168,9 +168,24 @@ function clampMinuteDomain(start: number, end: number): [number, number] {
 
 function getTicksForDomain(domain?: [number, number]) {
   if (!domain) return MARKET_TIME_TICKS;
-  const ticks = MARKET_TIME_TICKS.filter((tick) => tick >= domain[0] && tick <= domain[1]);
+  const ticks = MARKET_TIME_TICKS.filter(
+    (tick) => tick >= domain[0] && tick <= domain[1],
+  );
   if (ticks.length >= 2) return ticks;
   return [Math.round(domain[0]), Math.round(domain[1])];
+}
+
+function useIsMobile(maxWidth = 760) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const update = () => setIsMobile(window.innerWidth <= maxWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [maxWidth]);
+
+  return isMobile;
 }
 
 function clampChartValue(value: any, limit = 120000) {
@@ -190,7 +205,15 @@ function clampChartNullable(value: any, limit = 120000) {
   return n;
 }
 
-function getSessionChartRows<T extends { timeLabel: string; up?: number; down?: number; kospi?: number; kosdaq?: number }>(rows: T[]) {
+function getSessionChartRows<
+  T extends {
+    timeLabel: string;
+    up?: number;
+    down?: number;
+    kospi?: number;
+    kosdaq?: number;
+  },
+>(rows: T[]) {
   const regularRows = rows.filter((row) => {
     const minute = timeToMinute(row.timeLabel);
     return minute >= 8 * 60 + 50 && minute <= 15 * 60 + 40;
@@ -198,7 +221,8 @@ function getSessionChartRows<T extends { timeLabel: string; up?: number; down?: 
 
   const cleanRegularRows = regularRows.filter((row) => {
     const hasBreadth = Number(row.up ?? 0) > 0 || Number(row.down ?? 0) > 0;
-    const hasIndex = Number(row.kospi ?? 0) > 1000 || Number(row.kosdaq ?? 0) > 100;
+    const hasIndex =
+      Number(row.kospi ?? 0) > 1000 || Number(row.kosdaq ?? 0) > 100;
     return hasBreadth && hasIndex;
   });
 
@@ -211,7 +235,6 @@ function getAlertColor(level?: string, fallback?: string) {
   if (level === "중") return "#f97316";
   return "#facc15";
 }
-
 
 function getSignalDirection(type?: string): "상방" | "하방" | "중립" {
   if (!type) return "중립";
@@ -261,7 +284,11 @@ function getSignalLabel(type?: string) {
   }
 }
 
-function getSignalStrength(type?: string, accel?: number, marketScore?: number): "약" | "중" | "강" {
+function getSignalStrength(
+  type?: string,
+  accel?: number,
+  marketScore?: number,
+): "약" | "중" | "강" {
   const absAccel = Math.abs(Number(accel ?? 0));
   const absScore = Math.abs(Number(marketScore ?? 0));
 
@@ -293,7 +320,7 @@ function marketScore(row?: Row) {
   const scoreByDiff = Math.max(-60, Math.min(60, row.diff / 20));
   const scoreByRatio = Math.max(
     -40,
-    Math.min(40, (row.upRatio - row.downRatio) * 100)
+    Math.min(40, (row.upRatio - row.downRatio) * 100),
   );
 
   return Math.round(scoreByDiff + scoreByRatio);
@@ -310,8 +337,6 @@ function marketTone(row?: Row) {
   return "중립";
 }
 
-
-
 function getFlowPower(row?: Row) {
   if (!row) return 0;
   if (typeof row.flowPower === "number") return row.flowPower;
@@ -326,7 +351,10 @@ function isLiveFlowRow(row?: Row | any) {
 }
 
 function getCleanMarketState(value?: string) {
-  return String(value ?? "").replace(/\|FLOW_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED)$/i, "");
+  return String(value ?? "").replace(
+    /\|FLOW_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED)$/i,
+    "",
+  );
 }
 
 function getFlowSource(row?: Row | any) {
@@ -335,7 +363,7 @@ function getFlowSource(row?: Row | any) {
       row?.flowsource ??
       row?.flowStatus ??
       row?.flowstatus ??
-      ""
+      "",
   ).toUpperCase();
 
   if (explicit) return explicit;
@@ -346,7 +374,13 @@ function getFlowSource(row?: Row | any) {
 }
 
 function buildRowsWithFlowFallback(rows: Row[]) {
-  let lastLiveFlow: { foreignFlow: number; instFlow: number; indivFlow: number; flowPower: number; flowMomentum: number } | null = null;
+  let lastLiveFlow: {
+    foreignFlow: number;
+    instFlow: number;
+    indivFlow: number;
+    flowPower: number;
+    flowMomentum: number;
+  } | null = null;
 
   return rows.map((row) => {
     const source = getFlowSource(row);
@@ -428,7 +462,6 @@ function flowTone(row?: Row, prev?: Row) {
   return "수급 중립";
 }
 
-
 function getFlowColor(value?: number) {
   const n = Number(value ?? 0);
   if (n > 0) return "#ef4444";
@@ -463,11 +496,35 @@ function getFlowBadge(row?: Row, prev?: Row) {
   const trend = getFlowTrend(row, prev);
   const strength = getFlowStrength(power);
 
-  if (power > 0 && trend > 0) return { label: `매수 강화 ${strength}`, color: "#ef4444", bg: "rgba(239, 68, 68, 0.14)" };
-  if (power > 0 && trend <= 0) return { label: `매수 둔화 ${strength}`, color: "#f97316", bg: "rgba(249, 115, 22, 0.14)" };
-  if (power < 0 && trend < 0) return { label: `매도 강화 ${strength}`, color: "#60a5fa", bg: "rgba(96, 165, 250, 0.14)" };
-  if (power < 0 && trend >= 0) return { label: `매도 완화 ${strength}`, color: "#38bdf8", bg: "rgba(56, 189, 248, 0.14)" };
-  return { label: "수급 중립", color: "#94a3b8", bg: "rgba(148, 163, 184, 0.10)" };
+  if (power > 0 && trend > 0)
+    return {
+      label: `매수 강화 ${strength}`,
+      color: "#ef4444",
+      bg: "rgba(239, 68, 68, 0.14)",
+    };
+  if (power > 0 && trend <= 0)
+    return {
+      label: `매수 둔화 ${strength}`,
+      color: "#f97316",
+      bg: "rgba(249, 115, 22, 0.14)",
+    };
+  if (power < 0 && trend < 0)
+    return {
+      label: `매도 강화 ${strength}`,
+      color: "#60a5fa",
+      bg: "rgba(96, 165, 250, 0.14)",
+    };
+  if (power < 0 && trend >= 0)
+    return {
+      label: `매도 완화 ${strength}`,
+      color: "#38bdf8",
+      bg: "rgba(56, 189, 248, 0.14)",
+    };
+  return {
+    label: "수급 중립",
+    color: "#94a3b8",
+    bg: "rgba(148, 163, 184, 0.10)",
+  };
 }
 
 function getFlowNarrative(row?: Row, prev?: Row) {
@@ -496,7 +553,8 @@ function getFlowNarrative(row?: Row, prev?: Row) {
   }
 
   if (power > 0 && trend > 0) return "외인·기관 수급이 개선되는 상승 우호 구간";
-  if (power < 0 && trend < 0) return "외인·기관 수급 압박이 커지는 하락 경계 구간";
+  if (power < 0 && trend < 0)
+    return "외인·기관 수급 압박이 커지는 하락 경계 구간";
 
   if (Math.abs(indiv) > Math.abs(power) * 1.5 && Math.abs(indiv) >= 5000) {
     return "개인 수급 영향이 큰 구간이라 방향성 신뢰도는 낮음";
@@ -617,9 +675,15 @@ function buildSignals(rows: Row[]) {
 
 function signalSummary(signals: SignalItem[]) {
   const latest = signals[0];
-  const strongCount = signals.filter((signal) => signal.strength === "강").length;
-  const upCount = signals.filter((signal) => signal.direction === "상방").length;
-  const downCount = signals.filter((signal) => signal.direction === "하방").length;
+  const strongCount = signals.filter(
+    (signal) => signal.strength === "강",
+  ).length;
+  const upCount = signals.filter(
+    (signal) => signal.direction === "상방",
+  ).length;
+  const downCount = signals.filter(
+    (signal) => signal.direction === "하방",
+  ).length;
 
   let bias = "중립";
   let color = "#e5e7eb";
@@ -737,12 +801,42 @@ function buildSessionSummary(rows: any[]) {
     };
   }
 
-  const highDiffRow = rows.reduce((best, row) => Number(row.diff ?? 0) > Number(best.diff ?? 0) ? row : best, rows[0]);
-  const lowDiffRow = rows.reduce((best, row) => Number(row.diff ?? 0) < Number(best.diff ?? 0) ? row : best, rows[0]);
-  const maxAccelRow = rows.reduce((best, row) => Number(row.accel ?? 0) > Number(best.accel ?? 0) ? row : best, rows[0]);
-  const minAccelRow = rows.reduce((best, row) => Number(row.accel ?? 0) < Number(best.accel ?? 0) ? row : best, rows[0]);
-  const flowPeakRow = rows.reduce((best, row) => Number(row.foreignInstFlowValue ?? 0) > Number(best.foreignInstFlowValue ?? 0) ? row : best, rows[0]);
-  const flowLowRow = rows.reduce((best, row) => Number(row.foreignInstFlowValue ?? 0) < Number(best.foreignInstFlowValue ?? 0) ? row : best, rows[0]);
+  const highDiffRow = rows.reduce(
+    (best, row) =>
+      Number(row.diff ?? 0) > Number(best.diff ?? 0) ? row : best,
+    rows[0],
+  );
+  const lowDiffRow = rows.reduce(
+    (best, row) =>
+      Number(row.diff ?? 0) < Number(best.diff ?? 0) ? row : best,
+    rows[0],
+  );
+  const maxAccelRow = rows.reduce(
+    (best, row) =>
+      Number(row.accel ?? 0) > Number(best.accel ?? 0) ? row : best,
+    rows[0],
+  );
+  const minAccelRow = rows.reduce(
+    (best, row) =>
+      Number(row.accel ?? 0) < Number(best.accel ?? 0) ? row : best,
+    rows[0],
+  );
+  const flowPeakRow = rows.reduce(
+    (best, row) =>
+      Number(row.foreignInstFlowValue ?? 0) >
+      Number(best.foreignInstFlowValue ?? 0)
+        ? row
+        : best,
+    rows[0],
+  );
+  const flowLowRow = rows.reduce(
+    (best, row) =>
+      Number(row.foreignInstFlowValue ?? 0) <
+      Number(best.foreignInstFlowValue ?? 0)
+        ? row
+        : best,
+    rows[0],
+  );
 
   return {
     highDiff: Number(highDiffRow.diff ?? 0),
@@ -754,7 +848,9 @@ function buildSessionSummary(rows: any[]) {
     minAccel: Number(minAccelRow.accel ?? 0),
     minAccelTime: minAccelRow.timeLabel ?? "-",
     dangerCount: rows.filter((row) => row.divergenceType === "danger").length,
-    accumulationCount: rows.filter((row) => row.divergenceType === "accumulation").length,
+    accumulationCount: rows.filter(
+      (row) => row.divergenceType === "accumulation",
+    ).length,
     signalCount: rows.filter((row) => row.signalMarkerColor).length,
     flowPeak: Number(flowPeakRow.foreignInstFlowValue ?? 0),
     flowPeakTime: flowPeakRow.timeLabel ?? "-",
@@ -765,9 +861,14 @@ function buildSessionSummary(rows: any[]) {
 }
 
 function getActiveLabelFromChartEvent(event: any) {
-  const raw = Number(event?.activeLabel ?? event?.activePayload?.[0]?.payload?.timeMinuteValue);
+  const raw = Number(
+    event?.activeLabel ?? event?.activePayload?.[0]?.payload?.timeMinuteValue,
+  );
   if (!Number.isFinite(raw)) return null;
-  return Math.max(MARKET_OPEN_MINUTE, Math.min(MARKET_CLOSE_MINUTE, Math.round(raw)));
+  return Math.max(
+    MARKET_OPEN_MINUTE,
+    Math.min(MARKET_CLOSE_MINUTE, Math.round(raw)),
+  );
 }
 
 function getIndexChangeInfo(value?: number, prevValue?: number) {
@@ -787,7 +888,13 @@ function getIndexChangeInfo(value?: number, prevValue?: number) {
   return { diff, pct, color: "#94a3b8", icon: "▲" };
 }
 
-function downsampleChartRows<T extends { timeMinuteValue?: number; signalMarkerColor?: string; divergenceType?: string }>(data: T[], maxPoints = 520) {
+function downsampleChartRows<
+  T extends {
+    timeMinuteValue?: number;
+    signalMarkerColor?: string;
+    divergenceType?: string;
+  },
+>(data: T[], maxPoints = 520) {
   if (data.length <= maxPoints) return data;
 
   const keep = new Set<number>();
@@ -809,17 +916,28 @@ function downsampleChartRows<T extends { timeMinuteValue?: number; signalMarkerC
 function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
   return data.map((row, index) => {
     const prev = index > 0 ? data[index - 1] : null;
-    const matchedSignal = signals.find((signal) => signal.time === row.timeLabel);
+    const matchedSignal = signals.find(
+      (signal) => signal.time === row.timeLabel,
+    );
 
-    const kospiMove = prev ? Number(row.kospi ?? 0) - Number(prev.kospi ?? 0) : 0;
-    const kosdaqMove = prev ? Number(row.kosdaq ?? 0) - Number(prev.kosdaq ?? 0) : 0;
+    const kospiMove = prev
+      ? Number(row.kospi ?? 0) - Number(prev.kospi ?? 0)
+      : 0;
+    const kosdaqMove = prev
+      ? Number(row.kosdaq ?? 0) - Number(prev.kosdaq ?? 0)
+      : 0;
     const indexMove = kospiMove + kosdaqMove;
     const flowMove = prev
-      ? Number(row.foreignInstFlowValue ?? 0) - Number(prev.foreignInstFlowValue ?? 0)
+      ? Number(row.foreignInstFlowValue ?? 0) -
+        Number(prev.foreignInstFlowValue ?? 0)
       : 0;
 
-    const dangerDivergence = Boolean(prev && indexMove >= 0 && flowMove <= -5000);
-    const accumulationDivergence = Boolean(prev && indexMove <= 0 && flowMove >= 5000);
+    const dangerDivergence = Boolean(
+      prev && indexMove >= 0 && flowMove <= -5000,
+    );
+    const accumulationDivergence = Boolean(
+      prev && indexMove <= 0 && flowMove >= 5000,
+    );
 
     const divergenceType = dangerDivergence
       ? "danger"
@@ -843,16 +961,18 @@ function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
           ? "#22c55e"
           : "#94a3b8",
       signalMarkerColor: matchedSignal?.color ?? "",
-      signalMarkerLabel: matchedSignal ? getSignalLabel(matchedSignal.type) : "",
+      signalMarkerLabel: matchedSignal
+        ? getSignalLabel(matchedSignal.type)
+        : "",
       signalMarkerDirection: matchedSignal?.direction ?? "",
     };
   });
 }
 
-
 function playSignalBeep() {
   try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const AudioContextClass =
+      window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
 
     const audioContext = new AudioContextClass();
@@ -862,8 +982,14 @@ function playSignalBeep() {
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
     gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.08, audioContext.currentTime + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.28);
+    gain.gain.exponentialRampToValueAtTime(
+      0.08,
+      audioContext.currentTime + 0.03,
+    );
+    gain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      audioContext.currentTime + 0.28,
+    );
 
     oscillator.connect(gain);
     gain.connect(audioContext.destination);
@@ -885,7 +1011,8 @@ export default function DailyPage() {
   const [showTopDetails, setShowTopDetails] = useState(false);
   const [showRebound, setShowRebound] = useState(true);
   const [showDangerDivergence, setShowDangerDivergence] = useState(true);
-  const [showAccumulationDivergence, setShowAccumulationDivergence] = useState(true);
+  const [showAccumulationDivergence, setShowAccumulationDivergence] =
+    useState(true);
   const [showSignalMarker, setShowSignalMarker] = useState(true);
   const [chartPanelFullscreen, setChartPanelFullscreen] = useState(false);
   const [chartZoomDomain, setChartZoomDomain] = useState<[number, number]>([
@@ -905,7 +1032,9 @@ export default function DailyPage() {
     // Vercel Cron이 /api/market/live를 1분마다 실행해 DB에 저장합니다.
     // 페이지에서는 KIS API를 직접 호출하지 않고 저장된 DB 데이터만 조회합니다.
 
-    const res = await fetch(`/api/market/daily${dateQuery}`, { cache: "no-store" });
+    const res = await fetch(`/api/market/daily${dateQuery}`, {
+      cache: "no-store",
+    });
     const json = await res.json();
 
     if (json.ok) {
@@ -921,11 +1050,13 @@ export default function DailyPage() {
           ...alert,
           time: formatTime(alert.time),
           color: getAlertColor(alert.level, alert.color),
-        }))
+        })),
       );
       setSummary(alertJson.summary ?? null);
       setDbSignals(
-        (alertJson.signals ?? []).map((signal: any) => normalizeDbSignal(signal))
+        (alertJson.signals ?? []).map((signal: any) =>
+          normalizeDbSignal(signal),
+        ),
       );
     }
   }
@@ -967,18 +1098,21 @@ export default function DailyPage() {
     if (currentRange <= 0) return;
 
     const rect = event.currentTarget.getBoundingClientRect();
-    const rawRatio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
+    const rawRatio =
+      rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
     const anchorRatio = Math.max(0.05, Math.min(0.95, rawRatio));
     const anchorMinute = start + currentRange * anchorRatio;
 
     const zoomFactor = event.deltaY < 0 ? 0.82 : 1.22;
-    const nextRange = Math.max(30, Math.min(totalRange, currentRange * zoomFactor));
+    const nextRange = Math.max(
+      30,
+      Math.min(totalRange, currentRange * zoomFactor),
+    );
     const nextStart = anchorMinute - nextRange * anchorRatio;
     const nextEnd = nextStart + nextRange;
 
     setChartZoomDomain(clampMinuteDomain(nextStart, nextEnd));
   };
-
 
   const handleChartMouseMove = (event: any) => {
     const activeMinute = getActiveLabelFromChartEvent(event);
@@ -991,7 +1125,9 @@ export default function DailyPage() {
       setHoverMinute((prev) => (prev === activeMinute ? prev : activeMinute));
 
       if (dragStartMinute !== null && activeMinute !== null) {
-        setDragEndMinute((prev) => (prev === activeMinute ? prev : activeMinute));
+        setDragEndMinute((prev) =>
+          prev === activeMinute ? prev : activeMinute,
+        );
       }
     });
   };
@@ -1044,7 +1180,10 @@ export default function DailyPage() {
     setSignalNotifyEnabled(permission === "granted");
   };
 
-  const flowDisplayRows = useMemo(() => buildRowsWithFlowFallback(rows), [rows]);
+  const flowDisplayRows = useMemo(
+    () => buildRowsWithFlowFallback(rows),
+    [rows],
+  );
 
   const chartRows = useMemo(
     () =>
@@ -1066,14 +1205,17 @@ export default function DailyPage() {
           flowPowerValue: getFlowPower(r),
           flowTrendValue: getFlowTrend(r, prev),
           flowMomentumValue: Number(r.flowMomentum ?? getFlowPower(r)),
-          foreignInstFlowValue: Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0),
+          foreignInstFlowValue:
+            Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0),
           foreignFlowEokValue: toFlowEok(Number(r.foreignFlow ?? 0)),
           instFlowEokValue: toFlowEok(Number(r.instFlow ?? 0)),
           indivFlowEokValue: toFlowEok(Number(r.indivFlow ?? 0)),
-          foreignInstFlowEokValue: toFlowEok(Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0)),
+          foreignInstFlowEokValue: toFlowEok(
+            Number(r.foreignFlow ?? 0) + Number(r.instFlow ?? 0),
+          ),
         };
       }),
-    [flowDisplayRows]
+    [flowDisplayRows],
   );
 
   const visibleChartRows = useMemo(
@@ -1082,7 +1224,7 @@ export default function DailyPage() {
         .filter(
           (row) =>
             row.timeMinuteValue >= MARKET_OPEN_MINUTE &&
-            row.timeMinuteValue <= MARKET_CLOSE_MINUTE
+            row.timeMinuteValue <= MARKET_CLOSE_MINUTE,
         )
         .map((row) => ({
           ...row,
@@ -1096,55 +1238,76 @@ export default function DailyPage() {
           foreignFlowEokValue: clampChartNullable(row.foreignFlowEokValue),
           instFlowEokValue: clampChartNullable(row.instFlowEokValue),
           indivFlowEokValue: clampChartNullable(row.indivFlowEokValue),
-          foreignInstFlowEokValue: clampChartNullable(row.foreignInstFlowEokValue),
+          foreignInstFlowEokValue: clampChartNullable(
+            row.foreignInstFlowEokValue,
+          ),
         })),
-    [chartRows]
+    [chartRows],
   );
 
   const last = flowDisplayRows[flowDisplayRows.length - 1];
-  const prevLast = flowDisplayRows.length >= 2 ? flowDisplayRows[flowDisplayRows.length - 2] : undefined;
+  const prevLast =
+    flowDisplayRows.length >= 2
+      ? flowDisplayRows[flowDisplayRows.length - 2]
+      : undefined;
 
-  const localAlerts = useMemo(() => makeAlerts(flowDisplayRows), [flowDisplayRows]);
+  const localAlerts = useMemo(
+    () => makeAlerts(flowDisplayRows),
+    [flowDisplayRows],
+  );
   const sourceAlerts = dbAlerts.length > 0 ? dbAlerts : localAlerts;
   const alerts = useMemo(
     () =>
       alertFilter === "전체"
         ? sourceAlerts.slice(0, 12)
-        : sourceAlerts.filter((alert) => alert.level === alertFilter).slice(0, 12),
-    [alertFilter, sourceAlerts]
+        : sourceAlerts
+            .filter((alert) => alert.level === alertFilter)
+            .slice(0, 12),
+    [alertFilter, sourceAlerts],
   );
 
-  const localSignals = useMemo(() => buildSignals(flowDisplayRows), [flowDisplayRows]);
+  const localSignals = useMemo(
+    () => buildSignals(flowDisplayRows),
+    [flowDisplayRows],
+  );
   const signals = useMemo(
     () => (dbSignals.length > 0 ? dbSignals : localSignals),
-    [dbSignals, localSignals]
+    [dbSignals, localSignals],
   );
   const sigSummary = useMemo(() => signalSummary(signals), [signals]);
   const enhancedChartRowsFull = useMemo(
     () => buildEnhancedChartRows(visibleChartRows, signals),
-    [visibleChartRows, signals]
+    [visibleChartRows, signals],
   );
   const enhancedChartRows = useMemo(
     () => downsampleChartRows(enhancedChartRowsFull, 520),
-    [enhancedChartRowsFull]
+    [enhancedChartRowsFull],
   );
   const latestDivergence = useMemo(
-    () => [...enhancedChartRowsFull].reverse().find((row) => row.divergenceType),
-    [enhancedChartRowsFull]
+    () =>
+      [...enhancedChartRowsFull].reverse().find((row) => row.divergenceType),
+    [enhancedChartRowsFull],
   );
   const sessionSummary = useMemo(
     () => buildSessionSummary(enhancedChartRowsFull),
-    [enhancedChartRowsFull]
+    [enhancedChartRowsFull],
   );
   const latestStrongSignal = useMemo(
     () => signals.find((signal) => signal.strength === "강") ?? signals[0],
-    [signals]
+    [signals],
   );
 
   useEffect(() => {
-    if (!signalNotifyEnabled || !("Notification" in window) || Notification.permission !== "granted") return;
+    if (
+      !signalNotifyEnabled ||
+      !("Notification" in window) ||
+      Notification.permission !== "granted"
+    )
+      return;
 
-    const latestDivergenceRow = [...enhancedChartRowsFull].reverse().find((row) => row.divergenceType);
+    const latestDivergenceRow = [...enhancedChartRowsFull]
+      .reverse()
+      .find((row) => row.divergenceType);
     const target = latestStrongSignal
       ? {
           key: `signal-${latestStrongSignal.time}-${latestStrongSignal.type}-${latestStrongSignal.message}`,
@@ -1195,7 +1358,9 @@ export default function DailyPage() {
         <div>
           <h1 style={{ margin: 0 }}>Baltazza DAILY LOG 1.0ver</h1>
           <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
-            {selectedDate ? `${selectedDate} 저장 데이터 조회 중` : "오늘 실시간 데이터 조회 중"}
+            {selectedDate
+              ? `${selectedDate} 저장 데이터 조회 중`
+              : "오늘 실시간 데이터 조회 중"}
           </div>
         </div>
 
@@ -1302,9 +1467,21 @@ export default function DailyPage() {
             marginBottom: 14,
           }}
         >
-          <SummaryCard title="시장상태" value={marketTone(last)} color={last.diff >= 0 ? "#22c55e" : "#60a5fa"} />
-          <SummaryCard title="시장점수" value={marketScore(last)} color={marketScore(last) >= 0 ? "#22c55e" : "#60a5fa"} />
-          <SummaryCard title="Diff" value={last.diff} color={last.diff >= 0 ? "#22c55e" : "#60a5fa"} />
+          <SummaryCard
+            title="시장상태"
+            value={marketTone(last)}
+            color={last.diff >= 0 ? "#22c55e" : "#60a5fa"}
+          />
+          <SummaryCard
+            title="시장점수"
+            value={marketScore(last)}
+            color={marketScore(last) >= 0 ? "#22c55e" : "#60a5fa"}
+          />
+          <SummaryCard
+            title="Diff"
+            value={last.diff}
+            color={last.diff >= 0 ? "#22c55e" : "#60a5fa"}
+          />
           <SummaryCard
             title="상승비율"
             value={`${(Number(last.upRatio) * 100).toFixed(2)}%`}
@@ -1315,7 +1492,7 @@ export default function DailyPage() {
 
       {last && (
         <div
-          className="daily-brief-layout"
+          className="daily-brief-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 0.85fr)",
@@ -1344,14 +1521,36 @@ export default function DailyPage() {
               }}
             >
               <div>
-                <div style={{ fontSize: 12, color: "#93c5fd", fontWeight: 900, marginBottom: 6 }}>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#93c5fd",
+                    fontWeight: 900,
+                    marginBottom: 6,
+                  }}
+                >
                   MARKET BRIEF
                 </div>
-                <div style={{ fontSize: 24, fontWeight: 950, color: sigSummary.color }}>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 950,
+                    color: sigSummary.color,
+                  }}
+                >
                   {sigSummary.bias}
                 </div>
-                <div style={{ marginTop: 6, fontSize: 13, color: "#cbd5e1", fontWeight: 800 }}>
-                  {latestDivergence ? latestDivergence.divergenceLabel : getFlowNarrative(last, prevLast)}
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 13,
+                    color: "#cbd5e1",
+                    fontWeight: 800,
+                  }}
+                >
+                  {latestDivergence
+                    ? latestDivergence.divergenceLabel
+                    : getFlowNarrative(last, prevLast)}
                 </div>
               </div>
 
@@ -1359,7 +1558,9 @@ export default function DailyPage() {
                 onClick={() => setShowTopDetails((value) => !value)}
                 style={{
                   border: "1px solid rgba(56,189,248,0.32)",
-                  background: showTopDetails ? "rgba(56,189,248,0.18)" : "rgba(15,23,42,0.72)",
+                  background: showTopDetails
+                    ? "rgba(56,189,248,0.18)"
+                    : "rgba(15,23,42,0.72)",
                   color: "#bae6fd",
                   borderRadius: 999,
                   padding: "8px 12px",
@@ -1374,17 +1575,33 @@ export default function DailyPage() {
             </div>
 
             <div
-              className="daily-compact-grid"
+              className="daily-flow-metric-grid"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
                 gap: 10,
               }}
             >
-              <CompactMetric title="외국인" value={formatFlowEok(Number(last.foreignFlow ?? 0))} color={getFlowColor(Number(last.foreignFlow ?? 0))} />
-              <CompactMetric title="기관" value={formatFlowEok(Number(last.instFlow ?? 0))} color={getFlowColor(Number(last.instFlow ?? 0))} />
-              <CompactMetric title="개인" value={formatFlowEok(Number(last.indivFlow ?? 0))} color={getFlowColor(Number(last.indivFlow ?? 0))} />
-              <CompactMetric title="수급합" value={formatFlowEok(getFlowPower(last))} color={getFlowPower(last) >= 0 ? "#ef4444" : "#60a5fa"} />
+              <CompactMetric
+                title="외국인"
+                value={formatFlowEok(Number(last.foreignFlow ?? 0))}
+                color={getFlowColor(Number(last.foreignFlow ?? 0))}
+              />
+              <CompactMetric
+                title="기관"
+                value={formatFlowEok(Number(last.instFlow ?? 0))}
+                color={getFlowColor(Number(last.instFlow ?? 0))}
+              />
+              <CompactMetric
+                title="개인"
+                value={formatFlowEok(Number(last.indivFlow ?? 0))}
+                color={getFlowColor(Number(last.indivFlow ?? 0))}
+              />
+              <CompactMetric
+                title="수급합"
+                value={formatFlowEok(getFlowPower(last))}
+                color={getFlowPower(last) >= 0 ? "#ef4444" : "#60a5fa"}
+              />
             </div>
           </div>
 
@@ -1399,13 +1616,39 @@ export default function DailyPage() {
               backdropFilter: "blur(18px)",
             }}
           >
-            <div style={{ fontSize: 12, color: "#93c5fd", fontWeight: 900, marginBottom: 12 }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#93c5fd",
+                fontWeight: 900,
+                marginBottom: 12,
+              }}
+            >
               SIGNAL / FLOW
             </div>
-            <div className="daily-signal-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-              <CompactMetric title="상방" value={sigSummary.upCount} color="#22c55e" />
-              <CompactMetric title="하방" value={sigSummary.downCount} color="#60a5fa" />
-              <CompactMetric title="강함" value={sigSummary.strongCount} color="#ef4444" />
+            <div
+              className="daily-signal-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 10,
+              }}
+            >
+              <CompactMetric
+                title="상방"
+                value={sigSummary.upCount}
+                color="#22c55e"
+              />
+              <CompactMetric
+                title="하방"
+                value={sigSummary.downCount}
+                color="#60a5fa"
+              />
+              <CompactMetric
+                title="강함"
+                value={sigSummary.strongCount}
+                color="#ef4444"
+              />
               <CompactMetric
                 title="다이버전스"
                 value={latestDivergence ? latestDivergence.timeLabel : "-"}
@@ -1429,7 +1672,14 @@ export default function DailyPage() {
             backdropFilter: "blur(16px)",
           }}
         >
-          <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 900, marginBottom: 12 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "#94a3b8",
+              fontWeight: 900,
+              marginBottom: 12,
+            }}
+          >
             DETAIL METRICS
           </div>
           <div
@@ -1440,14 +1690,52 @@ export default function DailyPage() {
               gap: 12,
             }}
           >
-            <SummaryCard title="수급 추세" value={formatFlowEok(getFlowTrend(last, prevLast))} color={getFlowTrend(last, prevLast) >= 0 ? "#ef4444" : "#60a5fa"} />
-            <SummaryCard title="수급 모멘텀" value={formatFlowEok(Number(last.flowMomentum ?? getFlowPower(last)))} color={Number(last.flowMomentum ?? getFlowPower(last)) >= 0 ? "#ef4444" : "#60a5fa"} />
-            <SummaryCard title="세션 최고 Diff" value={`${sessionSummary.highDiff.toLocaleString()} / ${sessionSummary.highDiffTime}`} color="#22c55e" />
-            <SummaryCard title="세션 최저 Diff" value={`${sessionSummary.lowDiff.toLocaleString()} / ${sessionSummary.lowDiffTime}`} color="#60a5fa" />
-            <SummaryCard title="다이버전스" value={`위험 ${sessionSummary.dangerCount} / 매집 ${sessionSummary.accumulationCount}`} color="#facc15" />
-            <SummaryCard title="수급 범위" value={`${formatFlowEok(sessionSummary.flowLow)} ~ ${formatFlowEok(sessionSummary.flowPeak)}`} color="#38bdf8" />
-            <SummaryCard title="ALERT" value={summary?.total ?? 0} color="#facc15" />
-            <SummaryCard title="최근 발생" value={latestDivergence?.timeLabel ?? sessionSummary.latestTime} color="#e5e7eb" />
+            <SummaryCard
+              title="수급 추세"
+              value={formatFlowEok(getFlowTrend(last, prevLast))}
+              color={getFlowTrend(last, prevLast) >= 0 ? "#ef4444" : "#60a5fa"}
+            />
+            <SummaryCard
+              title="수급 모멘텀"
+              value={formatFlowEok(
+                Number(last.flowMomentum ?? getFlowPower(last)),
+              )}
+              color={
+                Number(last.flowMomentum ?? getFlowPower(last)) >= 0
+                  ? "#ef4444"
+                  : "#60a5fa"
+              }
+            />
+            <SummaryCard
+              title="세션 최고 Diff"
+              value={`${sessionSummary.highDiff.toLocaleString()} / ${sessionSummary.highDiffTime}`}
+              color="#22c55e"
+            />
+            <SummaryCard
+              title="세션 최저 Diff"
+              value={`${sessionSummary.lowDiff.toLocaleString()} / ${sessionSummary.lowDiffTime}`}
+              color="#60a5fa"
+            />
+            <SummaryCard
+              title="다이버전스"
+              value={`위험 ${sessionSummary.dangerCount} / 매집 ${sessionSummary.accumulationCount}`}
+              color="#facc15"
+            />
+            <SummaryCard
+              title="수급 범위"
+              value={`${formatFlowEok(sessionSummary.flowLow)} ~ ${formatFlowEok(sessionSummary.flowPeak)}`}
+              color="#38bdf8"
+            />
+            <SummaryCard
+              title="ALERT"
+              value={summary?.total ?? 0}
+              color="#facc15"
+            />
+            <SummaryCard
+              title="최근 발생"
+              value={latestDivergence?.timeLabel ?? sessionSummary.latestTime}
+              color="#e5e7eb"
+            />
           </div>
         </div>
       )}
@@ -1476,7 +1764,13 @@ export default function DailyPage() {
               "0 22px 70px rgba(0,0,0,0.46), inset 0 1px 0 rgba(255,255,255,0.04)",
           }}
         >
-          <table className="daily-log-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "separate",
+              borderSpacing: 0,
+            }}
+          >
             <thead>
               <tr>
                 <th style={th}>시간</th>
@@ -1501,7 +1795,10 @@ export default function DailyPage() {
                 <tr
                   key={row.id}
                   style={{
-                    background: index % 2 === 0 ? "rgba(15, 23, 42, 0.18)" : "rgba(2, 6, 23, 0.24)",
+                    background:
+                      index % 2 === 0
+                        ? "rgba(15, 23, 42, 0.18)"
+                        : "rgba(2, 6, 23, 0.24)",
                   }}
                 >
                   <td style={td}>{formatTime(row.time)}</td>
@@ -1518,19 +1815,52 @@ export default function DailyPage() {
                   </td>
                   <td style={{ ...td, color: "#f59e0b" }}>{row.accel ?? 0}</td>
                   <td style={td}>{(Number(row.upRatio) * 100).toFixed(2)}%</td>
-                  <td style={td}>{(Number(row.downRatio) * 100).toFixed(2)}%</td>
-                  <IndexCell value={row.kospi} prevValue={flowDisplayRows[index - 1]?.kospi} />
-                  <IndexCell value={row.kosdaq} prevValue={flowDisplayRows[index - 1]?.kosdaq} />
-                  <td style={{ ...td, color: Number(row.foreignFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa" }}>
+                  <td style={td}>
+                    {(Number(row.downRatio) * 100).toFixed(2)}%
+                  </td>
+                  <IndexCell
+                    value={row.kospi}
+                    prevValue={flowDisplayRows[index - 1]?.kospi}
+                  />
+                  <IndexCell
+                    value={row.kosdaq}
+                    prevValue={flowDisplayRows[index - 1]?.kosdaq}
+                  />
+                  <td
+                    style={{
+                      ...td,
+                      color:
+                        Number(row.foreignFlow ?? 0) >= 0
+                          ? "#ef4444"
+                          : "#60a5fa",
+                    }}
+                  >
                     {formatFlowEok(Number(row.foreignFlow ?? 0))}
                   </td>
-                  <td style={{ ...td, color: Number(row.instFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa" }}>
+                  <td
+                    style={{
+                      ...td,
+                      color:
+                        Number(row.instFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa",
+                    }}
+                  >
                     {formatFlowEok(Number(row.instFlow ?? 0))}
                   </td>
-                  <td style={{ ...td, color: Number(row.indivFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa" }}>
+                  <td
+                    style={{
+                      ...td,
+                      color:
+                        Number(row.indivFlow ?? 0) >= 0 ? "#ef4444" : "#60a5fa",
+                    }}
+                  >
                     {formatFlowEok(Number(row.indivFlow ?? 0))}
                   </td>
-                  <td style={{ ...td, color: getFlowPower(row) >= 0 ? "#ef4444" : "#60a5fa" }}>
+                  <td
+                    style={{
+                      ...td,
+                      color: getFlowPower(row) >= 0 ? "#ef4444" : "#60a5fa",
+                    }}
+                  >
                     {formatFlowEok(getFlowPower(row))}
                   </td>
                 </tr>
@@ -1553,7 +1883,6 @@ export default function DailyPage() {
           }}
         >
           <div
-            className="daily-chart-toolbar"
             style={{
               display: "flex",
               justifyContent: "space-between",
@@ -1562,21 +1891,37 @@ export default function DailyPage() {
               padding: "10px 12px",
               border: "1px solid rgba(56, 189, 248, 0.16)",
               borderRadius: 18,
-              background: "linear-gradient(145deg, rgba(15,23,42,0.82), rgba(2,6,23,0.66))",
+              background:
+                "linear-gradient(145deg, rgba(15,23,42,0.82), rgba(2,6,23,0.66))",
               boxShadow: "0 12px 32px rgba(0,0,0,0.30)",
               backdropFilter: "blur(16px)",
             }}
           >
             <div>
-              <div style={{ fontSize: 13, fontWeight: 950, color: "#f8fafc" }}>CHART PANEL</div>
-              <div style={{ marginTop: 3, fontSize: 11, color: "#94a3b8" }}>노란점=반등 / 빨강=위험 / 초록=매집 / 보라=SIGNAL / X축 09:00~15:30</div>
+              <div style={{ fontSize: 13, fontWeight: 950, color: "#f8fafc" }}>
+                CHART PANEL
+              </div>
+              <div style={{ marginTop: 3, fontSize: 11, color: "#94a3b8" }}>
+                노란점=반등 / 빨강=위험 / 초록=매집 / 보라=SIGNAL / X축
+                09:00~15:30
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
+              }}
+            >
               <button
                 onClick={() => setShowRebound((v) => !v)}
                 style={{
                   border: "1px solid rgba(250,204,21,0.34)",
-                  background: showRebound ? "rgba(250,204,21,0.12)" : "rgba(15,23,42,0.88)",
+                  background: showRebound
+                    ? "rgba(250,204,21,0.12)"
+                    : "rgba(15,23,42,0.88)",
                   color: showRebound ? "#fde68a" : "#94a3b8",
                   borderRadius: 999,
                   padding: "8px 12px",
@@ -1592,7 +1937,9 @@ export default function DailyPage() {
                 onClick={() => setShowDangerDivergence((v) => !v)}
                 style={{
                   border: "1px solid rgba(239,68,68,0.34)",
-                  background: showDangerDivergence ? "rgba(239,68,68,0.12)" : "rgba(15,23,42,0.88)",
+                  background: showDangerDivergence
+                    ? "rgba(239,68,68,0.12)"
+                    : "rgba(15,23,42,0.88)",
                   color: showDangerDivergence ? "#fecaca" : "#94a3b8",
                   borderRadius: 999,
                   padding: "8px 12px",
@@ -1608,7 +1955,9 @@ export default function DailyPage() {
                 onClick={() => setShowAccumulationDivergence((v) => !v)}
                 style={{
                   border: "1px solid rgba(34,197,94,0.34)",
-                  background: showAccumulationDivergence ? "rgba(34,197,94,0.12)" : "rgba(15,23,42,0.88)",
+                  background: showAccumulationDivergence
+                    ? "rgba(34,197,94,0.12)"
+                    : "rgba(15,23,42,0.88)",
                   color: showAccumulationDivergence ? "#bbf7d0" : "#94a3b8",
                   borderRadius: 999,
                   padding: "8px 12px",
@@ -1624,7 +1973,9 @@ export default function DailyPage() {
                 onClick={() => setShowSignalMarker((v) => !v)}
                 style={{
                   border: "1px solid rgba(168,85,247,0.34)",
-                  background: showSignalMarker ? "rgba(168,85,247,0.12)" : "rgba(15,23,42,0.88)",
+                  background: showSignalMarker
+                    ? "rgba(168,85,247,0.12)"
+                    : "rgba(15,23,42,0.88)",
                   color: showSignalMarker ? "#e9d5ff" : "#94a3b8",
                   borderRadius: 999,
                   padding: "8px 12px",
@@ -1640,7 +1991,9 @@ export default function DailyPage() {
                 onClick={enableSignalNotification}
                 style={{
                   border: "1px solid rgba(250,204,21,0.34)",
-                  background: signalNotifyEnabled ? "rgba(250,204,21,0.14)" : "rgba(15,23,42,0.88)",
+                  background: signalNotifyEnabled
+                    ? "rgba(250,204,21,0.14)"
+                    : "rgba(15,23,42,0.88)",
                   color: signalNotifyEnabled ? "#fde68a" : "#94a3b8",
                   borderRadius: 999,
                   padding: "8px 12px",
@@ -1673,7 +2026,9 @@ export default function DailyPage() {
                 onClick={() => setChartsCollapsed((v) => !v)}
                 style={{
                   border: "1px solid rgba(56,189,248,0.32)",
-                  background: chartsCollapsed ? "rgba(56,189,248,0.18)" : "rgba(15,23,42,0.88)",
+                  background: chartsCollapsed
+                    ? "rgba(56,189,248,0.18)"
+                    : "rgba(15,23,42,0.88)",
                   color: "#e5e7eb",
                   borderRadius: 999,
                   padding: "8px 12px",
@@ -1694,103 +2049,121 @@ export default function DailyPage() {
                 border: "1px solid rgba(148, 163, 184, 0.16)",
                 borderRadius: 20,
                 padding: 18,
-                background: "linear-gradient(145deg, rgba(15,23,42,0.82), rgba(2,6,23,0.70))",
+                background:
+                  "linear-gradient(145deg, rgba(15,23,42,0.82), rgba(2,6,23,0.70))",
                 color: "#94a3b8",
                 boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
               }}
             >
-              차트가 접혀 있습니다. 왼쪽 데이터 확인 시 화면 가림을 줄일 수 있습니다.
+              차트가 접혀 있습니다. 왼쪽 데이터 확인 시 화면 가림을 줄일 수
+              있습니다.
             </div>
           ) : (
             <>
-          <MemoMiniChart
-            title="1. Net Breadth · 전체 상승-하락 폭"
-            data={enhancedChartRows}
-            height={220}
-            referenceLines={[0]}
-            lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]}
-            showRebound={showRebound}
-            showDangerDivergence={showDangerDivergence}
-            showAccumulationDivergence={showAccumulationDivergence}
-            showSignalMarker={showSignalMarker}
-            hoverMinute={hoverMinute}
-            onHoverMinuteChange={handleChartMouseMove}
-            onHoverLeave={handleChartMouseLeave}
-          />
+              <MemoMiniChart
+                title="1. Net Breadth · 전체 상승-하락 폭"
+                data={enhancedChartRows}
+                height={220}
+                referenceLines={[0]}
+                lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]}
+                showRebound={showRebound}
+                showDangerDivergence={showDangerDivergence}
+                showAccumulationDivergence={showAccumulationDivergence}
+                showSignalMarker={showSignalMarker}
+                hoverMinute={hoverMinute}
+                onHoverMinuteChange={handleChartMouseMove}
+                onHoverLeave={handleChartMouseLeave}
+              />
 
-          <MemoMiniChart
-            title="2. Breadth Ratio · 상승/하락 비율"
-            data={enhancedChartRows}
-            height={220}
-            referenceLines={[0]}
-            domain={[0, 80]}
-            lines={[
-              { key: "upRatioPct", name: "상승비율", color: "#ef4444" },
-              { key: "downRatioPct", name: "하락비율", color: "#60a5fa" },
-            ]}
-            showRebound={showRebound}
-            showDangerDivergence={showDangerDivergence}
-            showAccumulationDivergence={showAccumulationDivergence}
-            showSignalMarker={showSignalMarker}
-            hoverMinute={hoverMinute}
-            onHoverMinuteChange={handleChartMouseMove}
-            onHoverLeave={handleChartMouseLeave}
-          />
+              <MemoMiniChart
+                title="2. Breadth Ratio · 상승/하락 비율"
+                data={enhancedChartRows}
+                height={220}
+                referenceLines={[0]}
+                domain={[0, 80]}
+                lines={[
+                  { key: "upRatioPct", name: "상승비율", color: "#ef4444" },
+                  { key: "downRatioPct", name: "하락비율", color: "#60a5fa" },
+                ]}
+                showRebound={showRebound}
+                showDangerDivergence={showDangerDivergence}
+                showAccumulationDivergence={showAccumulationDivergence}
+                showSignalMarker={showSignalMarker}
+                hoverMinute={hoverMinute}
+                onHoverMinuteChange={handleChartMouseMove}
+                onHoverLeave={handleChartMouseLeave}
+              />
 
-          <MemoMiniChart
-            title="3. Flow · 외국인 / 기관 / 개인 수급"
-            data={enhancedChartRows}
-            height={240}
-            referenceLines={[0]}
-            lines={[
-              { key: "foreignFlowEokValue", name: "외국인(억)", color: "#60a5fa" },
-              { key: "instFlowEokValue", name: "기관(억)", color: "#ef4444" },
-              { key: "indivFlowEokValue", name: "개인(억)", color: "#facc15" },
-            ]}
-            showRebound={showRebound}
-            showDangerDivergence={showDangerDivergence}
-            showAccumulationDivergence={showAccumulationDivergence}
-            showSignalMarker={showSignalMarker}
-            hoverMinute={hoverMinute}
-            onHoverMinuteChange={handleChartMouseMove}
-            onHoverLeave={handleChartMouseLeave}
-          />
+              <MemoMiniChart
+                title="3. Flow · 외국인 / 기관 / 개인 수급"
+                data={enhancedChartRows}
+                height={240}
+                referenceLines={[0]}
+                lines={[
+                  {
+                    key: "foreignFlowEokValue",
+                    name: "외국인(억)",
+                    color: "#60a5fa",
+                  },
+                  {
+                    key: "instFlowEokValue",
+                    name: "기관(억)",
+                    color: "#ef4444",
+                  },
+                  {
+                    key: "indivFlowEokValue",
+                    name: "개인(억)",
+                    color: "#facc15",
+                  },
+                ]}
+                showRebound={showRebound}
+                showDangerDivergence={showDangerDivergence}
+                showAccumulationDivergence={showAccumulationDivergence}
+                showSignalMarker={showSignalMarker}
+                hoverMinute={hoverMinute}
+                onHoverMinuteChange={handleChartMouseMove}
+                onHoverLeave={handleChartMouseLeave}
+              />
 
-          <MemoMiniChart
-            title="4. KOSPI 지수"
-            data={enhancedChartRows}
-            height={220}
-            referenceLines={[0]}
-            domain={["auto", "auto"]}
-            lines={[{ key: "kospi", name: "KOSPI", color: "#facc15" }]}
-            showRebound={showRebound}
-            showDangerDivergence={showDangerDivergence}
-            showAccumulationDivergence={showAccumulationDivergence}
-            showSignalMarker={showSignalMarker}
-            hoverMinute={hoverMinute}
-            onHoverMinuteChange={handleChartMouseMove}
-            onHoverLeave={handleChartMouseLeave}
-          />
+              <MemoMiniChart
+                title="4. KOSPI 지수"
+                data={enhancedChartRows}
+                height={220}
+                referenceLines={[0]}
+                domain={["auto", "auto"]}
+                lines={[{ key: "kospi", name: "KOSPI", color: "#facc15" }]}
+                showRebound={showRebound}
+                showDangerDivergence={showDangerDivergence}
+                showAccumulationDivergence={showAccumulationDivergence}
+                showSignalMarker={showSignalMarker}
+                hoverMinute={hoverMinute}
+                onHoverMinuteChange={handleChartMouseMove}
+                onHoverLeave={handleChartMouseLeave}
+              />
 
-          <MemoMiniChart
-            title="5. KOSDAQ 지수"
-            data={enhancedChartRows}
-            height={220}
-            referenceLines={[0]}
-            domain={["auto", "auto"]}
-            lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
-            showRebound={showRebound}
-            showDangerDivergence={showDangerDivergence}
-            showAccumulationDivergence={showAccumulationDivergence}
-            showSignalMarker={showSignalMarker}
-            hoverMinute={hoverMinute}
-            onHoverMinuteChange={handleChartMouseMove}
-            onHoverLeave={handleChartMouseLeave}
-          />
+              <MemoMiniChart
+                title="5. KOSDAQ 지수"
+                data={enhancedChartRows}
+                height={220}
+                referenceLines={[0]}
+                domain={["auto", "auto"]}
+                lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
+                showRebound={showRebound}
+                showDangerDivergence={showDangerDivergence}
+                showAccumulationDivergence={showAccumulationDivergence}
+                showSignalMarker={showSignalMarker}
+                hoverMinute={hoverMinute}
+                onHoverMinuteChange={handleChartMouseMove}
+                onHoverLeave={handleChartMouseLeave}
+              />
 
-          <AlertBox alerts={alerts} filter={alertFilter} onFilterChange={setAlertFilter} />
+              <AlertBox
+                alerts={alerts}
+                filter={alertFilter}
+                onFilterChange={setAlertFilter}
+              />
 
-          <SignalBox signals={signals} />
+              <SignalBox signals={signals} />
             </>
           )}
         </div>
@@ -1810,6 +2183,7 @@ export default function DailyPage() {
           }}
         >
           <div
+            className="daily-fullscreen-grid"
             onClick={(e) => e.stopPropagation()}
             style={{
               maxWidth: 1480,
@@ -1830,11 +2204,23 @@ export default function DailyPage() {
               }}
             >
               <div>
-                <div style={{ fontSize: 20, fontWeight: 950, color: "#f8fafc" }}>CHART PANEL 전체보기</div>
+                <div
+                  style={{ fontSize: 20, fontWeight: 950, color: "#f8fafc" }}
+                >
+                  CHART PANEL 전체보기
+                </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8" }}>
-                  반등 {showRebound ? "ON" : "OFF"} / 위험 {showDangerDivergence ? "ON" : "OFF"} / 매집 {showAccumulationDivergence ? "ON" : "OFF"} / SIGNAL {showSignalMarker ? "ON" : "OFF"}
-                  <span style={{ color: "#38bdf8", marginLeft: 10 }}>휠 확대 {minuteToTimeLabel(chartZoomDomain[0])}~{minuteToTimeLabel(chartZoomDomain[1])}</span>
-                  <span style={{ color: "#facc15", marginLeft: 10 }}>드래그 확대 가능</span>
+                  반등 {showRebound ? "ON" : "OFF"} / 위험{" "}
+                  {showDangerDivergence ? "ON" : "OFF"} / 매집{" "}
+                  {showAccumulationDivergence ? "ON" : "OFF"} / SIGNAL{" "}
+                  {showSignalMarker ? "ON" : "OFF"}
+                  <span style={{ color: "#38bdf8", marginLeft: 10 }}>
+                    휠 확대 {minuteToTimeLabel(chartZoomDomain[0])}~
+                    {minuteToTimeLabel(chartZoomDomain[1])}
+                  </span>
+                  <span style={{ color: "#facc15", marginLeft: 10 }}>
+                    드래그 확대 가능
+                  </span>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1853,31 +2239,148 @@ export default function DailyPage() {
                 >
                   줌 초기화
                 </button>
-              <button
-                onClick={() => setChartPanelFullscreen(false)}
-                style={{
-                  border: "1px solid rgba(148, 163, 184, 0.24)",
-                  background: "rgba(15,23,42,0.92)",
-                  color: "#e5e7eb",
-                  borderRadius: 999,
-                  padding: "10px 14px",
-                  fontSize: 13,
-                  fontWeight: 900,
-                  cursor: "pointer",
-                }}
-              >
-                닫기
-              </button>
+                <button
+                  onClick={() => setChartPanelFullscreen(false)}
+                  style={{
+                    border: "1px solid rgba(148, 163, 184, 0.24)",
+                    background: "rgba(15,23,42,0.92)",
+                    color: "#e5e7eb",
+                    borderRadius: 999,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  닫기
+                </button>
               </div>
             </div>
 
-            <MemoMiniChart title="1. Net Breadth · 전체 상승-하락 폭" data={enhancedChartRows} height={320} referenceLines={[0]} lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
-            <MemoMiniChart title="2. Breadth Ratio · 상승/하락 비율" data={enhancedChartRows} height={320} referenceLines={[0]} domain={[0, 80]} lines={[{ key: "upRatioPct", name: "상승비율", color: "#ef4444" }, { key: "downRatioPct", name: "하락비율", color: "#60a5fa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+            <MemoMiniChart
+              title="1. Net Breadth · 전체 상승-하락 폭"
+              data={enhancedChartRows}
+              height={320}
+              referenceLines={[0]}
+              lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]}
+              showRebound={showRebound}
+              showDangerDivergence={showDangerDivergence}
+              showAccumulationDivergence={showAccumulationDivergence}
+              showSignalMarker={showSignalMarker}
+              xDomain={chartZoomDomain}
+              onChartWheel={handleFullscreenChartWheel}
+              hoverMinute={hoverMinute}
+              onHoverMinuteChange={handleChartMouseMove}
+              onHoverLeave={handleChartMouseLeave}
+              onChartDragStart={handleChartDragStart}
+              onChartDragEnd={handleChartDragEnd}
+              dragStartMinute={dragStartMinute}
+              dragEndMinute={dragEndMinute}
+            />
+            <MemoMiniChart
+              title="2. Breadth Ratio · 상승/하락 비율"
+              data={enhancedChartRows}
+              height={320}
+              referenceLines={[0]}
+              domain={[0, 80]}
+              lines={[
+                { key: "upRatioPct", name: "상승비율", color: "#ef4444" },
+                { key: "downRatioPct", name: "하락비율", color: "#60a5fa" },
+              ]}
+              showRebound={showRebound}
+              showDangerDivergence={showDangerDivergence}
+              showAccumulationDivergence={showAccumulationDivergence}
+              showSignalMarker={showSignalMarker}
+              xDomain={chartZoomDomain}
+              onChartWheel={handleFullscreenChartWheel}
+              hoverMinute={hoverMinute}
+              onHoverMinuteChange={handleChartMouseMove}
+              onHoverLeave={handleChartMouseLeave}
+              onChartDragStart={handleChartDragStart}
+              onChartDragEnd={handleChartDragEnd}
+              dragStartMinute={dragStartMinute}
+              dragEndMinute={dragEndMinute}
+            />
             <div style={{ gridColumn: "1 / -1" }}>
-              <MemoMiniChart title="3. Flow · 외국인 / 기관 / 개인 수급" data={enhancedChartRows} height={340} referenceLines={[0]} lines={[{ key: "foreignFlowEokValue", name: "외국인(억)", color: "#60a5fa" }, { key: "instFlowEokValue", name: "기관(억)", color: "#ef4444" }, { key: "indivFlowEokValue", name: "개인(억)", color: "#facc15" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+              <MemoMiniChart
+                title="3. Flow · 외국인 / 기관 / 개인 수급"
+                data={enhancedChartRows}
+                height={340}
+                referenceLines={[0]}
+                lines={[
+                  {
+                    key: "foreignFlowEokValue",
+                    name: "외국인(억)",
+                    color: "#60a5fa",
+                  },
+                  {
+                    key: "instFlowEokValue",
+                    name: "기관(억)",
+                    color: "#ef4444",
+                  },
+                  {
+                    key: "indivFlowEokValue",
+                    name: "개인(억)",
+                    color: "#facc15",
+                  },
+                ]}
+                showRebound={showRebound}
+                showDangerDivergence={showDangerDivergence}
+                showAccumulationDivergence={showAccumulationDivergence}
+                showSignalMarker={showSignalMarker}
+                xDomain={chartZoomDomain}
+                onChartWheel={handleFullscreenChartWheel}
+                hoverMinute={hoverMinute}
+                onHoverMinuteChange={handleChartMouseMove}
+                onHoverLeave={handleChartMouseLeave}
+                onChartDragStart={handleChartDragStart}
+                onChartDragEnd={handleChartDragEnd}
+                dragStartMinute={dragStartMinute}
+                dragEndMinute={dragEndMinute}
+              />
             </div>
-            <MemoMiniChart title="4. KOSPI 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
-            <MemoMiniChart title="5. KOSDAQ 지수" data={enhancedChartRows} height={320} referenceLines={[0]} domain={["auto", "auto"]} lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]} showRebound={showRebound} showDangerDivergence={showDangerDivergence} showAccumulationDivergence={showAccumulationDivergence} showSignalMarker={showSignalMarker} xDomain={chartZoomDomain} onChartWheel={handleFullscreenChartWheel} hoverMinute={hoverMinute} onHoverMinuteChange={handleChartMouseMove} onHoverLeave={handleChartMouseLeave} onChartDragStart={handleChartDragStart} onChartDragEnd={handleChartDragEnd} dragStartMinute={dragStartMinute} dragEndMinute={dragEndMinute} />
+            <MemoMiniChart
+              title="4. KOSPI 지수"
+              data={enhancedChartRows}
+              height={320}
+              referenceLines={[0]}
+              domain={["auto", "auto"]}
+              lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]}
+              showRebound={showRebound}
+              showDangerDivergence={showDangerDivergence}
+              showAccumulationDivergence={showAccumulationDivergence}
+              showSignalMarker={showSignalMarker}
+              xDomain={chartZoomDomain}
+              onChartWheel={handleFullscreenChartWheel}
+              hoverMinute={hoverMinute}
+              onHoverMinuteChange={handleChartMouseMove}
+              onHoverLeave={handleChartMouseLeave}
+              onChartDragStart={handleChartDragStart}
+              onChartDragEnd={handleChartDragEnd}
+              dragStartMinute={dragStartMinute}
+              dragEndMinute={dragEndMinute}
+            />
+            <MemoMiniChart
+              title="5. KOSDAQ 지수"
+              data={enhancedChartRows}
+              height={320}
+              referenceLines={[0]}
+              domain={["auto", "auto"]}
+              lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
+              showRebound={showRebound}
+              showDangerDivergence={showDangerDivergence}
+              showAccumulationDivergence={showAccumulationDivergence}
+              showSignalMarker={showSignalMarker}
+              xDomain={chartZoomDomain}
+              onChartWheel={handleFullscreenChartWheel}
+              hoverMinute={hoverMinute}
+              onHoverMinuteChange={handleChartMouseMove}
+              onHoverLeave={handleChartMouseLeave}
+              onChartDragStart={handleChartDragStart}
+              onChartDragEnd={handleChartDragEnd}
+              dragStartMinute={dragStartMinute}
+              dragEndMinute={dragEndMinute}
+            />
           </div>
         </div>
       )}
@@ -1908,202 +2411,44 @@ export default function DailyPage() {
           scrollbar-color: #2563eb rgba(15, 23, 42, 0.34);
         }
 
+        @media (max-width: 760px) {
+          .daily-summary-card {
+            padding: 14px !important;
+            border-radius: 16px !important;
+            min-height: 104px !important;
+            overflow: hidden !important;
+          }
+
+          .daily-summary-card > div:first-child {
+            font-size: 12px !important;
+            margin-bottom: 8px !important;
+            word-break: keep-all !important;
+          }
+
+          .daily-summary-card > div:last-child {
+            font-size: clamp(24px, 8vw, 36px) !important;
+            line-height: 1.12 !important;
+            word-break: keep-all !important;
+            overflow-wrap: anywhere !important;
+          }
+
+          .daily-compact-metric {
+            padding: 12px !important;
+            min-height: 74px !important;
+          }
+
+          .daily-compact-metric > div:last-child {
+            font-size: clamp(18px, 5.8vw, 24px) !important;
+          }
+        }
+
         .chart-box-header {
           position: relative;
         }
 
-        
         .chart-header-legend button:hover {
           transform: translateY(-1px);
           border-color: rgba(226, 232, 240, 0.34) !important;
-        }
-
-        @media (max-width: 760px) {
-          .chart-box-header {
-            align-items: flex-start !important;
-            flex-direction: column !important;
-            gap: 8px !important;
-          }
-
-          .chart-header-legend {
-            max-width: 100% !important;
-            justify-content: flex-start !important;
-          }
-        }
-
-
-
-        @media (max-width: 760px) {
-          html,
-          body {
-            overflow-x: hidden !important;
-          }
-
-          .daily-page-root {
-            padding: 14px 10px 96px !important;
-            overflow-x: hidden !important;
-          }
-
-          .daily-page-header {
-            display: block !important;
-            margin-bottom: 76px !important;
-          }
-
-          .daily-page-header h1 {
-            max-width: calc(100vw - 24px) !important;
-            font-size: 20px !important;
-            line-height: 1.22 !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-          }
-
-          .daily-floating-date {
-            left: 10px !important;
-            right: 10px !important;
-            top: 12px !important;
-            width: auto !important;
-            max-width: calc(100vw - 20px) !important;
-            transform: none !important;
-            justify-content: space-between !important;
-            gap: 6px !important;
-            padding: 6px !important;
-            overflow: hidden !important;
-          }
-
-          .daily-floating-date a,
-          .daily-floating-date label,
-          .daily-floating-date button {
-            min-width: 0 !important;
-            padding: 9px 10px !important;
-            font-size: 12px !important;
-            flex: 1 1 0 !important;
-            justify-content: center !important;
-          }
-
-          .daily-floating-date label input {
-            width: 94px !important;
-            min-width: 94px !important;
-            font-size: 12px !important;
-          }
-
-          .daily-summary-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            gap: 10px !important;
-          }
-
-          .daily-summary-card {
-            min-width: 0 !important;
-            min-height: 112px !important;
-            padding: 14px 12px !important;
-            border-radius: 18px !important;
-            overflow: hidden !important;
-          }
-
-          .daily-summary-title {
-            font-size: 12px !important;
-            line-height: 1.35 !important;
-            word-break: keep-all !important;
-            white-space: normal !important;
-          }
-
-          .daily-summary-value {
-            font-size: clamp(23px, 8.2vw, 34px) !important;
-            line-height: 1.08 !important;
-            letter-spacing: -0.04em !important;
-            word-break: keep-all !important;
-            white-space: normal !important;
-            overflow-wrap: normal !important;
-          }
-
-          .daily-brief-layout,
-          .daily-main-layout {
-            grid-template-columns: 1fr !important;
-            gap: 12px !important;
-          }
-
-          .daily-compact-grid,
-          .daily-detail-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-
-          .daily-signal-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-
-          .daily-compact-metric {
-            min-height: 72px !important;
-            padding: 10px !important;
-            overflow: hidden !important;
-          }
-
-          .daily-compact-metric > div:first-child {
-            word-break: keep-all !important;
-          }
-
-          .daily-table-scroll {
-            width: 100% !important;
-            max-width: calc(100vw - 20px) !important;
-            max-height: none !important;
-            overflow-x: auto !important;
-            overflow-y: visible !important;
-            border-radius: 18px !important;
-            -webkit-overflow-scrolling: touch !important;
-          }
-
-          .daily-log-table {
-            min-width: 980px !important;
-            width: 980px !important;
-            table-layout: fixed !important;
-          }
-
-          .daily-log-table th,
-          .daily-log-table td {
-            padding: 11px 10px !important;
-            font-size: 14px !important;
-          }
-
-          .daily-log-table th:nth-child(1),
-          .daily-log-table td:nth-child(1) {
-            position: sticky !important;
-            left: 0 !important;
-            z-index: 35 !important;
-            background: rgba(15, 23, 42, 0.98) !important;
-            box-shadow: 1px 0 0 rgba(56, 189, 248, 0.16) !important;
-          }
-
-          .daily-chart-panel {
-            position: relative !important;
-            top: auto !important;
-            gap: 12px !important;
-            max-width: calc(100vw - 20px) !important;
-            overflow: hidden !important;
-          }
-
-          .daily-chart-toolbar {
-            flex-direction: column !important;
-            align-items: stretch !important;
-          }
-
-          .daily-chart-toolbar > div:last-child {
-            justify-content: flex-start !important;
-          }
-
-          .daily-chart-toolbar button {
-            padding: 8px 10px !important;
-            font-size: 11px !important;
-          }
-
-          .chart-box-header {
-            align-items: flex-start !important;
-            flex-direction: column !important;
-            gap: 8px !important;
-          }
-
-          .chart-header-legend {
-            max-width: 100% !important;
-            justify-content: flex-start !important;
-          }
         }
 
         @media (max-width: 1180px) {
@@ -2114,6 +2459,179 @@ export default function DailyPage() {
           .daily-chart-panel {
             position: relative !important;
             top: auto !important;
+          }
+        }
+
+        @media (max-width: 760px) {
+          html,
+          body {
+            overflow-x: hidden;
+          }
+
+          .daily-page-root {
+            padding: calc(12px + env(safe-area-inset-top)) 10px 16px !important;
+            min-width: 0 !important;
+          }
+
+          .daily-page-header {
+            display: block !important;
+            margin-bottom: 14px !important;
+            padding-top: 2px !important;
+          }
+
+          .daily-page-header h1 {
+            font-size: 21px !important;
+            line-height: 1.2 !important;
+            max-width: calc(100vw - 24px) !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+          }
+
+          .daily-floating-date {
+            position: static !important;
+            top: auto !important;
+            right: auto !important;
+            transform: none !important;
+            transform-origin: initial !important;
+            width: 100% !important;
+            margin-top: 12px !important;
+            padding: 5px !important;
+            display: grid !important;
+            grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr) !important;
+            gap: 8px !important;
+            border-radius: 22px !important;
+            z-index: 30 !important;
+          }
+
+          .daily-floating-date a,
+          .daily-floating-date button,
+          .daily-floating-date label {
+            width: 100% !important;
+            min-width: 0 !important;
+            justify-content: center !important;
+            padding: 10px 8px !important;
+            font-size: 12px !important;
+            box-sizing: border-box !important;
+          }
+
+          .daily-floating-date label {
+            gap: 5px !important;
+          }
+
+          .daily-floating-date label span {
+            white-space: normal !important;
+            line-height: 1.1 !important;
+          }
+
+          .daily-floating-date input {
+            width: 92px !important;
+            min-width: 92px !important;
+            font-size: 12px !important;
+          }
+
+          .daily-summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 10px !important;
+            margin-bottom: 12px !important;
+          }
+
+          .daily-brief-grid {
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+
+          .daily-flow-metric-grid,
+          .daily-signal-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .daily-detail-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .daily-main-layout {
+            grid-template-columns: 1fr !important;
+            gap: 14px !important;
+          }
+
+          .daily-table-scroll {
+            max-height: 65vh !important;
+            width: 100% !important;
+            border-radius: 18px !important;
+            -webkit-overflow-scrolling: touch;
+          }
+
+          .daily-table-scroll table {
+            width: max-content !important;
+            min-width: 1180px !important;
+          }
+
+          .daily-table-scroll th {
+            padding: 10px 9px !important;
+            font-size: 12px !important;
+          }
+
+          .daily-table-scroll td {
+            padding: 10px 9px !important;
+            font-size: 12px !important;
+          }
+
+          .daily-chart-panel {
+            position: relative !important;
+            top: auto !important;
+            gap: 12px !important;
+          }
+
+          .daily-chart-panel > div:first-child {
+            display: block !important;
+            padding: 12px !important;
+            border-radius: 18px !important;
+          }
+
+          .daily-chart-panel > div:first-child > div:last-child {
+            justify-content: flex-start !important;
+            margin-top: 10px !important;
+          }
+
+          .chart-box-header {
+            align-items: flex-start !important;
+            flex-direction: column !important;
+            gap: 9px !important;
+          }
+
+          .chart-header-legend {
+            max-width: 100% !important;
+            justify-content: flex-start !important;
+            gap: 7px !important;
+          }
+
+          .chart-header-legend button {
+            padding: 6px 9px !important;
+            font-size: 10.5px !important;
+          }
+
+          .recharts-responsive-container {
+            min-width: 0 !important;
+          }
+
+          .daily-fullscreen-grid {
+            grid-template-columns: 1fr !important;
+            padding: 0 !important;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .daily-summary-grid {
+            grid-template-columns: 1fr 1fr !important;
+          }
+
+          .daily-flow-metric-grid {
+            grid-template-columns: 1fr 1fr !important;
+          }
+
+          .daily-floating-date {
+            grid-template-columns: 1fr 1fr !important;
           }
         }
       `}</style>
@@ -2184,7 +2702,8 @@ function ChartLegend({
               whiteSpace: "nowrap",
               cursor: "pointer",
               opacity: isHidden ? 0.52 : 1,
-              transition: "opacity 0.16s ease, transform 0.16s ease, border-color 0.16s ease, color 0.16s ease",
+              transition:
+                "opacity 0.16s ease, transform 0.16s ease, border-color 0.16s ease, color 0.16s ease",
             }}
           >
             <span
@@ -2209,7 +2728,8 @@ function ChartLegend({
 function ModernTooltip({ active, payload, label }: any) {
   if (!active || !payload || payload.length === 0) return null;
 
-  const displayLabel = typeof label === "number" ? minuteToTimeLabel(label) : label;
+  const displayLabel =
+    typeof label === "number" ? minuteToTimeLabel(label) : label;
   const cleanPayload = payload.reduce((acc: any[], item: any) => {
     const dataKey = String(item?.dataKey ?? "");
     const name = String(item?.name ?? "");
@@ -2238,10 +2758,31 @@ function ModernTooltip({ active, payload, label }: any) {
         minWidth: 132,
       }}
     >
-      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 7, fontWeight: 800 }}>{displayLabel}</div>
+      <div
+        style={{
+          fontSize: 11,
+          color: "#94a3b8",
+          marginBottom: 7,
+          fontWeight: 800,
+        }}
+      >
+        {displayLabel}
+      </div>
       {cleanPayload.map((item: any) => (
-        <div key={`${item.name}-${item.dataKey}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", fontSize: 12, lineHeight: 1.7 }}>
-          <span style={{ color: item.color, fontWeight: 800 }}>{item.name}</span>
+        <div
+          key={`${item.name}-${item.dataKey}`}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "center",
+            fontSize: 12,
+            lineHeight: 1.7,
+          }}
+        >
+          <span style={{ color: item.color, fontWeight: 800 }}>
+            {item.name}
+          </span>
           <strong style={{ color: "#f8fafc", fontWeight: 900 }}>
             {String(item.dataKey ?? "").includes("Eok")
               ? `${Number(item.value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}억`
@@ -2261,7 +2802,7 @@ function chartMarkerDot(
   showRebound: boolean,
   showDangerDivergence: boolean,
   showAccumulationDivergence: boolean,
-  showSignalMarker: boolean
+  showSignalMarker: boolean,
 ) {
   const { cx, cy, payload, index } = props;
 
@@ -2269,7 +2810,9 @@ function chartMarkerDot(
 
   if (isPrimaryLine && payload.divergenceType) {
     const isDanger = payload.divergenceType === "danger";
-    const shouldShowDivergence = isDanger ? showDangerDivergence : showAccumulationDivergence;
+    const shouldShowDivergence = isDanger
+      ? showDangerDivergence
+      : showAccumulationDivergence;
 
     if (shouldShowDivergence) {
       const color = isDanger ? "#ef4444" : "#22c55e";
@@ -2317,7 +2860,11 @@ function chartMarkerDot(
   const prev2 = Number(data[index - 2]?.[dataKey]);
   const curr = Number(payload[dataKey]);
 
-  if (!Number.isFinite(prev) || !Number.isFinite(prev2) || !Number.isFinite(curr)) {
+  if (
+    !Number.isFinite(prev) ||
+    !Number.isFinite(prev2) ||
+    !Number.isFinite(curr)
+  ) {
     return null;
   }
 
@@ -2379,21 +2926,28 @@ function MiniChart({
   dragEndMinute?: number | null;
 }) {
   const chartId = title.replace(/[^a-zA-Z0-9]/g, "");
-  const activeXDomain: [number, number] = xDomain ?? [MARKET_OPEN_MINUTE, MARKET_CLOSE_MINUTE];
-  const activeXTicks = getTicksForDomain(activeXDomain);
+  const isMobile = useIsMobile();
+  const activeXDomain: [number, number] = xDomain ?? [
+    MARKET_OPEN_MINUTE,
+    MARKET_CLOSE_MINUTE,
+  ];
+  const baseXTicks = getTicksForDomain(activeXDomain);
+  const activeXTicks = isMobile
+    ? baseXTicks.filter(
+        (tick) => tick % 60 === 0 || tick === MARKET_CLOSE_MINUTE,
+      )
+    : baseXTicks;
 
   const [hiddenLineKeys, setHiddenLineKeys] = useState<string[]>([]);
 
   const visibleLines = useMemo(
     () => lines.filter((line) => !hiddenLineKeys.includes(line.key)),
-    [lines, hiddenLineKeys]
+    [lines, hiddenLineKeys],
   );
 
   const toggleLine = (key: string) => {
     setHiddenLineKeys((prev) =>
-      prev.includes(key)
-        ? prev.filter((item) => item !== key)
-        : [...prev, key]
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key],
     );
   };
 
@@ -2415,139 +2969,175 @@ function MiniChart({
           backfaceVisibility: "hidden",
           contain: "layout paint style",
         }}
-        title={onChartWheel ? "마우스 휠로 시간축을 확대/축소할 수 있습니다" : undefined}
+        title={
+          onChartWheel
+            ? "마우스 휠로 시간축을 확대/축소할 수 있습니다"
+            : undefined
+        }
       >
         <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart
-          data={data}
-          margin={{ top: 12, right: 22, left: 20, bottom: 0 }}
-          onMouseMove={onHoverMinuteChange}
-          onMouseLeave={onHoverLeave}
-          onMouseDown={onChartDragStart}
-          onMouseUp={onChartDragEnd}
-        >
-          <defs>
-            {visibleLines.map((line) => (
-              <linearGradient key={`gradient-${line.key}`} id={`areaGradient-${chartId}-${line.key}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={line.color} stopOpacity={0.30} />
-                <stop offset="55%" stopColor={line.color} stopOpacity={0.10} />
-                <stop offset="100%" stopColor={line.color} stopOpacity={0.02} />
-              </linearGradient>
+          <ComposedChart
+            data={data}
+            margin={
+              isMobile
+                ? { top: 12, right: 8, left: 0, bottom: 0 }
+                : { top: 12, right: 22, left: 20, bottom: 0 }
+            }
+            onMouseMove={onHoverMinuteChange}
+            onMouseLeave={onHoverLeave}
+            onMouseDown={onChartDragStart}
+            onMouseUp={onChartDragEnd}
+          >
+            <defs>
+              {visibleLines.map((line) => (
+                <linearGradient
+                  key={`gradient-${line.key}`}
+                  id={`areaGradient-${chartId}-${line.key}`}
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="1"
+                >
+                  <stop offset="5%" stopColor={line.color} stopOpacity={0.3} />
+                  <stop offset="55%" stopColor={line.color} stopOpacity={0.1} />
+                  <stop
+                    offset="100%"
+                    stopColor={line.color}
+                    stopOpacity={0.02}
+                  />
+                </linearGradient>
+              ))}
+              <filter
+                id={`chartGlow-${chartId}`}
+                x="-30%"
+                y="-30%"
+                width="160%"
+                height="160%"
+              >
+                <feGaussianBlur stdDeviation="2.3" result="coloredBlur" />
+                <feMerge>
+                  <feMergeNode in="coloredBlur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <CartesianGrid
+              stroke="rgba(148, 163, 184, 0.11)"
+              vertical={false}
+              strokeDasharray="3 8"
+            />
+            <XAxis
+              dataKey="timeMinuteValue"
+              type="number"
+              domain={activeXDomain}
+              ticks={activeXTicks}
+              tickFormatter={minuteToTimeLabel}
+              interval={0}
+              allowDataOverflow
+              stroke="rgba(203, 213, 225, 0.62)"
+              fontSize={isMobile ? 9 : 10}
+              tickLine={false}
+              axisLine={{ stroke: "rgba(148, 163, 184, 0.18)" }}
+            />
+            <YAxis
+              stroke="rgba(203, 213, 225, 0.62)"
+              fontSize={isMobile ? 9 : 10}
+              tickLine={false}
+              axisLine={false}
+              width={isMobile ? 46 : 62}
+              domain={domain ?? ["auto", "auto"]}
+              tickMargin={8}
+            />
+            <Tooltip content={<ModernTooltip />} />
+            {referenceLines.map((value) => (
+              <ReferenceLine
+                key={value}
+                y={value}
+                stroke={
+                  value === 0
+                    ? "rgba(226, 232, 240, 0.38)"
+                    : "rgba(148, 163, 184, 0.22)"
+                }
+                strokeDasharray="4 6"
+              />
             ))}
-            <filter id={`chartGlow-${chartId}`} x="-30%" y="-30%" width="160%" height="160%">
-              <feGaussianBlur stdDeviation="2.3" result="coloredBlur" />
-              <feMerge>
-                <feMergeNode in="coloredBlur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          <CartesianGrid stroke="rgba(148, 163, 184, 0.11)" vertical={false} strokeDasharray="3 8" />
-          <XAxis
-            dataKey="timeMinuteValue"
-            type="number"
-            domain={activeXDomain}
-            ticks={activeXTicks}
-            tickFormatter={minuteToTimeLabel}
-            interval={0}
-            allowDataOverflow
-            stroke="rgba(203, 213, 225, 0.62)"
-            fontSize={10}
-            tickLine={false}
-            axisLine={{ stroke: "rgba(148, 163, 184, 0.18)" }}
-          />
-          <YAxis
-            stroke="rgba(203, 213, 225, 0.62)"
-            fontSize={10}
-            tickLine={false}
-            axisLine={false}
-            width={62}
-            domain={domain ?? ["auto", "auto"]}
-            tickMargin={8}
-          />
-          <Tooltip content={<ModernTooltip />} />
-          {referenceLines.map((value) => (
-            <ReferenceLine
-              key={value}
-              y={value}
-              stroke={value === 0 ? "rgba(226, 232, 240, 0.38)" : "rgba(148, 163, 184, 0.22)"}
-              strokeDasharray="4 6"
-            />
-          ))}
-          {hoverMinute !== null && (
-            <ReferenceLine
-              x={hoverMinute}
-              stroke="rgba(250, 204, 21, 0.72)"
-              strokeDasharray="3 4"
-              ifOverflow="extendDomain"
-            />
-          )}
-          {dragStartMinute !== null && dragEndMinute !== null && Math.abs(Number(dragEndMinute) - Number(dragStartMinute)) > 1 && (
-            <ReferenceArea
-              x1={Math.min(Number(dragStartMinute), Number(dragEndMinute))}
-              x2={Math.max(Number(dragStartMinute), Number(dragEndMinute))}
-              strokeOpacity={0.25}
-              fill="rgba(56, 189, 248, 0.18)"
-              ifOverflow="hidden"
-            />
-          )}
-          {visibleLines.map((line) => (
-            <Area
-              key={`area-${line.key}`}
-              type="monotone"
-              dataKey={line.key}
-              stroke="none"
-              fill={`url(#areaGradient-${chartId}-${line.key})`}
-              fillOpacity={1}
-              isAnimationActive={false}
-              connectNulls
-            />
-          ))}
-          {visibleLines.map((line) => {
-            const originalLineIndex = lines.findIndex((item) => item.key === line.key);
+            {hoverMinute !== null && (
+              <ReferenceLine
+                x={hoverMinute}
+                stroke="rgba(250, 204, 21, 0.72)"
+                strokeDasharray="3 4"
+                ifOverflow="extendDomain"
+              />
+            )}
+            {dragStartMinute !== null &&
+              dragEndMinute !== null &&
+              Math.abs(Number(dragEndMinute) - Number(dragStartMinute)) > 1 && (
+                <ReferenceArea
+                  x1={Math.min(Number(dragStartMinute), Number(dragEndMinute))}
+                  x2={Math.max(Number(dragStartMinute), Number(dragEndMinute))}
+                  strokeOpacity={0.25}
+                  fill="rgba(56, 189, 248, 0.18)"
+                  ifOverflow="hidden"
+                />
+              )}
+            {visibleLines.map((line) => (
+              <Area
+                key={`area-${line.key}`}
+                type="monotone"
+                dataKey={line.key}
+                stroke="none"
+                fill={`url(#areaGradient-${chartId}-${line.key})`}
+                fillOpacity={1}
+                isAnimationActive={false}
+                connectNulls
+              />
+            ))}
+            {visibleLines.map((line) => {
+              const originalLineIndex = lines.findIndex(
+                (item) => item.key === line.key,
+              );
 
-            return (
-            <Line
-              key={line.key}
-              type="monotone"
-              dataKey={line.key}
-              name={line.name}
-              stroke={line.color}
-              strokeWidth={1.75}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              dot={(props) =>
-                chartMarkerDot(
-                  props,
-                  data,
-                  line.key,
-                  originalLineIndex === 0,
-                  showRebound,
-                  showDangerDivergence,
-                  showAccumulationDivergence,
-                  showSignalMarker
-                )
-              }
-              activeDot={{
-                r: 3.5,
-                strokeWidth: 1.2,
-                stroke: "rgba(255,255,255,0.9)",
-                fill: line.color,
-              }}
-              isAnimationActive={false}
-              connectNulls
-            />
-            );
-          })}
-        </ComposedChart>
-      </ResponsiveContainer>
+              return (
+                <Line
+                  key={line.key}
+                  type="monotone"
+                  dataKey={line.key}
+                  name={line.name}
+                  stroke={line.color}
+                  strokeWidth={1.75}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  dot={(props) =>
+                    chartMarkerDot(
+                      props,
+                      data,
+                      line.key,
+                      originalLineIndex === 0,
+                      showRebound,
+                      showDangerDivergence,
+                      showAccumulationDivergence,
+                      showSignalMarker,
+                    )
+                  }
+                  activeDot={{
+                    r: 3.5,
+                    strokeWidth: 1.2,
+                    stroke: "rgba(255,255,255,0.9)",
+                    fill: line.color,
+                  }}
+                  isAnimationActive={false}
+                  connectNulls
+                />
+              );
+            })}
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     </ChartBox>
   );
 }
 
 const MemoMiniChart = memo(MiniChart);
-
 
 function CompactMetric({
   title,
@@ -2570,8 +3160,28 @@ function CompactMetric({
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
       }}
     >
-      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6, fontWeight: 800 }}>{title}</div>
-      <div style={{ fontSize: 18, fontWeight: 950, color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
+      <div
+        style={{
+          fontSize: 11,
+          color: "#94a3b8",
+          marginBottom: 6,
+          fontWeight: 800,
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 950,
+          color,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -2598,8 +3208,27 @@ function SummaryCard({
         backdropFilter: "blur(16px)",
       }}
     >
-      <div className="daily-summary-title" style={{ fontSize: 12, color: "#93c5fd", marginBottom: 10, fontWeight: 800, letterSpacing: 0.2 }}>{title}</div>
-      <div className="daily-summary-value" style={{ fontSize: 28, fontWeight: 950, color, textShadow: "0 0 18px rgba(255,255,255,0.10)" }}>{value}</div>
+      <div
+        style={{
+          fontSize: 12,
+          color: "#93c5fd",
+          marginBottom: 10,
+          fontWeight: 800,
+          letterSpacing: 0.2,
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          fontSize: 28,
+          fontWeight: 950,
+          color,
+          textShadow: "0 0 18px rgba(255,255,255,0.10)",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -2655,20 +3284,18 @@ function ChartBox({
         >
           {title}
         </h3>
-        <ChartLegend items={legend} hiddenLineKeys={hiddenLineKeys} onToggleLine={onToggleLine} />
+        <ChartLegend
+          items={legend}
+          hiddenLineKeys={hiddenLineKeys}
+          onToggleLine={onToggleLine}
+        />
       </div>
       {children}
     </div>
   );
 }
 
-function FlowStatusPanel({
-  row,
-  prev,
-}: {
-  row: Row;
-  prev?: Row;
-}) {
+function FlowStatusPanel({ row, prev }: { row: Row; prev?: Row }) {
   const badge = getFlowBadge(row, prev);
   const foreign = Number(row.foreignFlow ?? 0);
   const inst = Number(row.instFlow ?? 0);
@@ -2700,7 +3327,9 @@ function FlowStatusPanel({
         }}
       >
         <div>
-          <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 5 }}>FLOW STATUS</div>
+          <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 5 }}>
+            FLOW STATUS
+          </div>
           <div style={{ fontSize: 18, fontWeight: 900, color: "#e5e7eb" }}>
             {getFlowNarrative(row, prev)}
           </div>
@@ -2735,7 +3364,11 @@ function FlowStatusPanel({
         <FlowMiniCard title="외인+기관" value={power} strong />
         <FlowMiniCard title="추세" value={trend} />
         <FlowMiniCard title="모멘텀" value={momentum} />
-        <FlowMiniCard title="강도" value={getFlowStrength(power)} textColor={badge.color} />
+        <FlowMiniCard
+          title="강도"
+          value={getFlowStrength(power)}
+          textColor={badge.color}
+        />
       </div>
     </div>
   );
@@ -2767,7 +3400,9 @@ function FlowMiniCard({
         minHeight: 76,
       }}
     >
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
+        {title}
+      </div>
       <div style={{ fontSize: strong ? 19 : 16, fontWeight: 900, color }}>
         {isNumber ? formatFlowEok(value) : value}
       </div>
@@ -2780,7 +3415,13 @@ function FlowMiniCard({
   );
 }
 
-function IndexCell({ value, prevValue }: { value: number; prevValue?: number }) {
+function IndexCell({
+  value,
+  prevValue,
+}: {
+  value: number;
+  prevValue?: number;
+}) {
   const info = getIndexChangeInfo(value, prevValue);
   const hasPrev = Number(prevValue ?? 0) > 0;
 
@@ -2800,7 +3441,8 @@ function IndexCell({ value, prevValue }: { value: number; prevValue?: number }) 
             textShadow: `0 0 10px ${info.color}33`,
           }}
         >
-          {info.icon} {Math.abs(info.diff).toFixed(2)} ({info.pct >= 0 ? "+" : "-"}
+          {info.icon} {Math.abs(info.diff).toFixed(2)} (
+          {info.pct >= 0 ? "+" : "-"}
           {Math.abs(info.pct).toFixed(2)}%)
         </div>
       )}
@@ -2838,9 +3480,7 @@ function AlertBox({
           marginBottom: 12,
         }}
       >
-        <h3 style={{ fontSize: 14, color: "#cbd5e1", margin: 0 }}>
-          ALERT
-        </h3>
+        <h3 style={{ fontSize: 14, color: "#cbd5e1", margin: 0 }}>ALERT</h3>
 
         <div style={{ display: "flex", gap: 6 }}>
           {(["전체", "강", "중", "약"] as AlertFilter[]).map((item) => (
@@ -2896,7 +3536,12 @@ function AlertBox({
                   color: "#94a3b8",
                 }}
               >
-                <span style={{ color: getAlertColor(alert.level, alert.color), fontWeight: 800 }}>
+                <span
+                  style={{
+                    color: getAlertColor(alert.level, alert.color),
+                    fontWeight: 800,
+                  }}
+                >
                   {alert.level}
                 </span>
                 <span>{alert.time}</span>
@@ -2915,9 +3560,15 @@ function AlertBox({
                     color: "#94a3b8",
                   }}
                 >
-                  {typeof alert.marketScore === "number" ? `점수 ${alert.marketScore}` : ""}
-                  {typeof alert.diff === "number" ? ` / 차이 ${alert.diff}` : ""}
-                  {typeof alert.accel === "number" ? ` / 가속 ${alert.accel}` : ""}
+                  {typeof alert.marketScore === "number"
+                    ? `점수 ${alert.marketScore}`
+                    : ""}
+                  {typeof alert.diff === "number"
+                    ? ` / 차이 ${alert.diff}`
+                    : ""}
+                  {typeof alert.accel === "number"
+                    ? ` / 가속 ${alert.accel}`
+                    : ""}
                 </div>
               )}
             </div>
@@ -2927,7 +3578,6 @@ function AlertBox({
     </div>
   );
 }
-
 
 function isRecentStrongSignal(signal: SignalItem) {
   const now = new Date();
@@ -2949,7 +3599,8 @@ function isRecentStrongSignal(signal: SignalItem) {
     return Math.abs(Number(signal.accel ?? 0)) > 200;
   }
 
-  if (signal.type === "SCORE_OVERHEAT" || signal.type === "SCORE_OVERSOLD") return true;
+  if (signal.type === "SCORE_OVERHEAT" || signal.type === "SCORE_OVERSOLD")
+    return true;
 
   return false;
 }
@@ -2957,7 +3608,7 @@ function isRecentStrongSignal(signal: SignalItem) {
 function SignalBox({ signals }: { signals: SignalItem[] }) {
   const filteredSignals = useMemo(
     () => signals.filter(isRecentStrongSignal).slice(0, 10),
-    [signals]
+    [signals],
   );
 
   return (
@@ -3022,7 +3673,8 @@ function SignalBox({ signals }: { signals: SignalItem[] }) {
               </div>
 
               <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
-                diff {signal.diff ?? "-"} / accel {signal.accel ?? "-"} / score {signal.marketScore ?? "-"}
+                diff {signal.diff ?? "-"} / accel {signal.accel ?? "-"} / score{" "}
+                {signal.marketScore ?? "-"}
               </div>
 
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
