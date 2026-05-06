@@ -1166,6 +1166,7 @@ export default function DailyPage() {
 
   return (
     <div
+      className="daily-page-root"
       style={{
         background:
           "radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 32%), radial-gradient(circle at top right, rgba(168,85,247,0.16), transparent 34%), linear-gradient(135deg, #020617 0%, #07111f 46%, #020617 100%)",
@@ -1177,6 +1178,7 @@ export default function DailyPage() {
       }}
     >
       <div
+        className="daily-page-header"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -1292,6 +1294,7 @@ export default function DailyPage() {
 
       {last && (
         <div
+          className="daily-summary-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -1312,6 +1315,7 @@ export default function DailyPage() {
 
       {last && (
         <div
+          className="daily-brief-layout"
           style={{
             display: "grid",
             gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 0.85fr)",
@@ -1370,6 +1374,7 @@ export default function DailyPage() {
             </div>
 
             <div
+              className="daily-compact-grid"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -1397,7 +1402,7 @@ export default function DailyPage() {
             <div style={{ fontSize: 12, color: "#93c5fd", fontWeight: 900, marginBottom: 12 }}>
               SIGNAL / FLOW
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+            <div className="daily-signal-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
               <CompactMetric title="상방" value={sigSummary.upCount} color="#22c55e" />
               <CompactMetric title="하방" value={sigSummary.downCount} color="#60a5fa" />
               <CompactMetric title="강함" value={sigSummary.strongCount} color="#ef4444" />
@@ -1428,6 +1433,7 @@ export default function DailyPage() {
             DETAIL METRICS
           </div>
           <div
+            className="daily-detail-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -1470,7 +1476,7 @@ export default function DailyPage() {
               "0 22px 70px rgba(0,0,0,0.46), inset 0 1px 0 rgba(255,255,255,0.04)",
           }}
         >
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+          <table className="daily-log-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr>
                 <th style={th}>시간</th>
@@ -1547,6 +1553,7 @@ export default function DailyPage() {
           }}
         >
           <div
+            className="daily-chart-toolbar"
             style={{
               display: "flex",
               justifyContent: "space-between",
@@ -1924,12 +1931,178 @@ export default function DailyPage() {
           }
         }
 
+
+
         @media (max-width: 760px) {
+          html,
+          body {
+            overflow-x: hidden !important;
+          }
+
+          .daily-page-root {
+            padding: 14px 10px 96px !important;
+            overflow-x: hidden !important;
+          }
+
+          .daily-page-header {
+            display: block !important;
+            margin-bottom: 76px !important;
+          }
+
+          .daily-page-header h1 {
+            max-width: calc(100vw - 24px) !important;
+            font-size: 20px !important;
+            line-height: 1.22 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+          }
+
           .daily-floating-date {
-            right: 12px !important;
+            left: 10px !important;
+            right: 10px !important;
             top: 12px !important;
-            transform: scale(0.92);
-            transform-origin: top right;
+            width: auto !important;
+            max-width: calc(100vw - 20px) !important;
+            transform: none !important;
+            justify-content: space-between !important;
+            gap: 6px !important;
+            padding: 6px !important;
+            overflow: hidden !important;
+          }
+
+          .daily-floating-date a,
+          .daily-floating-date label,
+          .daily-floating-date button {
+            min-width: 0 !important;
+            padding: 9px 10px !important;
+            font-size: 12px !important;
+            flex: 1 1 0 !important;
+            justify-content: center !important;
+          }
+
+          .daily-floating-date label input {
+            width: 94px !important;
+            min-width: 94px !important;
+            font-size: 12px !important;
+          }
+
+          .daily-summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 10px !important;
+          }
+
+          .daily-summary-card {
+            min-width: 0 !important;
+            min-height: 112px !important;
+            padding: 14px 12px !important;
+            border-radius: 18px !important;
+            overflow: hidden !important;
+          }
+
+          .daily-summary-title {
+            font-size: 12px !important;
+            line-height: 1.35 !important;
+            word-break: keep-all !important;
+            white-space: normal !important;
+          }
+
+          .daily-summary-value {
+            font-size: clamp(23px, 8.2vw, 34px) !important;
+            line-height: 1.08 !important;
+            letter-spacing: -0.04em !important;
+            word-break: keep-all !important;
+            white-space: normal !important;
+            overflow-wrap: normal !important;
+          }
+
+          .daily-brief-layout,
+          .daily-main-layout {
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+
+          .daily-compact-grid,
+          .daily-detail-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .daily-signal-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .daily-compact-metric {
+            min-height: 72px !important;
+            padding: 10px !important;
+            overflow: hidden !important;
+          }
+
+          .daily-compact-metric > div:first-child {
+            word-break: keep-all !important;
+          }
+
+          .daily-table-scroll {
+            width: 100% !important;
+            max-width: calc(100vw - 20px) !important;
+            max-height: none !important;
+            overflow-x: auto !important;
+            overflow-y: visible !important;
+            border-radius: 18px !important;
+            -webkit-overflow-scrolling: touch !important;
+          }
+
+          .daily-log-table {
+            min-width: 980px !important;
+            width: 980px !important;
+            table-layout: fixed !important;
+          }
+
+          .daily-log-table th,
+          .daily-log-table td {
+            padding: 11px 10px !important;
+            font-size: 14px !important;
+          }
+
+          .daily-log-table th:nth-child(1),
+          .daily-log-table td:nth-child(1) {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 35 !important;
+            background: rgba(15, 23, 42, 0.98) !important;
+            box-shadow: 1px 0 0 rgba(56, 189, 248, 0.16) !important;
+          }
+
+          .daily-chart-panel {
+            position: relative !important;
+            top: auto !important;
+            gap: 12px !important;
+            max-width: calc(100vw - 20px) !important;
+            overflow: hidden !important;
+          }
+
+          .daily-chart-toolbar {
+            flex-direction: column !important;
+            align-items: stretch !important;
+          }
+
+          .daily-chart-toolbar > div:last-child {
+            justify-content: flex-start !important;
+          }
+
+          .daily-chart-toolbar button {
+            padding: 8px 10px !important;
+            font-size: 11px !important;
+          }
+
+          .chart-box-header {
+            align-items: flex-start !important;
+            flex-direction: column !important;
+            gap: 8px !important;
+          }
+
+          .chart-header-legend {
+            max-width: 100% !important;
+            justify-content: flex-start !important;
           }
         }
 
@@ -2387,6 +2560,7 @@ function CompactMetric({
 }) {
   return (
     <div
+      className="daily-compact-metric"
       style={{
         minHeight: 64,
         border: "1px solid rgba(148, 163, 184, 0.14)",
@@ -2413,6 +2587,7 @@ function SummaryCard({
 }) {
   return (
     <div
+      className="daily-summary-card"
       style={{
         background:
           "linear-gradient(145deg, rgba(15,23,42,0.86), rgba(30,41,59,0.58))",
@@ -2423,8 +2598,8 @@ function SummaryCard({
         backdropFilter: "blur(16px)",
       }}
     >
-      <div style={{ fontSize: 12, color: "#93c5fd", marginBottom: 10, fontWeight: 800, letterSpacing: 0.2 }}>{title}</div>
-      <div style={{ fontSize: 28, fontWeight: 950, color, textShadow: "0 0 18px rgba(255,255,255,0.10)" }}>{value}</div>
+      <div className="daily-summary-title" style={{ fontSize: 12, color: "#93c5fd", marginBottom: 10, fontWeight: 800, letterSpacing: 0.2 }}>{title}</div>
+      <div className="daily-summary-value" style={{ fontSize: 28, fontWeight: 950, color, textShadow: "0 0 18px rgba(255,255,255,0.10)" }}>{value}</div>
     </div>
   );
 }
