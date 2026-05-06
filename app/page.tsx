@@ -796,13 +796,13 @@ export default function Home() {
   };
 
   return (
-    <div style={{ background: "#020617", minHeight: "100vh", padding: "40px", color: "white" }}>
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 30 }}>
+    <div className="dashboard-page" style={{ background: "#020617", minHeight: "100vh", padding: "40px", color: "white" }}>
+      <div className="dashboard-header" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 30 }}>
         <div>
           <h1 style={{ fontSize: "28px", marginBottom: 8 }}>📊 MARKET DASHBOARD</h1>
           <div style={{ color: "#94A3B8", fontSize: 14 }}>1분마다 자동 갱신 · 최근 120개 기록 기준</div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div className="dashboard-header-actions" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <a
             href="/daily"
             style={{
@@ -850,6 +850,7 @@ export default function Home() {
       )}
 
       <div
+        className="dashboard-sticky-summary dashboard-grid-block"
         style={{
           display: "grid",
           gridTemplateColumns: "1.2fr 1fr 1fr 1fr",
@@ -892,6 +893,7 @@ export default function Home() {
       </div>
 
       <div
+        className="dashboard-signal-grid dashboard-grid-block"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
@@ -917,6 +919,7 @@ export default function Home() {
       </div>
 
       <div
+        className="dashboard-session-grid dashboard-grid-block"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
@@ -947,6 +950,7 @@ export default function Home() {
       </div>
 
       <div
+        className="dashboard-metric-grid dashboard-grid-block"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
@@ -1043,7 +1047,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div style={stickyChartStyle}>
+      <div className="dashboard-sticky-chart" style={stickyChartStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
           <div>
             <h3 style={{ margin: 0, marginBottom: 4 }}>📌 STICKY 핵심 차트</h3>
@@ -1071,7 +1075,7 @@ export default function Home() {
           </div>
         </div>
         {!isStickyChartCollapsed && (
-          <div style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr", gap: 16 }}>
+          <div className="dashboard-sticky-chart-grid" style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr", gap: 16 }}>
           <MarketScoreChart logs={history} />
           <div style={{ display: "grid", gap: 16 }}>
             <div>
@@ -1111,6 +1115,7 @@ export default function Home() {
       <div style={sectionStyle}>
         <h3 style={{ marginBottom: "14px" }}>상승/하락 추이</h3>
         <div
+          className="dashboard-two-col-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
@@ -1141,6 +1146,7 @@ export default function Home() {
       <div style={sectionStyle}>
         <h3 style={{ marginBottom: "14px" }}>지수 추이</h3>
         <div
+          className="dashboard-two-col-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
@@ -1175,6 +1181,7 @@ export default function Home() {
           {(data.signals?.length ? data.signals : topSignal ? [topSignal] : []).map((s, idx) => (
             <div
               key={`${s.type}-${idx}`}
+              className="dashboard-signal-log-row"
               style={{
                 display: "grid",
                 gridTemplateColumns: "180px 1fr 80px 80px",
@@ -1211,6 +1218,7 @@ export default function Home() {
       <div style={sectionStyle}>
         <h3 style={{ marginBottom: "14px" }}>수급 개별 추이</h3>
         <div
+          className="dashboard-three-col-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr 1fr",
@@ -1241,6 +1249,150 @@ export default function Home() {
           1분마다 1개씩 누적되며 최근 120개까지만 표시됩니다
         </div>
       </div>
+
+      <style jsx global>{`
+        .dashboard-page,
+        .dashboard-page * {
+          box-sizing: border-box;
+        }
+
+        .dashboard-page {
+          overflow-x: hidden;
+        }
+
+        .dashboard-grid-block > div {
+          min-width: 0;
+        }
+
+        @media (max-width: 760px) {
+          .dashboard-page {
+            padding: 18px !important;
+            overflow-x: hidden !important;
+          }
+
+          .dashboard-header {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            justify-content: flex-start !important;
+            gap: 14px !important;
+            margin-bottom: 22px !important;
+          }
+
+          .dashboard-header h1 {
+            font-size: 34px !important;
+            line-height: 1.18 !important;
+            margin: 0 0 8px !important;
+            word-break: keep-all !important;
+          }
+
+          .dashboard-header-actions {
+            width: 100% !important;
+            justify-content: flex-start !important;
+            align-items: stretch !important;
+            gap: 8px !important;
+            overflow-x: auto !important;
+            padding-bottom: 4px !important;
+            -webkit-overflow-scrolling: touch;
+          }
+
+          .dashboard-header-actions > a,
+          .dashboard-header-actions > div {
+            flex: 0 0 auto !important;
+            max-width: calc(100vw - 36px) !important;
+            white-space: normal !important;
+            line-height: 1.35 !important;
+          }
+
+          .dashboard-sticky-summary {
+            position: relative !important;
+            top: auto !important;
+            z-index: 1 !important;
+            grid-template-columns: 1fr !important;
+            background: transparent !important;
+            padding: 0 !important;
+            margin-bottom: 16px !important;
+          }
+
+          .dashboard-signal-grid {
+            grid-template-columns: 1fr !important;
+            margin-bottom: 16px !important;
+          }
+
+          .dashboard-session-grid,
+          .dashboard-metric-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 10px !important;
+          }
+
+          .dashboard-grid-block > div {
+            padding: 14px !important;
+            border-radius: 14px !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .dashboard-grid-block > div > div:first-child {
+            font-size: 12px !important;
+            line-height: 1.35 !important;
+            word-break: keep-all !important;
+          }
+
+          .dashboard-grid-block > div > div:nth-child(2) {
+            font-size: 22px !important;
+            line-height: 1.22 !important;
+            word-break: keep-all !important;
+            overflow-wrap: normal !important;
+            white-space: normal !important;
+          }
+
+          .dashboard-signal-grid > div > div:nth-child(2),
+          .dashboard-sticky-summary > div:first-child > div:nth-child(2) {
+            font-size: 24px !important;
+          }
+
+          .dashboard-sticky-chart {
+            position: relative !important;
+            top: auto !important;
+            z-index: 1 !important;
+            max-height: none !important;
+            padding: 14px !important;
+            margin-top: 18px !important;
+            overflow: visible !important;
+          }
+
+          .dashboard-sticky-chart-grid,
+          .dashboard-two-col-grid,
+          .dashboard-three-col-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .dashboard-sticky-chart canvas,
+          .dashboard-sticky-chart svg {
+            max-width: 100% !important;
+          }
+
+          .dashboard-signal-log-row {
+            grid-template-columns: 1fr !important;
+            gap: 6px !important;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .dashboard-page {
+            padding: 14px !important;
+          }
+
+          .dashboard-header h1 {
+            font-size: 30px !important;
+          }
+
+          .dashboard-session-grid,
+          .dashboard-metric-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
