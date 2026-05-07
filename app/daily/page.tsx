@@ -1222,6 +1222,98 @@ function getIndexChangeInfo(value?: number, prevValue?: number) {
   return { diff, pct, color: "#94a3b8", icon: "▲" };
 }
 
+function getNowMinute() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function getDataStatusInfo(args: {
+  row?: Row & { flowFallback?: boolean; flowDisplaySource?: string };
+  selectedDate: string;
+}) {
+  const { row, selectedDate } = args;
+  const nowMinute = getNowMinute();
+  const lastMinute = row ? timeToMinute(row.time) : -1;
+  const isToday = isTodayDate(selectedDate);
+  const isMarketTime = nowMinute >= MARKET_OPEN_MINUTE && nowMinute <= MARKET_CLOSE_MINUTE;
+  const isAfterClose = nowMinute > MARKET_CLOSE_MINUTE;
+  const delayMinutes = isToday && lastMinute >= 0 ? nowMinute - lastMinute : 0;
+  const isDelayed = isToday && isMarketTime && lastMinute >= 0 && delayMinutes >= 3;
+  const source = String(row?.flowDisplaySource ?? getFlowSource(row) ?? "LIVE").toUpperCase();
+  const isFallback = Boolean(row?.flowFallback) || (source && source !== "LIVE");
+
+  if (!row) {
+    return {
+      label: "데이터 대기",
+      detail: "저장 데이터 없음",
+      color: "#94a3b8",
+      bg: "rgba(148, 163, 184, 0.12)",
+      border: "rgba(148, 163, 184, 0.32)",
+      isDelayed: false,
+      isFallback: false,
+      delayMinutes: 0,
+    };
+  }
+
+  if (isAfterClose || (!isToday && selectedDate)) {
+    return {
+      label: "장마감",
+      detail: `최종 ${formatTime(row.time)}`,
+      color: "#cbd5e1",
+      bg: "rgba(148, 163, 184, 0.12)",
+      border: "rgba(148, 163, 184, 0.30)",
+      isDelayed: false,
+      isFallback,
+      delayMinutes,
+    };
+  }
+
+  if (isDelayed) {
+    return {
+      label: "⚠ 데이터 수집 지연",
+      detail: `최근 ${formatTime(row.time)} / 약 ${delayMinutes}분 지연`,
+      color: "#facc15",
+      bg: "rgba(250, 204, 21, 0.14)",
+      border: "rgba(250, 204, 21, 0.42)",
+      isDelayed: true,
+      isFallback,
+      delayMinutes,
+    };
+  }
+
+  if (isFallback) {
+    return {
+      label: "수급 보정중",
+      detail: `${source || "FALLBACK"} / 직전 정상 수급 표시`,
+      color: "#f97316",
+      bg: "rgba(249, 115, 22, 0.14)",
+      border: "rgba(249, 115, 22, 0.42)",
+      isDelayed: false,
+      isFallback: true,
+      delayMinutes,
+    };
+  }
+
+  return {
+    label: "LIVE 정상",
+    detail: `최근 ${formatTime(row.time)} / 수급 LIVE`,
+    color: "#22c55e",
+    bg: "rgba(34, 197, 94, 0.14)",
+    border: "rgba(34, 197, 94, 0.42)",
+    isDelayed: false,
+    isFallback: false,
+    delayMinutes,
+  };
+}
+
+function getChartDomain(mode: "auto" | "fixed", type: "breadth" | "ratio" | "flow" | "index") {
+  if (mode === "auto") return ["auto", "auto"];
+  if (type === "breadth") return [-1800, 1800];
+  if (type === "ratio") return [0, 80];
+  if (type === "flow") return [-1200, 1200];
+  return ["auto", "auto"];
+}
+
 function downsampleChartRows<
   T extends {
     timeMinuteValue?: number;
@@ -1421,6 +1513,9 @@ export default function DailyPage() {
   const [dragStartMinute, setDragStartMinute] = useState<number | null>(null);
   const [dragEndMinute, setDragEndMinute] = useState<number | null>(null);
   const [signalNotifyEnabled, setSignalNotifyEnabled] = useState(false);
+  const [yAxisMode, setYAxisMode] = useState<"auto" | "fixed">("auto");
+  const [showSignalGuide, setShowSignalGuide] = useState(false);
+  const [mobileView, setMobileView] = useState<"charts" | "logs">("charts");
   const notifiedSignalRef = useRef<string>("");
   const chartHoverRafRef = useRef<number | null>(null);
 
@@ -1618,7 +1713,7 @@ export default function DailyPage() {
 
   const visibleChartRows = useMemo(
     () =>
-      getSessionChartRows(chartRows)
+      getSessionChartRows(chartRows as any[])
         .filter(
           (row) =>
             row.timeMinuteValue >= MARKET_OPEN_MINUTE &&
@@ -1648,6 +1743,15 @@ export default function DailyPage() {
     flowDisplayRows.length >= 2
       ? flowDisplayRows[flowDisplayRows.length - 2]
       : undefined;
+  const latestStatus = useMemo(
+    () => getDataStatusInfo({ row: last as any, selectedDate }),
+    [last, selectedDate],
+  );
+  const kospiChange = getIndexChangeInfo(last?.kospi, prevLast?.kospi);
+  const kosdaqChange = getIndexChangeInfo(last?.kosdaq, prevLast?.kosdaq);
+  const showSessionCloseSummary = Boolean(
+    last && (!isTodayDate(selectedDate) || getNowMinute() > MARKET_CLOSE_MINUTE),
+  );
 
   const localAlerts = useMemo(
     () => makeAlerts(flowDisplayRows),
@@ -1731,7 +1835,7 @@ export default function DailyPage() {
 
   return (
     <div
-      className="daily-page-root"
+      className={`daily-page-root ${mobileView === "charts" ? "mobile-charts-active" : "mobile-logs-active"}`}
       style={{
         background:
           "radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 32%), radial-gradient(circle at top right, rgba(168,85,247,0.16), transparent 34%), linear-gradient(135deg, #020617 0%, #07111f 46%, #020617 100%)",
@@ -1859,12 +1963,31 @@ export default function DailyPage() {
         </div>
       </div>
 
+      <div className="daily-mobile-tabbar">
+        <button
+          onClick={() => setMobileView("charts")}
+          className={mobileView === "charts" ? "active" : ""}
+        >
+          차트보기
+        </button>
+        <button
+          onClick={() => setMobileView("logs")}
+          className={mobileView === "logs" ? "active" : ""}
+        >
+          로그보기
+        </button>
+      </div>
+
+      {last && (
+        <DataStatusStrip status={latestStatus} />
+      )}
+
       {last && (
         <div
           className="daily-summary-grid"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
             gap: 12,
             marginBottom: 14,
           }}
@@ -1888,6 +2011,16 @@ export default function DailyPage() {
             title="상승비율"
             value={`${(Number(last.upRatio) * 100).toFixed(2)}%`}
             color="#22c55e"
+          />
+          <SummaryCard
+            title="KOSPI"
+            value={`${Number(last.kospi ?? 0).toLocaleString()} ${kospiChange.icon} ${Math.abs(kospiChange.pct).toFixed(2)}%`}
+            color={kospiChange.color}
+          />
+          <SummaryCard
+            title="KOSDAQ"
+            value={`${Number(last.kosdaq ?? 0).toLocaleString()} ${kosdaqChange.icon} ${Math.abs(kosdaqChange.pct).toFixed(2)}%`}
+            color={kosdaqChange.color}
           />
         </div>
       )}
@@ -2142,6 +2275,13 @@ export default function DailyPage() {
         </div>
       )}
 
+      {showSessionCloseSummary && (
+        <SessionCloseSummary
+          summary={sessionSummary}
+          finalTone={last ? marketTone(last, prevLast) : "-"}
+        />
+      )}
+
       <div
         className="daily-main-layout"
         style={{
@@ -2152,7 +2292,7 @@ export default function DailyPage() {
         }}
       >
         <div
-          className="daily-table-scroll"
+          className="daily-log-section daily-table-scroll"
           style={{
             maxHeight: "calc(100vh - 220px)",
             overflowY: "auto",
@@ -2193,14 +2333,23 @@ export default function DailyPage() {
             </thead>
 
             <tbody>
-              {flowDisplayRows.map((row, index) => (
+              {flowDisplayRows.map((row, index) => {
+                const isLatestRow = index === flowDisplayRows.length - 1;
+                const isFallbackRow = Boolean((row as any).flowFallback);
+
+                return (
                 <tr
                   key={row.id}
                   style={{
-                    background:
-                      index % 2 === 0
+                    background: isLatestRow
+                      ? "linear-gradient(90deg, rgba(56,189,248,0.22), rgba(15,23,42,0.28))"
+                      : index % 2 === 0
                         ? "rgba(15, 23, 42, 0.18)"
                         : "rgba(2, 6, 23, 0.24)",
+                    opacity: isFallbackRow ? 0.58 : 1,
+                    boxShadow: isLatestRow
+                      ? "inset 3px 0 0 #38bdf8, inset 0 1px 0 rgba(56,189,248,0.40), inset 0 -1px 0 rgba(56,189,248,0.24)"
+                      : "none",
                   }}
                 >
                   <td style={td}>{formatTime(row.time)}</td>
@@ -2266,13 +2415,14 @@ export default function DailyPage() {
                     {formatFlowEok(getFlowPower(row))}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
 
         <div
-          className="daily-chart-panel"
+          className="daily-chart-section daily-chart-panel"
           style={{
             position: "sticky",
             top: 20,
@@ -2390,6 +2540,40 @@ export default function DailyPage() {
               </button>
 
               <button
+                onClick={() => setYAxisMode((value) => (value === "auto" ? "fixed" : "auto"))}
+                style={{
+                  border: "1px solid rgba(56,189,248,0.34)",
+                  background: yAxisMode === "auto"
+                    ? "rgba(56,189,248,0.14)"
+                    : "rgba(15,23,42,0.88)",
+                  color: yAxisMode === "auto" ? "#bae6fd" : "#94a3b8",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                Y축 {yAxisMode === "auto" ? "자동" : "고정"}
+              </button>
+
+              <button
+                onClick={() => setShowSignalGuide(true)}
+                style={{
+                  border: "1px solid rgba(168,85,247,0.34)",
+                  background: "rgba(168,85,247,0.10)",
+                  color: "#e9d5ff",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                기준 보기
+              </button>
+
+              <button
                 onClick={enableSignalNotification}
                 style={{
                   border: "1px solid rgba(250,204,21,0.34)",
@@ -2467,6 +2651,7 @@ export default function DailyPage() {
                 data={enhancedChartRows}
                 height={220}
                 referenceLines={[0]}
+                domain={getChartDomain(yAxisMode, "breadth")}
                 lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]}
                 showRebound={showRebound}
                 showDangerDivergence={showDangerDivergence}
@@ -2482,7 +2667,7 @@ export default function DailyPage() {
                 data={enhancedChartRows}
                 height={220}
                 referenceLines={[0]}
-                domain={[0, 80]}
+                domain={getChartDomain(yAxisMode, "ratio")}
                 lines={[
                   { key: "upRatioPct", name: "상승비율", color: "#ef4444" },
                   { key: "downRatioPct", name: "하락비율", color: "#60a5fa" },
@@ -2501,6 +2686,7 @@ export default function DailyPage() {
                 data={enhancedChartRows}
                 height={240}
                 referenceLines={[0]}
+                domain={getChartDomain(yAxisMode, "flow")}
                 lines={[
                   {
                     key: "foreignFlowEokValue",
@@ -2532,7 +2718,7 @@ export default function DailyPage() {
                 data={enhancedChartRows}
                 height={220}
                 referenceLines={[0]}
-                domain={["auto", "auto"]}
+                domain={getChartDomain(yAxisMode, "index")}
                 lines={[{ key: "kospi", name: "KOSPI", color: "#facc15" }]}
                 showRebound={showRebound}
                 showDangerDivergence={showDangerDivergence}
@@ -2548,7 +2734,7 @@ export default function DailyPage() {
                 data={enhancedChartRows}
                 height={220}
                 referenceLines={[0]}
-                domain={["auto", "auto"]}
+                domain={getChartDomain(yAxisMode, "index")}
                 lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
                 showRebound={showRebound}
                 showDangerDivergence={showDangerDivergence}
@@ -2664,6 +2850,7 @@ export default function DailyPage() {
               data={enhancedChartRows}
               height={320}
               referenceLines={[0]}
+              domain={getChartDomain(yAxisMode, "breadth")}
               lines={[{ key: "diff", name: "상승-하락", color: "#facc15" }]}
               showRebound={showRebound}
               showDangerDivergence={showDangerDivergence}
@@ -2684,7 +2871,7 @@ export default function DailyPage() {
               data={enhancedChartRows}
               height={320}
               referenceLines={[0]}
-              domain={[0, 80]}
+              domain={getChartDomain(yAxisMode, "ratio")}
               lines={[
                 { key: "upRatioPct", name: "상승비율", color: "#ef4444" },
                 { key: "downRatioPct", name: "하락비율", color: "#60a5fa" },
@@ -2709,6 +2896,7 @@ export default function DailyPage() {
                 data={enhancedChartRows}
                 height={340}
                 referenceLines={[0]}
+                domain={getChartDomain(yAxisMode, "flow")}
                 lines={[
                   {
                     key: "foreignFlowEokValue",
@@ -2746,7 +2934,7 @@ export default function DailyPage() {
               data={enhancedChartRows}
               height={320}
               referenceLines={[0]}
-              domain={["auto", "auto"]}
+              domain={getChartDomain(yAxisMode, "index")}
               lines={[{ key: "kospi", name: "KOSPI", color: "#22c55e" }]}
               showRebound={showRebound}
               showDangerDivergence={showDangerDivergence}
@@ -2767,7 +2955,7 @@ export default function DailyPage() {
               data={enhancedChartRows}
               height={320}
               referenceLines={[0]}
-              domain={["auto", "auto"]}
+              domain={getChartDomain(yAxisMode, "index")}
               lines={[{ key: "kosdaq", name: "KOSDAQ", color: "#a78bfa" }]}
               showRebound={showRebound}
               showDangerDivergence={showDangerDivergence}
@@ -2785,6 +2973,10 @@ export default function DailyPage() {
             />
           </div>
         </div>
+      )}
+
+      {showSignalGuide && (
+        <SignalGuideModal onClose={() => setShowSignalGuide(false)} />
       )}
 
       <style jsx global>{`
@@ -2811,6 +3003,27 @@ export default function DailyPage() {
         .daily-table-scroll {
           scrollbar-width: thin;
           scrollbar-color: #2563eb rgba(15, 23, 42, 0.34);
+        }
+
+        .daily-mobile-tabbar {
+          display: none;
+        }
+
+        .daily-mobile-tabbar button {
+          border: 1px solid rgba(56, 189, 248, 0.28);
+          background: rgba(15, 23, 42, 0.72);
+          color: #94a3b8;
+          border-radius: 999px;
+          padding: 10px 12px;
+          font-size: 13px;
+          font-weight: 950;
+          cursor: pointer;
+        }
+
+        .daily-mobile-tabbar button.active {
+          background: rgba(56, 189, 248, 0.18);
+          color: #bae6fd;
+          box-shadow: 0 0 18px rgba(56, 189, 248, 0.18);
         }
 
         @media (max-width: 760px) {
@@ -2950,6 +3163,24 @@ export default function DailyPage() {
 
           .daily-detail-grid {
             grid-template-columns: 1fr !important;
+          }
+
+          .daily-mobile-tabbar {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin: 0 0 12px;
+            position: sticky;
+            top: 8px;
+            z-index: 75;
+          }
+
+          .mobile-charts-active .daily-log-section {
+            display: none !important;
+          }
+
+          .mobile-logs-active .daily-chart-section {
+            display: none !important;
           }
 
           .daily-main-layout {
@@ -4214,6 +4445,251 @@ function SignalBox({ signals }: { signals: SignalItem[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+
+function DataStatusStrip({
+  status,
+}: {
+  status: ReturnType<typeof getDataStatusInfo>;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 12,
+        marginBottom: 14,
+        border: `1px solid ${status.border}`,
+        borderRadius: 18,
+        padding: "12px 14px",
+        background: status.bg,
+        boxShadow: "0 14px 34px rgba(0,0,0,0.22)",
+        backdropFilter: "blur(16px)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 999,
+            background: status.color,
+            boxShadow: `0 0 16px ${status.color}99`,
+            display: "inline-block",
+          }}
+        />
+        <strong style={{ color: status.color, fontSize: 14, fontWeight: 950 }}>
+          {status.label}
+        </strong>
+      </div>
+      <div
+        style={{
+          color: "#cbd5e1",
+          fontSize: 12,
+          fontWeight: 800,
+          textAlign: "right",
+        }}
+      >
+        {status.detail}
+      </div>
+    </div>
+  );
+}
+
+function SessionCloseSummary({
+  summary,
+  finalTone,
+}: {
+  summary: ReturnType<typeof buildSessionSummary>;
+  finalTone: string;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid rgba(250, 204, 21, 0.26)",
+        borderRadius: 22,
+        padding: 16,
+        marginBottom: 20,
+        background:
+          "linear-gradient(145deg, rgba(30,41,59,0.82), rgba(15,23,42,0.66))",
+        boxShadow: "0 18px 44px rgba(0,0,0,0.28)",
+        backdropFilter: "blur(18px)",
+      }}
+    >
+      <div style={{ fontSize: 13, color: "#fde68a", fontWeight: 950, marginBottom: 12 }}>
+        SESSION CLOSE SUMMARY
+      </div>
+      <div
+        className="daily-detail-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gap: 12,
+        }}
+      >
+        <CompactMetric
+          title="오늘 최고 Diff"
+          value={`${summary.highDiff.toLocaleString()} / ${summary.highDiffTime}`}
+          color="#22c55e"
+        />
+        <CompactMetric
+          title="오늘 최저 Diff"
+          value={`${summary.lowDiff.toLocaleString()} / ${summary.lowDiffTime}`}
+          color="#60a5fa"
+        />
+        <CompactMetric
+          title="위험/매집 횟수"
+          value={`위험 ${summary.dangerCount} / 매집 ${summary.accumulationCount}`}
+          color="#facc15"
+        />
+        <CompactMetric
+          title="수급 최고·최저"
+          value={`${formatFlowEok(summary.flowLow)} ~ ${formatFlowEok(summary.flowPeak)}`}
+          color="#38bdf8"
+        />
+        <CompactMetric
+          title="최종 시장판단"
+          value={finalTone}
+          color="#e5e7eb"
+        />
+        <CompactMetric
+          title="최대 가속"
+          value={`${summary.maxAccel.toLocaleString()} / ${summary.maxAccelTime}`}
+          color="#f97316"
+        />
+        <CompactMetric
+          title="최소 가속"
+          value={`${summary.minAccel.toLocaleString()} / ${summary.minAccelTime}`}
+          color="#a78bfa"
+        />
+        <CompactMetric
+          title="최종 시간"
+          value={summary.latestTime}
+          color="#cbd5e1"
+        />
+      </div>
+    </div>
+  );
+}
+
+function SignalGuideModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 10000,
+        background: "rgba(2, 6, 23, 0.82)",
+        backdropFilter: "blur(16px)",
+        padding: 22,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(820px, 100%)",
+          maxHeight: "82vh",
+          overflow: "auto",
+          border: "1px solid rgba(168, 85, 247, 0.32)",
+          borderRadius: 24,
+          padding: 20,
+          background:
+            "linear-gradient(145deg, rgba(15,23,42,0.96), rgba(30,41,59,0.84))",
+          boxShadow: "0 28px 80px rgba(0,0,0,0.55)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: 20, color: "#f8fafc" }}>
+            SIGNAL / 반등 / 위험 / 매집 기준
+          </h2>
+          <button
+            onClick={onClose}
+            style={{
+              border: "1px solid rgba(148, 163, 184, 0.28)",
+              background: "rgba(2,6,23,0.76)",
+              color: "#e5e7eb",
+              borderRadius: 999,
+              padding: "8px 12px",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            닫기
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          <GuideItem
+            title="반등표시"
+            color="#facc15"
+            text="Diff가 -400 이하로 눌린 뒤 직전 하락폭 대비 의미 있게 회복하고, 가속도와 하락비율 둔화가 같이 확인될 때 표시합니다."
+          />
+          <GuideItem
+            title="위험"
+            color="#ef4444"
+            text="지수는 버티는데 Diff 악화, 하락비율 확대, 외인·기관 수급 악화가 동시에 나타나는 다이버전스 구간입니다."
+          />
+          <GuideItem
+            title="매집"
+            color="#22c55e"
+            text="지수는 약하지만 Diff와 수급이 개선되고 하락비율이 둔화되는 구간으로, 눌림 매집 가능성을 표시합니다."
+          />
+          <GuideItem
+            title="SIGNAL"
+            color="#a78bfa"
+            text="0선 돌파/이탈, 상승·하락 가속 전환, 시장점수 과열·침체 진입이 신뢰도 점수 기준을 넘을 때 표시합니다."
+          />
+          <GuideItem
+            title="Y축 자동/고정"
+            color="#38bdf8"
+            text="자동은 데이터 범위에 맞게 확대하고, 고정은 Breadth·Ratio·Flow를 일정 범위로 고정해 장중 변화를 비교하기 쉽게 합니다."
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GuideItem({
+  title,
+  text,
+  color,
+}: {
+  title: string;
+  text: string;
+  color: string;
+}) {
+  return (
+    <div
+      style={{
+        border: `1px solid ${color}55`,
+        borderRadius: 16,
+        padding: 14,
+        background: "rgba(2, 6, 23, 0.42)",
+      }}
+    >
+      <div style={{ color, fontSize: 13, fontWeight: 950, marginBottom: 6 }}>
+        {title}
+      </div>
+      <div style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 1.6 }}>
+        {text}
+      </div>
     </div>
   );
 }
