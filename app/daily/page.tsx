@@ -586,7 +586,7 @@ function getFlowNarrative(row?: Row, prev?: Row) {
 
 const SIGNAL_COOLDOWN_MINUTES = 10;
 const SIGNAL_CHART_COOLDOWN_MINUTES = 12;
-const REBOUND_MARKER_COOLDOWN_MINUTES = 10;
+const REBOUND_MARKER_COOLDOWN_MINUTES = 12;
 const MIN_SIGNAL_SCORE = 4;
 
 function getTrendDuration(
@@ -1305,12 +1305,12 @@ function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
 
     const dangerDivergence = Boolean(
       rawDangerDivergence &&
-        currentMinute - lastDangerMinute >= SIGNAL_CHART_COOLDOWN_MINUTES,
+      currentMinute - lastDangerMinute >= SIGNAL_CHART_COOLDOWN_MINUTES,
     );
     const accumulationDivergence = Boolean(
       !dangerDivergence &&
-        rawAccumulationDivergence &&
-        currentMinute - lastAccumulationMinute >= SIGNAL_CHART_COOLDOWN_MINUTES,
+      rawAccumulationDivergence &&
+      currentMinute - lastAccumulationMinute >= SIGNAL_CHART_COOLDOWN_MINUTES,
     );
 
     if (dangerDivergence) lastDangerMinute = currentMinute;
@@ -1318,7 +1318,7 @@ function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
 
     const canShowSignalMarker = Boolean(
       matchedSignal &&
-        currentMinute - lastSignalMarkerMinute >= SIGNAL_CHART_COOLDOWN_MINUTES,
+      currentMinute - lastSignalMarkerMinute >= SIGNAL_CHART_COOLDOWN_MINUTES,
     );
 
     if (canShowSignalMarker) lastSignalMarkerMinute = currentMinute;
@@ -1349,9 +1349,9 @@ function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
         : accumulationDivergence
           ? "#22c55e"
           : "#94a3b8",
-      signalMarkerColor: canShowSignalMarker
-        ? (matchedSignal?.color ?? "")
-        : "",
+      // 차트 SIGNAL 마커는 신호 종류와 관계없이 보라색으로 고정합니다.
+      // 위험/매집 마커와 색상이 섞이면 빨간 SIGNAL처럼 보여 혼동됩니다.
+      signalMarkerColor: canShowSignalMarker ? "#a78bfa" : "",
       signalMarkerLabel:
         canShowSignalMarker && matchedSignal
           ? getSignalLabel(matchedSignal.type)
@@ -3279,7 +3279,9 @@ function chartMarkerDot(
     );
   }
 
-  if (!showRebound) return null;
+  // 반등 노란점은 Net Breadth(diff) 기준의 강한 반등만 표시합니다.
+  // 비율/수급/지수 차트까지 반등점을 찍으면 노이즈가 커져서, SIGNAL/위험/매집과 분리합니다.
+  if (!showRebound || !isPrimaryLine || dataKey !== "diff") return null;
 
   if (index < 2) return null;
 
@@ -3296,16 +3298,21 @@ function chartMarkerDot(
   }
 
   const currentMinute = Number(payload.timeMinuteValue ?? -1);
-  const previousReboundTooClose = data.some((row, rowIndex) => {
-    if (rowIndex >= index || rowIndex < 2) return false;
-    const rowMinute = Number(row?.timeMinuteValue ?? -1);
-    if (currentMinute < 0 || rowMinute < 0) return false;
-    if (currentMinute - rowMinute > REBOUND_MARKER_COOLDOWN_MINUTES)
-      return false;
+  const currentDiff = Number(payload.diff ?? curr);
+  const currentAccel = Number(payload.accel ?? 0);
+  const currentDownRatio = Number(payload.downRatioPct ?? 0);
+  const prevDownRatio = Number(
+    data[index - 1]?.downRatioPct ?? currentDownRatio,
+  );
 
+  const isValidReboundAt = (rowIndex: number) => {
+    if (rowIndex < 2) return false;
+
+    const row = data[rowIndex];
     const rowPrev = Number(data[rowIndex - 1]?.[dataKey]);
     const rowPrev2 = Number(data[rowIndex - 2]?.[dataKey]);
     const rowCurr = Number(row?.[dataKey]);
+
     if (
       !Number.isFinite(rowPrev) ||
       !Number.isFinite(rowPrev2) ||
@@ -3314,41 +3321,67 @@ function chartMarkerDot(
       return false;
     }
 
+    const rowDiff = Number(row?.diff ?? rowCurr);
+    const rowAccel = Number(row?.accel ?? 0);
+    const rowDownRatio = Number(row?.downRatioPct ?? 0);
+    const rowPrevDownRatio = Number(
+      data[rowIndex - 1]?.downRatioPct ?? rowDownRatio,
+    );
     const rowReboundStrength = rowCurr - rowPrev;
     const rowDropStrength = rowPrev2 - rowPrev;
-    const rowThreshold = Math.max(45, Math.abs(rowPrev) * 0.022);
+    const rowReboundThreshold = Math.max(80, Math.abs(rowPrev) * 0.025);
+    const rowDropThreshold = Math.max(120, Math.abs(rowPrev2) * 0.02);
 
     return (
+      rowDiff <= -400 &&
       rowPrev < rowPrev2 &&
       rowCurr > rowPrev &&
-      rowReboundStrength >= rowThreshold &&
-      rowDropStrength >= rowThreshold
+      rowReboundStrength >= rowReboundThreshold &&
+      rowDropStrength >= rowDropThreshold &&
+      (rowAccel >= 40 || rowReboundStrength >= 130) &&
+      rowDownRatio <= rowPrevDownRatio - 0.1
     );
+  };
+
+  const previousReboundTooClose = data.some((row, rowIndex) => {
+    if (rowIndex >= index) return false;
+    const rowMinute = Number(row?.timeMinuteValue ?? -1);
+    if (currentMinute < 0 || rowMinute < 0) return false;
+    if (currentMinute - rowMinute > REBOUND_MARKER_COOLDOWN_MINUTES)
+      return false;
+
+    return isValidReboundAt(rowIndex);
   });
 
   const reboundStrength = curr - prev;
   const dropStrength = prev2 - prev;
-  const reboundThreshold = Math.max(45, Math.abs(prev) * 0.022);
+  const reboundThreshold = Math.max(80, Math.abs(prev) * 0.025);
+  const dropThreshold = Math.max(120, Math.abs(prev2) * 0.02);
 
   if (
     !previousReboundTooClose &&
+    currentDiff <= -400 &&
     prev < prev2 &&
     curr > prev &&
     reboundStrength >= reboundThreshold &&
-    dropStrength >= reboundThreshold
+    dropStrength >= dropThreshold &&
+    (currentAccel >= 40 || reboundStrength >= 130) &&
+    currentDownRatio <= prevDownRatio - 0.1
   ) {
     return (
-      <circle
-        cx={cx}
-        cy={cy}
-        r={3.2}
-        fill="#facc15"
-        stroke="rgba(2, 6, 23, 0.95)"
-        strokeWidth={1}
-      />
+      <g>
+        <circle cx={cx} cy={cy} r={7} fill="#facc15" opacity={0.16} />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={3.7}
+          fill="#facc15"
+          stroke="rgba(2, 6, 23, 0.95)"
+          strokeWidth={1.15}
+        />
+      </g>
     );
   }
-
   return null;
 }
 
