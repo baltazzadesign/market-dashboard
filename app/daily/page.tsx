@@ -563,114 +563,180 @@ function getFlowNarrative(row?: Row, prev?: Row) {
   return "수급 방향성이 뚜렷하지 않은 관망 구간";
 }
 
+const SIGNAL_COOLDOWN_MINUTES = 8;
+const SIGNAL_CHART_COOLDOWN_MINUTES = 10;
+const REBOUND_MARKER_COOLDOWN_MINUTES = 8;
+
+function compactSignalList(signals: SignalItem[], minGapMinutes = SIGNAL_COOLDOWN_MINUTES) {
+  const picked: SignalItem[] = [];
+
+  signals.forEach((signal) => {
+    const minute = timeToMinute(signal.time);
+    const hasRecentSameType = picked.some((item) => {
+      if (item.type !== signal.type) return false;
+      const pickedMinute = timeToMinute(item.time);
+      if (minute < 0 || pickedMinute < 0) return false;
+      return Math.abs(pickedMinute - minute) < minGapMinutes;
+    });
+
+    if (!hasRecentSameType) picked.push(signal);
+  });
+
+  return picked;
+}
+
 function buildSignals(rows: Row[]) {
   const signals: SignalItem[] = [];
 
-  if (rows.length < 2) return signals;
+  if (rows.length < 3) return signals;
 
-  const recentRows = rows.slice(-20);
+  const recentRows = rows.slice(-45);
+
+  const canPushSignal = (type: string, minute: number, minGapMinutes = SIGNAL_COOLDOWN_MINUTES) => {
+    if (minute < 0) return false;
+    return !signals.some((signal) => {
+      if (signal.type !== type) return false;
+      const signalMinute = timeToMinute(signal.time);
+      if (signalMinute < 0) return false;
+      return Math.abs(minute - signalMinute) < minGapMinutes;
+    });
+  };
+
+  const pushSignal = (signal: SignalItem, minGapMinutes = SIGNAL_COOLDOWN_MINUTES) => {
+    const minute = timeToMinute(signal.time);
+    if (!canPushSignal(signal.type, minute, minGapMinutes)) return;
+    signals.push(signal);
+  };
 
   recentRows.forEach((row, index) => {
     if (index === 0) return;
 
     const prev = recentRows[index - 1];
+    const prev2 = index >= 2 ? recentRows[index - 2] : undefined;
     const time = formatTime(row.time);
+    const currentMinute = timeToMinute(row.time);
     const score = marketScore(row);
     const prevScore = marketScore(prev);
     const kospiMove = Number(row.kospi) - Number(prev.kospi);
     const kosdaqMove = Number(row.kosdaq) - Number(prev.kosdaq);
     const indexMove = kospiMove + kosdaqMove;
+    const flowMove = getFlowPower(row) - getFlowPower(prev);
+    const diffImprove = Number(row.diff ?? 0) - Number(prev.diff ?? 0);
+    const downRatio = Number(row.downRatio ?? 0) * 100;
+    const prevDownRatio = Number(prev.downRatio ?? 0) * 100;
 
-    if (prev.diff <= 0 && row.diff > 0) {
-      signals.push({
+    if (prev.diff <= 0 && row.diff > 0 && Math.abs(diffImprove) >= 60) {
+      pushSignal({
         time,
         type: "0선 돌파",
         direction: "상방",
         strength: row.accel >= 150 || score >= 50 ? "강" : "중",
         message: `Diff가 0선 상방 돌파 / 현재 ${row.diff}`,
         color: "#22c55e",
-      });
+      }, 12);
     }
 
-    if (prev.diff >= 0 && row.diff < 0) {
-      signals.push({
+    if (prev.diff >= 0 && row.diff < 0 && Math.abs(diffImprove) >= 60) {
+      pushSignal({
         time,
         type: "0선 이탈",
         direction: "하방",
         strength: row.accel <= -150 || score <= -50 ? "강" : "중",
         message: `Diff가 0선 하방 이탈 / 현재 ${row.diff}`,
         color: "#60a5fa",
-      });
+      }, 12);
     }
 
-    if (prev.accel <= 0 && row.accel >= 200) {
-      signals.push({
+    if (
+      prev.accel <= -30 &&
+      row.accel >= 120 &&
+      diffImprove >= 40 &&
+      (!prev2 || Number(prev.diff ?? 0) <= Number(prev2.diff ?? 0))
+    ) {
+      pushSignal({
         time,
         type: "가속 전환",
         direction: "상방",
-        strength: row.accel >= 350 ? "강" : "중",
+        strength: row.accel >= 260 || diffImprove >= 120 ? "강" : "중",
         message: `상승 가속 전환 / 가속도 +${row.accel}`,
         color: "#16a34a",
       });
     }
 
-    if (prev.accel >= 0 && row.accel <= -200) {
-      signals.push({
+    if (
+      prev.accel >= 30 &&
+      row.accel <= -120 &&
+      diffImprove <= -40 &&
+      (!prev2 || Number(prev.diff ?? 0) >= Number(prev2.diff ?? 0))
+    ) {
+      pushSignal({
         time,
         type: "가속 전환",
         direction: "하방",
-        strength: row.accel <= -350 ? "강" : "중",
+        strength: row.accel <= -260 || diffImprove <= -120 ? "강" : "중",
         message: `하락 가속 전환 / 가속도 ${row.accel}`,
         color: "#38bdf8",
       });
     }
 
-    if (prevScore < 50 && score >= 50) {
-      signals.push({
+    if (prevScore < 50 && score >= 55 && score - prevScore >= 12) {
+      pushSignal({
         time,
         type: "시장점수 강화",
         direction: "상방",
-        strength: score >= 70 ? "강" : "중",
+        strength: score >= 72 ? "강" : "중",
         message: `시장점수 상승권 진입 / ${score}점`,
         color: "#facc15",
-      });
+      }, 12);
     }
 
-    if (prevScore > -50 && score <= -50) {
-      signals.push({
+    if (prevScore > -50 && score <= -55 && prevScore - score >= 12) {
+      pushSignal({
         time,
         type: "시장점수 약화",
         direction: "하방",
-        strength: score <= -70 ? "강" : "중",
+        strength: score <= -72 ? "강" : "중",
         message: `시장점수 하락권 진입 / ${score}점`,
         color: "#f97316",
-      });
+      }, 12);
     }
 
-    if (indexMove >= 0 && row.diff <= -300) {
-      signals.push({
+    if (
+      indexMove >= 0.5 &&
+      row.diff <= -450 &&
+      diffImprove <= -40 &&
+      flowMove <= -1200 &&
+      downRatio >= Math.max(55, prevDownRatio)
+    ) {
+      pushSignal({
         time,
-        type: "다이버전스",
+        type: "위험 다이버전스",
         direction: "하방",
-        strength: row.diff <= -700 ? "강" : "중",
-        message: `지수는 버티지만 하락 종목 우세 / Diff ${row.diff}`,
-        color: "#a78bfa",
-      });
+        strength: row.diff <= -800 || flowMove <= -3000 ? "강" : "중",
+        message: `지수는 버티지만 하락 종목과 매도 수급이 확대 / Diff ${row.diff}`,
+        color: "#ef4444",
+      }, 10);
     }
 
-    if (indexMove <= 0 && row.diff >= 300) {
-      signals.push({
+    if (
+      indexMove <= -0.5 &&
+      row.diff <= -250 &&
+      diffImprove >= 40 &&
+      flowMove >= 1200 &&
+      downRatio >= 52
+    ) {
+      pushSignal({
         time,
-        type: "다이버전스",
+        type: "매집 다이버전스",
         direction: "상방",
-        strength: row.diff >= 700 ? "강" : "중",
-        message: `지수는 약하지만 상승 종목 확산 / Diff ${row.diff}`,
-        color: "#2dd4bf",
-      });
+        strength: flowMove >= 3000 || diffImprove >= 120 ? "강" : "중",
+        message: `지수는 약하지만 외인·기관 수급과 종목 흐름이 개선 / Diff ${row.diff}`,
+        color: "#22c55e",
+      }, 10);
     }
   });
 
-  return signals.slice(-10).reverse();
+  return compactSignalList(signals.slice().reverse(), SIGNAL_COOLDOWN_MINUTES).slice(0, 10);
 }
 
 function signalSummary(signals: SignalItem[]) {
@@ -914,11 +980,19 @@ function downsampleChartRows<
 }
 
 function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
+  let lastDangerMinute = -9999;
+  let lastAccumulationMinute = -9999;
+
   return data.map((row, index) => {
     const prev = index > 0 ? data[index - 1] : null;
-    const matchedSignal = signals.find(
-      (signal) => signal.time === row.timeLabel,
-    );
+    const prev2 = index > 1 ? data[index - 2] : null;
+    const matchedSignal = signals.find((signal) => {
+      if (signal.time !== row.timeLabel) return false;
+      const signalMinute = timeToMinute(signal.time);
+      const rowMinute = Number(row.timeMinuteValue ?? -1);
+      if (signalMinute < 0 || rowMinute < 0) return true;
+      return Math.abs(signalMinute - rowMinute) <= 1;
+    });
 
     const kospiMove = prev
       ? Number(row.kospi ?? 0) - Number(prev.kospi ?? 0)
@@ -931,13 +1005,41 @@ function buildEnhancedChartRows(data: any[], signals: SignalItem[]) {
       ? Number(row.foreignInstFlowValue ?? 0) -
         Number(prev.foreignInstFlowValue ?? 0)
       : 0;
+    const diffMove = prev ? Number(row.diff ?? 0) - Number(prev.diff ?? 0) : 0;
+    const prevDiffMove = prev && prev2 ? Number(prev.diff ?? 0) - Number(prev2.diff ?? 0) : 0;
+    const downRatio = Number(row.downRatioPct ?? 0);
+    const prevDownRatio = prev ? Number(prev.downRatioPct ?? 0) : 0;
+    const currentMinute = Number(row.timeMinuteValue ?? -1);
+
+    const rawDangerDivergence = Boolean(
+      prev &&
+        indexMove >= 0.5 &&
+        flowMove <= -1200 &&
+        diffMove <= -40 &&
+        Number(row.diff ?? 0) <= -350 &&
+        downRatio >= Math.max(55, prevDownRatio - 0.2)
+    );
+
+    const rawAccumulationDivergence = Boolean(
+      prev &&
+        indexMove <= -0.5 &&
+        flowMove >= 1200 &&
+        diffMove >= 40 &&
+        Number(row.diff ?? 0) <= -250 &&
+        (prevDiffMove <= 0 || downRatio <= prevDownRatio + 0.2)
+    );
 
     const dangerDivergence = Boolean(
-      prev && indexMove >= 0 && flowMove <= -5000,
+      rawDangerDivergence && currentMinute - lastDangerMinute >= SIGNAL_CHART_COOLDOWN_MINUTES
     );
     const accumulationDivergence = Boolean(
-      prev && indexMove <= 0 && flowMove >= 5000,
+      !dangerDivergence &&
+        rawAccumulationDivergence &&
+        currentMinute - lastAccumulationMinute >= SIGNAL_CHART_COOLDOWN_MINUTES
     );
+
+    if (dangerDivergence) lastDangerMinute = currentMinute;
+    if (accumulationDivergence) lastAccumulationMinute = currentMinute;
 
     const divergenceType = dangerDivergence
       ? "danger"
@@ -1271,7 +1373,11 @@ export default function DailyPage() {
     [flowDisplayRows],
   );
   const signals = useMemo(
-    () => (dbSignals.length > 0 ? dbSignals : localSignals),
+    () =>
+      compactSignalList(
+        dbSignals.length > 0 ? dbSignals : localSignals,
+        SIGNAL_COOLDOWN_MINUTES,
+      ).slice(0, 10),
     [dbSignals, localSignals],
   );
   const sigSummary = useMemo(() => signalSummary(signals), [signals]);
@@ -2868,15 +2974,44 @@ function chartMarkerDot(
     return null;
   }
 
-  if (prev < prev2 && curr > prev) {
+  const currentMinute = Number(payload.timeMinuteValue ?? -1);
+  const previousReboundTooClose = data.some((row, rowIndex) => {
+    if (rowIndex >= index || rowIndex < 2) return false;
+    const rowMinute = Number(row?.timeMinuteValue ?? -1);
+    if (currentMinute < 0 || rowMinute < 0) return false;
+    if (currentMinute - rowMinute > REBOUND_MARKER_COOLDOWN_MINUTES) return false;
+
+    const rowPrev = Number(data[rowIndex - 1]?.[dataKey]);
+    const rowPrev2 = Number(data[rowIndex - 2]?.[dataKey]);
+    const rowCurr = Number(row?.[dataKey]);
+    if (!Number.isFinite(rowPrev) || !Number.isFinite(rowPrev2) || !Number.isFinite(rowCurr)) return false;
+
+    const rowReboundStrength = rowCurr - rowPrev;
+    const rowDropStrength = rowPrev2 - rowPrev;
+    const rowThreshold = Math.max(35, Math.abs(rowPrev) * 0.018);
+
+    return rowPrev < rowPrev2 && rowCurr > rowPrev && rowReboundStrength >= rowThreshold && rowDropStrength >= rowThreshold;
+  });
+
+  const reboundStrength = curr - prev;
+  const dropStrength = prev2 - prev;
+  const reboundThreshold = Math.max(35, Math.abs(prev) * 0.018);
+
+  if (
+    !previousReboundTooClose &&
+    prev < prev2 &&
+    curr > prev &&
+    reboundStrength >= reboundThreshold &&
+    dropStrength >= reboundThreshold
+  ) {
     return (
       <circle
         cx={cx}
         cy={cy}
-        r={2.6}
+        r={2.9}
         fill="#facc15"
         stroke="rgba(2, 6, 23, 0.95)"
-        strokeWidth={0.8}
+        strokeWidth={0.9}
       />
     );
   }
