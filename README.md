@@ -1,36 +1,114 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# baltatool · 시장 기록 확장
 
-## Getting Started
+기존 Next.js 16 / React 19 / Recharts / Supabase 구조와 다크 디자인을 유지한 업데이트입니다.
 
-First, run the development server:
+## VS Code에서 업데이트
+
+1. 현재 프로젝트 폴더를 복사해 백업합니다.
+2. 이 압축파일 안의 `market-dashboard` 폴더를 엽니다. 기존 프로젝트에 적용한다면 `app`, `components`, `lib`의 변경 파일과 `supabase`, `scripts`, `tests`, `package.json`, `package-lock.json`을 같은 위치에 복사합니다. 원래 프로젝트의 `.env.local`, `.git`, `public`은 유지합니다.
+3. 이번 첨부에 없던 `next.config.ts`, `tsconfig.json`, `postcss.config.mjs`, `next-env.d.ts`를 실행에 필요한 기본값으로 보완했습니다. 기존 파일에 별도 설정이 있었다면 그대로 유지하고 TypeScript의 `@/*` 별칭만 확인합니다.
+4. **Supabase → SQL Editor**에서 `supabase/migrations/001_market_history.sql` 전체를 실행합니다. 기존 `logs`를 삭제하지 않고 확장하며, 저장된 과거 기록으로 일별 요약을 생성합니다. 앱 교체 전에 실행하세요.
+5. `.env.local`의 기존 KIS·Supabase 값을 유지합니다. `CRON_SECRET`이 없다면 충분히 긴 임의 문자열로 추가하고, 기존 스케줄러도 같은 `Authorization: Bearer ...` 값을 사용하도록 맞춥니다. `.env.example`은 키 이름을 보여주는 예시이며 실제 인증정보가 아닙니다.
+6. VS Code 터미널에서 실행합니다.
 
 ```bash
+npm ci
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+브라우저에서 `http://localhost:3000`에 접속하고 로그인합니다. 왼쪽 메뉴의 **시장 캘린더**를 누르면 새 기능이 열립니다. 모바일에서는 하단 캘린더 메뉴를 사용합니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+프로덕션 실행:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+```
 
-## Learn More
+현재 구조의 SQLite 패키지를 유지했으므로 지원되는 Node.js LTS(22 또는 24)를 사용하세요. 실제 화면 저장소는 Supabase입니다. `lib/db.ts`의 로컬 SQLite는 기존 파일로 유지되며 새 기능에서는 사용하지 않습니다.
 
-To learn more about Next.js, take a look at the following resources:
+### 접근 제어 파일
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+이번 첨부에는 기존 middleware/proxy 파일이 없어서 Next.js 16용 `proxy.ts`를 추가했습니다. **기존 프로젝트에 `middleware.ts` 또는 `src/middleware.ts`가 있으면 둘을 함께 두지 마세요.** 기존 규칙과 새 `proxy.ts`를 비교하여 하나의 proxy에 통합합니다. 기존 파일에 이 앱 이외의 인증 규칙이 있으면 유지해야 합니다. API 조회와 페이지는 기존 access 쿠키 인증을 사용하고, cron/live 수집 경로는 `CRON_SECRET`으로 보호합니다.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 추가 기능
 
-## Deploy on Vercel
+- `/history`: 월간 캘린더, 월간 종합 평가, 추정 포지션 3개 탭.
+- 캘린더: 거래일별 양 지수 등락률, 상승·하락 종목 수, 시장폭, 양 시장 합산 투자자 수급, 합산 거래대금, Market Pulse. 날짜 클릭으로 기존 확대/이동/커서 조회/범위 선택 차트 연결.
+- 월간 평가: 시장 선택(KOSPI/KOSDAQ), 월 수익률, 상승·하락·보합일, 평균 시장폭, 시장별 누적 수급, 최고·최악일, 일간 변동성, 전월 대비 체력, Market Score 0~100.
+- 추정 포지션: 시장·3/6/12/24개월 범위·시작/종료일 선택, 투자주체별 추정 평단/손익률/순매수/잔여 원금/계산 일수, 평단 추이와 마지막 평단 수평선, 가격대별 잔여 원금 분포. 외국인 파랑, 기관 빨강, 개인 노랑 유지.
+- 기존 `/daily?date=YYYY-MM-DD` 날짜 링크 반영.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 데이터 저장과 수집
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+기존 경로는 KIS `TR_066`(업종 지수·종목수), `TR_074`(시장별 투자자 순매수) → `/api/market/live` → Supabase `logs` → `/api/market/daily` → 화면입니다. 새 KIS 인증 발급 경로를 만들지 않고 기존 토큰 캐시와 `kis_tokens`를 사용합니다.
+
+`logs.market_data` JSONB를 추가했습니다. `version`, `capturedAt`, `kospi`, `kosdaq`를 보관합니다. 각 시장에는 `price`, `changePct`, `turnover`, `turnoverRaw`, `turnoverUnit`, `up/down/flat`, `flows`, `priceSource`, `flowSource`가 들어갑니다. 수급과 거래대금의 화면·정규화 저장 단위는 억원, 지수는 포인트, 등락률은 %입니다.
+
+`market_daily`는 `trade_date` 기본키와 `snapshot`, `updated_at`을 갖습니다. `logs` INSERT/UPDATE 트리거가 날짜별 마지막 정규장 스냅샷을 원자적으로 갱신합니다. 시간상 더 이른 수집값은 마감값을 덮지 않습니다. 같은 시각 수정은 반영하며 재시도·중복 수집에도 일별 요약은 한 행입니다. 일중 누적 순매수와 누적 거래대금을 분마다 더하지 않습니다. 원본 장중 `logs`는 그대로 보존합니다.
+
+마이그레이션은 기존 데이터로 과거 일별 기록을 채웁니다. 존재하지 않았던 거래대금, 전일 대비율, 시장별 수급은 복원하지 않으며 UI에 `—`로 표시합니다. 일별 장중 조회도 저장 시각 `created_at` 대신 수집기가 사용하는 한국 거래일 `createdat`을 기준으로 바꾸고 페이지 단위 조회를 적용했습니다.
+
+`logs`, `market_daily`, `kis_tokens`는 서버 service role로만 접근하도록 RLS/권한을 설정합니다. 기존 별도 클라이언트가 anon/authenticated로 logs를 직접 읽고 있었다면 그 클라이언트는 인증된 서버 API를 통해 읽도록 변경해야 합니다. 이 첨부 프로젝트의 화면은 이미 서버 API를 사용합니다.
+
+### 수집 운영
+
+기존 외부 스케줄러에서 정규장 중 `/api/cron`을 1분 간격으로 호출하고 **15:30 호출을 반드시 포함**하세요. 시간대는 KST(UTC+9)입니다. 정규장 시간은 UTC 00:00~06:30이며, 주말·기존 휴일 목록에 해당하는 날은 수집을 건너뜁니다. 이 업데이트는 별도 스케줄러를 생성하지 않습니다. 브라우저를 켜 두는 것만으로 장기 수집을 보장하지 않습니다.
+
+15:30 스냅샷을 ‘마감 기록’으로 취급하며 그 이전 마지막 기록은 ‘미완료’입니다. 거래소가 확정 공표한 최종 정산치와 같다는 의미는 아닙니다. KIS 응답이 지연되거나 거래소가 개장/폐장 시각을 변경한 날에는 운영 시간 설정을 검토해야 합니다. `MARKET_HOLIDAYS`에 추가 휴장일을 지정할 수 있고, 기존 `lib/market.ts`의 2026 휴일 목록은 유지했습니다. 실시간 공식 거래일 캘린더 동기화는 포함하지 않습니다. 빈 날짜를 휴장일로 단정하지 않습니다.
+
+KIS `TR_066`의 `bstp_nmix_prdy_ctrt`와 `prdy_vrss_sign`, `acml_tr_pbmn`을 읽습니다. 거래대금 기본 단위는 `million_krw`로 처리해 억원으로 /100 변환하며, 실제 계약 응답 단위가 다르면 `KIS_INDEX_TURNOVER_UNIT=krw` 또는 `eok_krw`로 지정합니다. 원본 금액과 적용 단위를 함께 저장하므로 검증 가능합니다. TR_074 수급 금액의 기존 /100 변환과 억원 반올림은 유지했습니다. 한 시장만 성공했을 때 합산 수급을 정상으로 오인하지 않도록 보완했고, 일부 투자자 필드가 빠진 응답은 결측 처리합니다. 직접 금액 필드가 모두 존재하면 실제 0도 유효값으로 처리합니다.
+
+수집 저장에 실패하면 `saved: false`, `ok: false`를 반환합니다. DB 설정이 없는데 저장 성공으로 표시하던 경우도 수정했습니다. UI는 조회 실패·미수집·부분 기록을 별도로 알립니다.
+
+## 계산 정의
+
+### 월간 평가
+
+- 월 수익률 = `(선택 월 마지막 마감 지수 / 전월 마지막 마감 지수 - 1) × 100`. 실제 두 기준 날짜를 표시합니다. 마지막 거래일 수집이 누락되면 관측 기간 수익률이므로 공식 월 수익률과 다를 수 있습니다. 전월 마감 기록이 없으면 계산하지 않습니다.
+- 상승/하락/보합일은 KIS 전일 대비율의 부호를 사용합니다. 과거 기록에 해당 값이 없으면 임의로 직전 저장값과 비교하지 않습니다.
+- 평균 시장폭 = 일별 `상승-하락`의 산술평균. 정규화 폭 = `(상승비율-하락비율)×100`. 이 두 지표와 Pulse는 양 시장 합계 기준입니다.
+- 월 수급 = 선택 시장의 정상 마감 일별 누적 순매수 합계. 유효 일수와 전체 마감 기록 일수를 표시합니다. 과거 시장별 수급이 없으면 합산 수급을 임의 배분하지 않습니다.
+- 변동성 = 확인 가능한 일간 등락률의 표본 표준편차(분모 n−1). 2일 미만은 결측입니다. 연율화 값이 아닙니다.
+- 최고/최악일 = 확인 가능한 선택 시장 전일 대비율의 최대/최소일.
+- Market Pulse = `(기존 시장점수 + 100) / 2`, 0~100 제한. 기존 장중 시장점수 −100~100은 변경하지 않습니다.
+- 월 Market Score = 아래 점수의 가중평균, 0~100. 수익률 점수 30%: `clamp(50 + 월수익률×5)`; 시장폭 점수 30%: `clamp(50 + 평균 정규화 폭/2)`; 상승일 점수 15%: `상승일/등락 확인일×100`; 수급 점수 15%: `외인+기관 순매수일/정상 수급일×100`; 안정성 점수 10%: `clamp(100 - 일간 변동성×25)`. clamp는 0~100 제한입니다.
+- 결측 항목은 0으로 간주하지 않고 가중치 합에서 제외합니다. 확보한 항목 비중을 표시하며, 전월 체력 차이는 양쪽에 존재하는 공통 항목만 동일 가중치로 비교합니다.
+- 15:30 마감 기록만 집계합니다. 이번 달은 월중 잠정 평가이며 전월 전체 관측치와 비교합니다. 전체 거래일 완전성을 보증하지 않으며 실제 누락 가능성을 표시합니다.
+
+### 추정 포지션
+
+시장별 순매수 금액과 같은 시장의 지수를 사용하는 **가상 지수 환산 모형**입니다. 개별 종목 데이터·실제 보유량·실제 매수 전체 금액이 없으므로 실제 평단이나 실제 손익을 계산할 수 없습니다.
+
+시작 보유량 0. 순매수액 F>0이면 지수 P에서 `q=F/P`만큼 환산 수량과 원금 F를 추가합니다. 순매도액 F<0이면 `|F|/P`만큼 환산 수량을 모든 기존 매수 구간에서 비례 차감합니다. 초과 매도는 별도로 집계하고 포지션을 0 아래로 만들지 않습니다. 잔여 원금/잔여 환산 수량이 추정 평단입니다. 비교 손익률은 `(종료일 이내 최신 정상 지수/추정 평단−1)×100`입니다.
+
+거래일별 마감의 정상 수급·정상 지수만 포지션 증감에 사용합니다. 현재 진행 중인 날은 지수 비교값에는 사용할 수 있지만 보유량 계산에서는 제외합니다. 매집 원금을 10개 지수 가격 구간으로 나눠 가격대 분포를 표시합니다. 조회 시작일 이전 보유, 실제 종목 구성, 총매수/총매도, 배당, 수수료, 레버리지, 공매도는 알 수 없으며 반영하지 않습니다. 모형의 값은 기간 선택에 따라 달라집니다.
+
+## 확인한 항목과 남은 연결 작업
+
+- `npm run build`: Next.js 프로덕션 빌드 및 TypeScript 검사 통과.
+- `npm test`: 금융 계산/기간/결측/단위/페이지 처리/수급 파싱 자동 테스트.
+- `node scripts/smoke.mjs`: 프로덕션 서버를 임시로 시작하여 합성 Supabase 응답으로 페이지·로그인·API·입력 검증·동일 출처 검사를 수행. 3221 포트를 사용하며 종료 후 서버를 닫습니다. 실제 시장 데이터와 섞지 않습니다.
+- PostgreSQL 호환 PGlite 환경에서 마이그레이션 신규/반복 실행, 트리거 순서, 늦은 삽입, 마감 수정, 과거 데이터 집계, 익명 접근 차단 확인.
+- 실제 KIS 및 사용자 Supabase 접속 정보는 첨부에 없으므로 실계정 API 응답·기존 원격 스키마·원격 마이그레이션 적용·외부 스케줄러 호출은 이 환경에서 검증하지 못했습니다.
+- 브라우저 시각 검사는 수행하지 않았습니다. 배포 요청이 없으므로 기존 서비스를 변경/배포하지 않았습니다.
+
+키를 넣은 뒤 SQL 적용 → 실행 → 로그인 → 오늘 실시간 새로고침 → Supabase `logs.market_data`와 `market_daily` 기록 확인 순으로 연결을 마무리하세요. 과거에 저장되지 않은 장중 데이터나 투자자별 시장 분리는 SQL만으로 생성되지 않습니다.
+
+## 주요 파일
+
+| 파일 | 역할 |
+|---|---|
+| `app/api/market/live/route.ts` | 기존 수집기 확장, 시장별 원본 지표 저장 |
+| `lib/kis-history.ts` | KIS 지수 응답의 단위/부호/결측 정규화 |
+| `lib/market-history-model.ts` | 일별 정규화, 월간 평가, 포지션 계산 |
+| `lib/market-history-data.ts` | Supabase 일별 요약 기간 조회 |
+| `app/api/market/history/route.ts` | 인증·기간 검증을 거친 기록 API |
+| `components/dashboard/HistoryWorkspace.tsx` | 캘린더/평가/포지션 화면 |
+| `components/dashboard/HistoryCharts.tsx` | 평단선/가격 분포 차트 |
+| `supabase/migrations/001_market_history.sql` | 신규 저장 구조·트리거·과거 기록 집계 |
+| `tests/history.test.ts` | 계산과 데이터 처리 검증 |
+
+공식 KIS 필드 참조:
+- https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_index_category_price/chk_inquire_index_category_price.py
+- https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_investor_time_by_market/inquire_investor_time_by_market.py

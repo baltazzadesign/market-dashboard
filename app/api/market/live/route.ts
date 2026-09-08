@@ -1,3 +1,6 @@
+import { indexSnapshot } from "@/lib/kis-history";
+import { kstParts } from "@/lib/balta-model";
+import { HOLIDAYS_2026 } from "@/lib/market";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -34,6 +37,8 @@ const KIS_BASE = process.env.KIS_BASE ?? "https://openapi.koreainvestment.com:94
 const CUSTTYPE = process.env.KIS_CUSTTYPE ?? "P";
 
 type FlowData = {
+  complete?: boolean;
+  markets?: { kospi: FlowData; kosdaq: FlowData };
   foreign: number;
   inst: number;
   indiv: number;
@@ -80,6 +85,7 @@ type MarketSignal = {
 };
 
 type SupabaseLogPayload = {
+  market_data?: Record<string, unknown>;
   createdat: string;
   time: string;
   up: number;
@@ -147,8 +153,7 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
   const config = getSupabaseConfig();
 
   if (!config) {
-    console.warn("SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY 없음");
-    return null;
+    throw new Error("SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY 없음");
   }
 
   const res = await fetch(`${config.url}${path}`, {
@@ -159,6 +164,7 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
       ...(init.headers ?? {}),
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(12000),
   });
 
   if (!res.ok) {
@@ -312,7 +318,7 @@ function getMemoryFlowFallback(raw?: any): FlowData | null {
 function applyGasStyleFlowFallback(flowData: FlowData, prevRow: SavedLogRow | null): FlowData {
   // LIVE 값이 정상으로 들어오면 그 값을 즉시 메모리에 저장해서,
   // 이후 TR 074가 일시적으로 전부 0을 반환해도 직전 정상값으로 버틸 수 있게 합니다.
-  if (flowData.source === "LIVE" && hasFlowValue(flowData)) {
+  if (flowData.source === "LIVE") {
     rememberFlow(flowData);
     return flowData;
   }
@@ -343,7 +349,7 @@ function applyGasStyleFlowFallback(flowData: FlowData, prevRow: SavedLogRow | nu
 
   // 2순위: 같은 서버 인스턴스의 메모리에 남아 있는 직전 정상 수급값 사용
   const memoryFallback = getMemoryFlowFallback(flowData.raw);
-  if (memoryFallback) return memoryFallback;
+  if (memoryFallback) return {...memoryFallback, markets: flowData.markets};
 
   return flowData;
 }
@@ -888,7 +894,10 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
     const inst = pickNumberByKeysAndPattern(row, directKeyGroups.inst, patternGroups.inst);
     const indiv = pickNumberByKeysAndPattern(row, directKeyGroups.indiv, patternGroups.indiv);
 
-    if (foreign !== 0 || inst !== 0 || indiv !== 0) {
+    const complete = (Object.keys(directKeyGroups) as Array<keyof typeof directKeyGroups>).every(key =>
+      Object.entries(row).some(([field,value]) => value !== null && value !== undefined && String(value).trim() !== "" && Number.isFinite(Number(String(value).replace(/,/g,""))) &&
+        (directKeyGroups[key].includes(field) || patternGroups[key].some(pattern=>pattern.test(field)))));
+    if (complete) {
       candidates.push({
         minute: parseFlowMinute(row),
         foreign: normalizeFlowUnit(foreign),
@@ -910,6 +919,7 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       foreign: latest.foreign,
       inst: latest.inst,
       indiv: latest.indiv,
+      complete: true,
     };
   }
 
@@ -973,6 +983,7 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
   }
 
   return {
+    complete: ["foreign","inst","indiv"].every(key=>byInvestor.has(key)),
     foreign: byInvestor.get("foreign")?.amount ?? 0,
     inst: byInvestor.get("inst")?.amount ?? 0,
     indiv: byInvestor.get("indiv")?.amount ?? 0,
@@ -1032,7 +1043,7 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
     }
 
     const parsed = parseFlowFromJson(data);
-    const hasValue = parsed.foreign !== 0 || parsed.inst !== 0 || parsed.indiv !== 0;
+    const hasValue = parsed.complete === true;
 
     console.log("074 RESULT", market, {
       request: { marketKey, marketCode },
@@ -1077,15 +1088,11 @@ async function fetchInvestorFlow(): Promise<FlowData> {
     const inst = kospiFlow.inst + kosdaqFlow.inst;
     const indiv = kospiFlow.indiv + kosdaqFlow.indiv;
 
-    const hasValue = foreign !== 0 || inst !== 0 || indiv !== 0;
-
-    const source = hasValue
-      ? "LIVE"
-      : kospiFlow.source === "ERROR" || kosdaqFlow.source === "ERROR"
-        ? "ERROR"
-        : "EMPTY";
+    const hasValue = kospiFlow.source === "LIVE" && kosdaqFlow.source === "LIVE";
+    const source: FlowData["source"] = hasValue ? "LIVE" : "ERROR";
 
     const combinedFlow: FlowData = {
+      markets: {kospi:kospiFlow,kosdaq:kosdaqFlow},
       foreign,
       inst,
       indiv,
@@ -1101,7 +1108,7 @@ async function fetchInvestorFlow(): Promise<FlowData> {
     // DB fallback은 GET 본문 applyGasStyleFlowFallback에서 한 번 더 적용됩니다.
     if (!hasValue) {
       const memoryFallback = getMemoryFlowFallback(combinedFlow.raw);
-      if (memoryFallback) return memoryFallback;
+      if (memoryFallback) return {...memoryFallback, markets: {kospi:kospiFlow,kosdaq:kosdaqFlow}};
     }
 
     return combinedFlow;
@@ -1454,6 +1461,7 @@ function buildFinalAlertLevel(alert: string, signals: MarketSignal[]) {
 export async function GET(req: Request) {
   const cronSecret = process.env.CRON_SECRET;
 
+  if (!cronSecret) return Response.json({ok:false,error:"CRON_SECRET 설정이 필요합니다."},{status:503});
   if (cronSecret) {
     const auth = req.headers.get("authorization") ?? "";
     const url = new URL(req.url);
@@ -1479,7 +1487,10 @@ export async function GET(req: Request) {
 
     const createdat = getKstDateString(now);
     const minuteKey = `${createdat} ${timeStr}`;
-    const isMarketTime = isRegularMarketTime(timeStr);
+    const parts = kstParts(now);
+    const extraHolidays = (process.env.MARKET_HOLIDAYS || "").split(",");
+    const isMarketTime = isRegularMarketTime(timeStr) && !parts.weekend && !HOLIDAYS_2026.has(createdat) && !extraHolidays.includes(createdat);
+    if (!isMarketTime) return Response.json({ok:true,saved:false,saveAction:"skipped",saveSkipReason:"OUT_OF_REGULAR_HOURS",createdat,time:timeStr});
 
     const [kospiData, kosdaqData, rawFlowData, latestDbRow, latestNormalBreadthRow] = await Promise.all([
       fetchBreadth("0001"),
@@ -1634,7 +1645,13 @@ export async function GET(req: Request) {
     );
     const marketState = `${baseMarketState}|FLOW_${flowData.source}|BREADTH_${breadthSource}`;
 
+    const marketData = {
+      version: 1, capturedAt: now.toISOString(),
+      kospi: indexSnapshot(kospiData.raw,rawFlowData.markets?.kospi,breadthSource === "LIVE"),
+      kosdaq: indexSnapshot(kosdaqData.raw,rawFlowData.markets?.kosdaq,breadthSource === "LIVE"),
+    };
     const rowToSave: SupabaseLogPayload = {
+      market_data: marketData,
       createdat,
       time: timeStr,
       up,
@@ -1751,7 +1768,10 @@ export async function GET(req: Request) {
       marketScore,
       marketState,
       signals,
-      saved: saveResult.action !== "skipped",
+      ok: saveResult.action !== "failed",
+      error: saveResult.action === "failed" ? "SAVE_FAILED" : undefined,
+      market_data: marketData,
+      saved: ["inserted","updated"].includes(saveResult.action),
       saveAction: saveResult.action,
       snapshotInvalidReason,
       saveSkipReason,
