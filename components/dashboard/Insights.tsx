@@ -1,12 +1,39 @@
 "use client";
+import { useId, type CSSProperties } from "react";
 import { type MarketRow, type MarketEvent, formatNumber as fmt, valueClass, marketTone, marketNarrative, sourceLabel } from "@/lib/balta-model";
 import { Icon, type IconName } from "./Icon";
 function Sparkline({ values, color }: { values: (number | null)[]; color: string }) {
+  const id = useId().replace(/:/g, "");
   const data = values.filter((v): v is number => v !== null);
   if (data.length < 2) return null;
   const min = Math.min(...data), range = Math.max(...data) - min || 1;
-  const points = data.map((v,i)=>(i/(data.length-1)*80).toFixed(1)+","+(27-(v-min)/range*24).toFixed(1)).join(" ");
-  return <svg className="metric-spark" viewBox="0 0 80 30" fill="none" aria-hidden="true"><polyline points={points} stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+  const segments: string[][] = [];
+  values.forEach((value, index) => {
+    if (value === null) return;
+    if (index === 0 || values[index - 1] === null) segments.push([]);
+    segments.at(-1)!.push(`${(index / (values.length - 1) * 280).toFixed(1)},${(42 - (value - min) / range * 34).toFixed(1)}`);
+  });
+  return <svg className="metric-spark" viewBox="0 0 280 52" preserveAspectRatio="none" fill="none" aria-hidden="true">
+    <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop stopColor={color} stopOpacity=".24"/><stop offset="1" stopColor={color} stopOpacity="0"/></linearGradient></defs>
+    {segments.map((points, index) => <g key={index}><path d={`M${points[0].split(",")[0]},52 L${points.join(" L")} L${points.at(-1)!.split(",")[0]},52 Z`} fill={`url(#${id})`}/><polyline points={points.join(" ")} stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke"/></g>)}
+  </svg>;
+}
+
+function ScoreGauge({ value }: { value?: number }) {
+  const id = useId().replace(/:/g, "");
+  const score = value != null && Number.isFinite(value) ? Math.max(-100, Math.min(100, value)) : null;
+  const angle = Math.PI * (1 - ((score ?? 0) + 100) / 200);
+  return <div className="score-gauge" role={score === null ? undefined : "meter"} aria-label="시장점수" aria-valuemin={score === null ? undefined : -100} aria-valuemax={score === null ? undefined : 100} aria-valuenow={score ?? undefined} aria-valuetext={score === null ? undefined : `${fmt(score, 0, true)}점`}>
+    <svg viewBox="0 0 220 125" fill="none" aria-hidden="true">
+      <defs><linearGradient id={id} x1="20" y1="0" x2="200" y2="0" gradientUnits="userSpaceOnUse"><stop stopColor="var(--down)"/><stop offset=".5" stopColor="#555f7d"/><stop offset="1" stopColor="var(--up)"/></linearGradient></defs>
+      <path d="M20 110 A90 90 0 0 1 200 110" stroke="#263047" strokeWidth="9" strokeLinecap="round"/>
+      <path d="M20 110 A90 90 0 0 1 200 110" stroke={`url(#${id})`} strokeWidth="9" strokeLinecap="round" opacity={score === null ? .2 : 1}/>
+      <path d="M34 110 A76 76 0 0 1 186 110" stroke="#687998" strokeOpacity=".4" strokeDasharray="1 9"/>
+      {score !== null && <circle cx={110 + 90 * Math.cos(angle)} cy={110 - 90 * Math.sin(angle)} r="6" fill="white" stroke="#111b2d" strokeWidth="3"/>}
+    </svg>
+    <div className="gauge-value"><span>시장점수</span><strong className={"num " + valueClass(score)}>{fmt(score, 0, true)}</strong></div>
+    <div className="gauge-labels"><span>−100 약세</span><span>강세 +100</span></div>
+  </div>;
 }
 export function Metrics({ rows, loading }: { rows: MarketRow[]; loading: boolean }) {
   const last = rows.at(-1), prev = rows.at(-2);
@@ -21,11 +48,11 @@ export function Metrics({ rows, loading }: { rows: MarketRow[]; loading: boolean
     { name: "시장 폭", value: last?.diff, unit: "개", signed: true, icon: "activity", foot: <><span className="positive">상승 {fmt(last?.up)}</span><span>·</span><span className="negative">하락 {fmt(last?.down)}</span></>, series: rows.map(r=>r.diff), color: last && last.diff < 0 ? "#79aaff" : "#ff7c8a" },
     { name: "외국인 + 기관", value: last?.flowPower, unit: "억", signed: true, icon: "layers", foot: <span>{last ? sourceLabel(last.flowSource) : "수급 기록 대기"}</span>, series: rows.map(r=>r.flowPower), color: last && (last.flowPower ?? 0) < 0 ? "#79aaff" : "#ff7c8a" },
   ];
-  return <div className="metric-grid">{cards.map(card => <section key={card.name} className="metric" aria-label={card.name}><div className="metric-label">{card.name}<Icon name={card.icon} size={16}/></div>{loading ? <><div className="loading-line large"/><div className="loading-line"/></> : <><div className={"metric-value num " + (card.signed ? valueClass(card.value) : "")}>{fmt(card.value, card.digits ?? 0, card.signed)}{card.unit && card.value != null && <small>{card.unit}</small>}</div><div className="metric-foot">{card.foot}</div><Sparkline values={card.series.slice(-60)} color={card.color ?? "#7de2d1"}/></>}</section>)}</div>;
+  return <div className="metric-grid">{cards.map(card => <section key={card.name} className="metric" aria-label={card.name} style={{ "--metric-color": card.color ?? "#7de2d1" } as CSSProperties}><div className="metric-label"><span>{card.name}</span><span className="metric-icon"><Icon name={card.icon} size={17}/></span></div>{loading ? <><div className="loading-line large"/><div className="loading-line"/></> : <><div className={"metric-value num " + (card.signed ? valueClass(card.value) : "")}>{fmt(card.value, card.digits ?? 0, card.signed)}{card.unit && card.value != null && <small>{card.unit}</small>}</div><div className="metric-foot">{card.foot}</div><div className="metric-trend"><Sparkline values={card.series.slice(-60)} color={card.color ?? "#7de2d1"}/></div></>}</section>)}</div>;
 }
 export function MarketSummary({ row }: { row?: MarketRow }) {
   const total = row ? row.up + row.down + row.flat : 0;
-  return <section className="panel"><div className="market-summary"><div className="summary-eyebrow"><span>시장 브리핑</span><span className="num">{row?.time ?? "—"} 기준</span></div><h2 className={"summary-tone " + valueClass(row?.diff)}>{marketTone(row)}</h2><p className="summary-copy">{marketNarrative(row)}</p><div className="score-track" aria-label={"시장점수 " + fmt(row?.marketScore)}>{row && <span className="score-marker" style={{ left: ((row.marketScore + 100)/2) + "%" }}/>}</div><div className="track-labels"><span>−100 약세</span><strong className="num">{fmt(row?.marketScore, 0, true)}{row ? "점" : ""}</strong><span>강세 +100</span></div></div><div className="breadth-strip"><div className="breadth-counts"><span className="positive">상승<strong className="num">{row ? fmt(row.upRatio*100, 1) + "%" : "—"}</strong></span><span className="muted" style={{ textAlign: "center" }}>보합<strong className="num">{row && total ? fmt(row.flat/total*100, 1) + "%" : "—"}</strong></span><span className="negative" style={{ textAlign: "right" }}>하락<strong className="num">{row ? fmt(row.downRatio*100, 1) + "%" : "—"}</strong></span></div><div className="breadth-bar" aria-hidden="true">{row && total > 0 && <><span style={{ width: row.up/total*100+"%", background:"var(--up)" }}/><span style={{ width:row.flat/total*100+"%", background:"#667184" }}/><span style={{ width:row.down/total*100+"%", background:"var(--down)" }}/></>}</div></div></section>;
+  return <section className="panel briefing-panel"><div className="market-summary"><div className="summary-eyebrow"><span><Icon name="activity" size={15}/>시장 브리핑</span><span className="num">{row?.time ?? "—"} 기준</span></div><h2 className={"summary-tone " + valueClass(row?.diff)}>{marketTone(row)}</h2><p className="summary-copy">{marketNarrative(row)}</p><ScoreGauge value={row?.marketScore}/></div><div className="breadth-strip"><div className="breadth-counts"><span className="positive">상승<strong className="num">{row ? fmt(row.upRatio*100, 1) + "%" : "—"}</strong></span><span className="muted" style={{ textAlign: "center" }}>보합<strong className="num">{row && total ? fmt(row.flat/total*100, 1) + "%" : "—"}</strong></span><span className="negative" style={{ textAlign: "right" }}>하락<strong className="num">{row ? fmt(row.downRatio*100, 1) + "%" : "—"}</strong></span></div><div className="breadth-bar" aria-hidden="true">{row && total > 0 && <><span style={{ width: row.up/total*100+"%", background:"var(--up)" }}/><span style={{ width:row.flat/total*100+"%", background:"#667184" }}/><span style={{ width:row.down/total*100+"%", background:"var(--down)" }}/></>}</div></div></section>;
 }
 export function FlowPanel({ row }: { row?: MarketRow }) {
   const entries = [{ name:"외국인", value:row?.foreignFlow, color:"#b4a0f4" },{ name:"기관", value:row?.instFlow, color:"#f1c278" },{ name:"개인", value:row?.indivFlow, color:"#79aaff" }];
