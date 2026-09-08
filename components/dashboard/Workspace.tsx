@@ -9,23 +9,18 @@ import { useMarketFeed } from "./useMarketFeed";
 import { Modal } from "./Modal";
 import { Metrics, MarketSummary, FlowPanel, SignalPanel, SessionSummary } from "./Insights";
 import RecordsPanel, { downloadCsv, type RecordView } from "./RecordsPanel";
-import type { ChartKind, Domain } from "./MarketCharts";
+import { chartNames as chartLabels, fitDomain as fit, type ChartKind, type Domain } from "./chart-model";
 
 const MarketChart = dynamic(() => import("./MarketCharts"), { ssr: false, loading: () => <div className="chart-loading"><Icon name="refresh" className="spin"/>차트 준비 중</div> });
-const chartLabels: Record<ChartKind, string> = { breadth:"시장 폭",score:"시장점수",flow:"투자자 수급",index:"시장 지수",ratio:"상승·하락 비율",accel:"가속도" };
 const chartKeys = Object.keys(chartLabels) as ChartKind[];
 type Settings = { autoRefresh: boolean; markers: boolean; compare: boolean; autoScale: boolean; notifications: boolean };
 const defaults: Settings = { autoRefresh:true,markers:true,compare:true,autoScale:true,notifications:false };
-function fit(start: number, end: number): Domain {
-  const width = Math.max(30,Math.min(CLOSE_MINUTE-OPEN_MINUTE,end-start));
-  const left = Math.max(OPEN_MINUTE,Math.min(CLOSE_MINUTE-width,start));
-  return [Math.round(left),Math.round(left+width)];
-}
 export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   const [date,setDate] = useState(""),[today,setToday] = useState(""),[clock,setClock] = useState(""),[now,setNow] = useState<Date | null>(null),[followToday,setFollowToday] = useState(true);
   const [settings,setSettings] = useState<Settings>(defaults),[settingsLoaded,setSettingsLoaded] = useState(false);
-  const [kind,setKind] = useState<ChartKind>("breadth"),[range,setRange] = useState("all"),[customDomain,setCustomDomain] = useState<Domain>([OPEN_MINUTE,CLOSE_MINUTE]);
+  const [kind,setKind] = useState<ChartKind>("flow"),[range,setRange] = useState("all"),[customDomain,setCustomDomain] = useState<Domain>([OPEN_MINUTE,CLOSE_MINUTE]);
   const [selectedMinute,setSelectedMinute] = useState<number | null>(null),[modal,setModal] = useState<"settings" | "guide" | "chart" | null>(null);
+  const [hoverMinute,setHoverMinute] = useState<number | null>(null),[expandedKind,setExpandedKind] = useState<ChartKind>("flow");
   const [tableView,setTableView] = useState<RecordView>(mode==="daily"?"records":"signals");
   const [toast,setToast] = useState(""),[loggingOut,setLoggingOut] = useState(false);
   const seen = useRef<{date:string;ids:Set<string>;armed:boolean}>({date:"",ids:new Set(),armed:false});
@@ -41,14 +36,15 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
     setSettingsLoaded(true);
   },[]);
   useEffect(()=>{if(settingsLoaded){try{localStorage.setItem("baltatool.preferences.v2",JSON.stringify(settings));}catch{}}},[settings,settingsLoaded]);
-  useEffect(()=>{setSelectedMinute(null);setRange("all");},[date]);
+  useEffect(()=>{setSelectedMinute(null);setHoverMinute(null);setRange("all");},[date]);
   useEffect(()=>{if(!toast)return;const id=setTimeout(()=>setToast(""),5500);return()=>clearTimeout(id);},[toast]);
   const feed=useMarketFeed(date,mode==="overview"&&date===today,settings.autoRefresh);
   const rows=feed.rows,last=rows.at(-1);
   const events=useMemo(()=>buildMarketEvents(rows),[rows]);
   const status=useMemo(()=>dataStatus(last,date,feed.error,now??new Date(0)),[last,date,feed.error,now]);
   const domain=useMemo<Domain>(()=>range==="custom"?customDomain:range==="all"?[OPEN_MINUTE,CLOSE_MINUTE]:fit((last?.minute??CLOSE_MINUTE)-Number(range),last?.minute??CLOSE_MINUTE),[range,customDomain,last?.minute]);
-  const comparisonKinds=(mode==="daily"?chartKeys:["score","flow","breadth"] as ChartKind[]).filter(key=>key!==kind).slice(0,mode==="daily"?5:2);
+  const overviewKinds: ChartKind[] = ["breadth", "ratio"];
+  const comparisonKinds: ChartKind[] = mode === "daily" ? ["kospi", "kosdaq", "score", "accel"] : ["kospi", "kosdaq"];
   useEffect(()=>{
     if(!date||!rows.length)return;
     const state=seen.current;
@@ -69,7 +65,10 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   function changeDate(value:string){if(!isValidDate(value)||value>today)return;setFollowToday(value===today);setDate(value);}
   function focusMinute(minute:number){setSelectedMinute(minute);setCustomDomain(fit(minute-30,minute+30));setRange("custom");document.getElementById("market-charts")?.scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});}
   function showRecords(){setTableView("signals");document.getElementById("records")?.scrollIntoView({behavior:"smooth",block:"start"});}
-  function changeDomain(value:Domain){setRange("custom");setCustomDomain(value);}
+  function changeDomain(value:Domain){setRange("custom");setCustomDomain(fit(...value));}
+  function resetCharts(){setRange("all");setSelectedMinute(null);setHoverMinute(null);}
+  function latestCharts(){setRange("60");setSelectedMinute(null);setHoverMinute(null);}
+  function openChart(key:ChartKind){setExpandedKind(key);setHoverMinute(null);setModal("chart");}
   function exportDay(){if(!rows.length)return;downloadCsv("baltatool-"+date+".csv",rowsCsv(rows));setToast(date+" 전체 기록을 CSV로 저장했어요.");}
   async function toggleNotifications(enabled:boolean){
     if(!enabled){setSettings(old=>({...old,notifications:false}));return;}
@@ -81,7 +80,8 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
     try{const response=await fetch("/api/auth/logout",{method:"POST"});if(!response.ok)throw new Error();window.location.assign("/login");}
     catch{setLoggingOut(false);setToast("로그아웃하지 못했어요. 다시 시도해 주세요.");}
   }
-  const chartProps={rows,kind,domain,selectedMinute,events,showMarkers:settings.markers,autoScale:settings.autoScale,onDomainChange:changeDomain};
+  const chartProps={rows,kind,domain,selectedMinute,events,showMarkers:settings.markers,autoScale:settings.autoScale,onDomainChange:changeDomain,hoverMinute,onHoverMinute:setHoverMinute,onReset:resetCharts,onLatest:latestCharts,refreshing:feed.refreshing,dataCaption:feed.warning?"수집 상태 확인":status.tone?status.label:settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"};
+  function comparisonChart(key:ChartKind){return <section className="panel comparison-panel" key={key}><div className="panel-header"><h2 className="panel-title">{chartLabels[key]}</h2><span className="panel-subtitle">{date}</span></div><MarketChart {...chartProps} kind={key} compact onExpand={()=>openChart(key)}/></section>;}
   function ranges(){return <div className="segmented" aria-label="차트 시간 범위">{[{value:"all",label:"전체"},{value:"60",label:"1시간"},{value:"30",label:"30분"}].map(item=><button key={item.value} className={range===item.value?"active":""} aria-pressed={range===item.value} onClick={()=>{setRange(item.value);setSelectedMinute(null);}}>{item.label}</button>)}</div>;}
   return <div className="workspace">
     <a className="skip-link" href="#main-content">본문으로 이동</a>
@@ -94,12 +94,13 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
       {!feed.error&&!feed.warning&&!feed.loading&&status.tone==="warn"&&<div className="notice" role="status"><Icon name="clock"/><span>{status.detail} · {sourceLabel(last?.flowSource)} · {breadthLabel(last?.breadthSource)}</span></div>}
       <Metrics rows={rows} loading={feed.loading}/>
       <div className="dashboard-grid"><div className="main-column">
-        <section className="panel" id="market-charts" style={{scrollMarginTop:24}} aria-labelledby="chart-heading"><div className="panel-header"><div><h2 className="panel-title" id="chart-heading">장중 흐름</h2><p className="panel-subtitle">{date||"선택 날짜"} · {rows.length}개 기록{selectedMinute!==null?" · "+minuteLabel(selectedMinute)+" 선택":""}</p></div><div className="toolbar">{ranges()}<button className="button icon small" onClick={()=>setModal("chart")} aria-label="차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={16}/></button></div></div>
+        {settings.compare&&rows.length>0&&<div className="mini-chart-grid overview-chart-grid">{overviewKinds.filter(key=>key!==kind).map(comparisonChart)}</div>}
+        <section className="panel" id="market-charts" style={{scrollMarginTop:24}} aria-labelledby="chart-heading"><div className="panel-header"><div><h2 className="panel-title" id="chart-heading">장중 흐름</h2><p className="panel-subtitle">{date||"선택 날짜"} · {rows.length}개 기록{selectedMinute!==null?" · "+minuteLabel(selectedMinute)+" 선택":""}</p></div><div className="toolbar">{ranges()}<button className="button icon small" onClick={()=>openChart(kind)} aria-label="차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={16}/></button></div></div>
           <div className="chart-tabs" aria-label="차트 지표">{chartKeys.map(key=><button key={key} className={"chart-tab"+(kind===key?" active":"")} aria-pressed={kind===key} onClick={()=>setKind(key)}>{chartLabels[key]}</button>)}</div>
           {feed.loading?<div className="chart-loading"><Icon name="refresh" className="spin"/>시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state" style={{minHeight:320}}><Icon name={feed.error?"warning":"chart"} size={34}/><strong>{feed.error?"시장 기록을 불러오지 못했어요":"선택한 날짜의 기록이 없어요"}</strong><p>{feed.error?"데이터 연결을 확인한 뒤 다시 시도해 주세요.":"주말·휴장일이거나 아직 기록이 수집되지 않았을 수 있어요. 다른 날짜를 선택해 보세요."}</p><button className="button" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing}><Icon name="refresh" size={15}/>다시 조회</button></div>:<MarketChart {...chartProps}/>}
-          <div className="chart-footer"><span className="num">{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</span><span className="desktop-hint">드래그로 구간 확대 · 차트 간 시간축 연동</span><button className="button ghost small" onClick={()=>{setRange("all");setSelectedMinute(null);}}>확대 초기화</button></div>
+          <div className="chart-footer"><span className="num">{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</span><span className="desktop-hint">5분까지 확대 · 모든 차트 시간축 연동</span><button className="button ghost small" onClick={()=>{setRange("all");setSelectedMinute(null);}}>확대 초기화</button></div>
         </section>
-        {settings.compare&&rows.length>0&&<div className="mini-chart-grid">{comparisonKinds.map(key=><section className="panel" key={key}><div className="panel-header"><h2 className="panel-title">{chartLabels[key]}</h2><button className="button ghost small" onClick={()=>{setKind(key);document.getElementById("market-charts")?.scrollIntoView({behavior:"smooth"});}} aria-label={chartLabels[key]+" 차트 크게 보기"}><Icon name="expand" size={14}/></button></div><MarketChart {...chartProps} kind={key} compact/></section>)}</div>}
+        {settings.compare&&rows.length>0&&<div className="mini-chart-grid">{comparisonKinds.filter(key=>key!==kind).map(comparisonChart)}</div>}
         {mode==="daily"&&<SessionSummary rows={rows} events={events}/>}
         <RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>
       </div><aside className="insight-column" aria-label="시장 요약"><MarketSummary row={last}/><FlowPanel row={last}/><SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/></aside></div>
@@ -107,7 +108,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
     </main>
     <nav className="mobile-nav" aria-label="모바일 메뉴"><Link href="/" className={mode==="overview"?"active":""} aria-current={mode==="overview"?"page":undefined}><Icon name="grid"/><span>대시보드</span></Link><Link href="/daily" className={mode==="daily"?"active":""} aria-current={mode==="daily"?"page":undefined}><Icon name="chart"/><span>일별 분석</span></Link><button onClick={showRecords}><Icon name="bell"/><span>신호 기록</span></button><button onClick={()=>setModal("settings")}><Icon name="settings"/><span>설정</span></button></nav>
     <Modal open={modal==="settings"} onClose={()=>setModal(null)} title="화면 설정"><div className="modal-content">
-      {([{key:"autoRefresh",title:"자동 갱신",text:"오늘 기록을 60초마다 갱신합니다. 숨겨진 탭에서는 잠시 쉽니다."},{key:"compare",title:"비교 차트",text:"주 차트 아래에서 여러 지표를 함께 확인합니다."},{key:"markers",title:"차트 신호 표시",text:"시장 폭·시장점수 차트에 주요 신호 지점을 표시합니다."},{key:"autoScale",title:"세로축 자동 조절",text:"끄면 시장 폭·수급 차트를 0 중심의 대칭 범위로 표시합니다."}] as const).map(item=><label className="settings-row" key={item.key}><span><strong>{item.title}</strong><p>{item.text}</p></span><input className="switch" type="checkbox" checked={settings[item.key]} onChange={e=>setSettings(old=>({...old,[item.key]:e.target.checked}))}/></label>)}
+      {([{key:"autoRefresh",title:"자동 갱신",text:"오늘 기록을 60초마다 갱신합니다. 숨겨진 탭에서는 잠시 쉽니다."},{key:"compare",title:"비교 차트",text:"시장 폭·비율과 개별 지수 차트를 함께 확인합니다."},{key:"markers",title:"차트 신호 표시",text:"시장 폭·시장점수 차트에 강한 신호 지점을 표시합니다."},{key:"autoScale",title:"세로축 자동 조절",text:"끄면 시장 폭·수급 차트를 0 중심의 대칭 범위로 표시합니다."}] as const).map(item=><label className="settings-row" key={item.key}><span><strong>{item.title}</strong><p>{item.text}</p></span><input className="switch" type="checkbox" checked={settings[item.key]} onChange={e=>setSettings(old=>({...old,[item.key]:e.target.checked}))}/></label>)}
       <label className="settings-row"><span><strong>새 강한 신호 알림</strong><p>화면 갱신 중 새로 감지한 강한 신호만 알립니다. 과거 기록에는 알리지 않습니다.</p></span><input className="switch" type="checkbox" checked={settings.notifications} onChange={e=>void toggleNotifications(e.target.checked)}/></label><div className="settings-row"><span><strong>설정 저장</strong><p>선택한 화면 설정은 이 브라우저에 저장됩니다.</p></span><button className="button small" onClick={()=>setSettings(defaults)}>초기화</button></div><div className="toolbar" style={{marginTop:20,justifyContent:"space-between"}}><button className="button" onClick={()=>setModal("guide")}><Icon name="help" size={16}/>지표 가이드</button><button className="button ghost" onClick={logout} disabled={loggingOut}><Icon name="logout" size={16}/>로그아웃</button></div>
     </div></Modal>
     <Modal open={modal==="guide"} onClose={()=>setModal(null)} title="지표 읽는 법"><div className="modal-content">{[
@@ -117,10 +118,11 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
       ["직전값과 누락 구간","직전 수급 유지로 표시된 값은 새로 받은 수급이 아닙니다. 없는 시간대는 차트를 끊어 표시하며, 기록을 보간해 만들지 않습니다."],
       ["수집 신호와 차트 분석","수집 신호는 서버에 저장된 신호, 차트 분석은 기존 일별 분석 규칙으로 기록에서 계산한 신호입니다. 같은 종류의 반복 신호는 10분 간격으로 정리합니다."],
       ["조건 충족률","기존의 신뢰도 %를 조건 충족률로 바꿨습니다. 여러 조건 중 충족한 비율이며, 상승 확률이나 수익 확률을 뜻하지 않습니다."],
-      ["차트와 기록 탐색","차트 범례를 누르면 해당 선을 숨기거나 표시할 수 있습니다. 30분·1시간 범위를 선택하거나 드래그로 확대하세요. 신호 또는 표의 시간을 누르면 해당 구간으로 이동합니다."],
+      ["차트와 기록 탐색","차트 상단 수치는 최신 수신 기록입니다. 커서를 올리면 해당 시각의 값이 별도로 표시됩니다. 외인은 파랑, 기관은 빨강, 개인은 노랑으로 구분합니다. 수급 부호는 순매수·순매도를 뜻합니다."],
+      ["확대와 구간 탐색","+/− 버튼, Ctrl/⌘+휠, 구간 드래그로 5분까지 확대합니다. 이동 모드에서는 끌어서 시간대를 이동할 수 있습니다. 하단 탐색 막대나 시작·끝 슬라이더를 사용해도 됩니다. 더블클릭·전체 버튼으로 초기화하고, 최근 1시간 버튼으로 최신 구간을 따라갑니다. 확대 아이콘은 큰 차트 창을 엽니다. 모든 차트의 시간 범위가 함께 변경됩니다."],
       ["CSV 다운로드","상단 내보내기는 선택 날짜의 전체 지표를 저장합니다. 기록 탐색의 CSV는 현재 검색·강도 필터와 정렬을 반영합니다."]
     ].map(([title,text])=><div className="guide-item" key={title}><strong>{title}</strong><p>{text}</p></div>)}</div></Modal>
-    <Modal open={modal==="chart"} onClose={()=>setModal(null)} title={chartLabels[kind]+" · "+date} wide><div className="panel-header"><div className="chart-legend"><span className="panel-subtitle">연결된 시간 범위</span><strong className="num" style={{fontSize:14}}>{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</strong></div>{ranges()}</div><MarketChart {...chartProps} syncGroup="balta-fullscreen"/><div className="chart-footer"><span>드래그로 구간을 확대할 수 있습니다.</span><button className="button small" onClick={()=>{setRange("all");setSelectedMinute(null);}}>전체 구간</button></div></Modal>
+    <Modal open={modal==="chart"} onClose={()=>setModal(null)} title={chartLabels[expandedKind]+" · "+date} wide><div className="panel-header"><div className="chart-legend"><span className="panel-subtitle">연결된 시간 범위</span><strong className="num" style={{fontSize:14}}>{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</strong></div>{ranges()}</div><MarketChart {...chartProps} kind={expandedKind} syncGroup="balta-fullscreen"/><div className="chart-footer"><span>Ctrl/⌘ + 휠 확대 · Esc로 닫기</span><button className="button small" onClick={()=>{setRange("all");setSelectedMinute(null);}}>전체 구간</button></div></Modal>
     {toast&&<div className="toast" role="status"><Icon name="check" size={16}/><span>{toast}</span><button className="button ghost small icon" onClick={()=>setToast("")} aria-label="메시지 닫기"><Icon name="close" size={14}/></button></div>}
   </div>;
 }
