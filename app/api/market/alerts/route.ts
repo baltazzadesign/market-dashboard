@@ -1,114 +1,22 @@
-import db from "@/lib/db";
-
-export async function GET() {
+import { readMarketDay, requestedDate, marketError } from "@/lib/balta-data";
+import { buildMarketEvents } from "@/lib/balta-signals";
+export const dynamic = "force-dynamic";
+export async function GET(request: Request) {
   try {
-    // ===== 기존 ALERT 조회 =====
-    const alerts = db
-      .prepare(`
-        SELECT 
-          id,
-          time,
-          level,
-          message,
-          diff,
-          accel,
-          marketScore,
-          createdAt
-        FROM alert_logs
-        ORDER BY id DESC
-        LIMIT 30
-      `)
-      .all();
-
-    // ===== 기존 ALERT summary =====
-    const summary = db
-      .prepare(`
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN level = '강' THEN 1 ELSE 0 END) AS strong,
-          SUM(CASE WHEN level = '중' THEN 1 ELSE 0 END) AS medium,
-          SUM(CASE WHEN level = '약' THEN 1 ELSE 0 END) AS weak,
-          MAX(createdAt) AS lastCreatedAt
-        FROM alert_logs
-        WHERE date(createdAt) = date('now', 'localtime')
-      `)
-      .get();
-
-    // ===== 기존 최근 강한 ALERT =====
-    const recentStrong = db
-      .prepare(`
-        SELECT
-          id,
-          time,
-          level,
-          message,
-          diff,
-          accel,
-          marketScore,
-          createdAt
-        FROM alert_logs
-        WHERE level = '강'
-        ORDER BY id DESC
-        LIMIT 1
-      `)
-      .get();
-
-    // ===== 🔥 SIGNAL 조회 추가 =====
-    const signals = db
-      .prepare(`
-        SELECT
-          id,
-          time,
-          type,
-          message,
-          diff,
-          prevDiff,
-          accel,
-          marketScore,
-          createdAt
-        FROM signal_logs
-        ORDER BY id DESC
-        LIMIT 30
-      `)
-      .all();
-
-    // ===== 🔥 SIGNAL summary 추가 =====
-    const signalSummary = db
-      .prepare(`
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN type = 'CROSS_UP' THEN 1 ELSE 0 END) AS crossUp,
-          SUM(CASE WHEN type = 'CROSS_DOWN' THEN 1 ELSE 0 END) AS crossDown,
-          SUM(CASE WHEN type = 'ACCEL_UP' THEN 1 ELSE 0 END) AS accelUp,
-          SUM(CASE WHEN type = 'ACCEL_DOWN' THEN 1 ELSE 0 END) AS accelDown,
-          SUM(CASE WHEN type = 'SCORE_OVERHEAT' THEN 1 ELSE 0 END) AS overheat,
-          SUM(CASE WHEN type = 'SCORE_OVERSOLD' THEN 1 ELSE 0 END) AS oversold,
-          MAX(createdAt) AS lastCreatedAt
-        FROM signal_logs
-        WHERE date(createdAt) = date('now', 'localtime')
-      `)
-      .get();
-
-    return Response.json({
-      ok: true,
-
-      // 기존
-      alerts,
-      summary,
-      recentStrong,
-
-      // 🔥 추가
-      signals,
-      signalSummary,
-    });
-  } catch (error: any) {
-    return Response.json(
-      {
-        ok: false,
-        error: "ALERT/SIGNAL 조회 실패",
-        detail: error.message,
-      },
-      { status: 500 }
-    );
-  }
+    const date = requestedDate(request);
+    const rows = await readMarketDay(date, request.signal);
+    const events = buildMarketEvents(rows);
+    const alerts = events.map(e => ({ ...e, createdAt: e.date + "T" + e.time + ":00+09:00" }));
+    const summary = {
+      total: alerts.length, strong: alerts.filter(e => e.level === "강").length,
+      medium: alerts.filter(e => e.level === "중").length, weak: alerts.filter(e => e.level === "약").length,
+      lastCreatedAt: alerts[0]?.createdAt ?? null,
+    };
+    const signals = alerts.filter(e => e.source !== "시장 알림");
+    const count = (type: string) => signals.filter(e => e.type.startsWith(type)).length;
+    return Response.json({ ok: true, selectedDate: date, alerts, summary, recentStrong: alerts.find(e => e.level === "강") ?? null, signals,
+      signalSummary: { total: signals.length, crossUp: count("CROSS_UP"), crossDown: count("CROSS_DOWN"),
+        accelUp: count("ACCEL_UP"), accelDown: count("ACCEL_DOWN"), overheat: count("SCORE_OVERHEAT"), oversold: count("SCORE_OVERSOLD"),
+        lastCreatedAt: signals[0]?.createdAt ?? null } });
+  } catch (error) { return marketError(error); }
 }

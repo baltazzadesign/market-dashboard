@@ -1711,6 +1711,8 @@ export async function GET(req: Request) {
     }
 
     return Response.json({
+      time: timeStr,
+      createdat,
       up,
       down,
       flat,

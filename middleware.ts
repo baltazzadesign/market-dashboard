@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PASSWORD = "balta260427";
+import { accessCode } from "@/lib/balta-access";
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -11,7 +11,7 @@ export function middleware(req: NextRequest) {
 
   const access = req.cookies.get("access")?.value;
 
-  if (access === PASSWORD) {
+  if (access === accessCode()) {
     return NextResponse.next();
   }
 
