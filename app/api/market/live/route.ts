@@ -1,3 +1,4 @@
+import { parseSectors } from "@/lib/market-research";
 import { indexSnapshot } from "@/lib/kis-history";
 import { kstParts } from "@/lib/balta-model";
 import { marketClosedReason, parseAdditionalHolidays } from "@/lib/market-calendar";
@@ -700,7 +701,7 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
       fid_cond_mrkt_div_code: "U",
       fid_input_iscd: code,
       fid_cond_scr_div_code: "20214",
-      fid_mrkt_cls_code: "K2",
+      fid_mrkt_cls_code: code === "0001" ? "K" : "Q",
       fid_blng_cls_code: "0",
     });
 
@@ -1645,8 +1646,10 @@ export async function GET(req: Request) {
     );
     const marketState = `${baseMarketState}|FLOW_${flowData.source}|BREADTH_${breadthSource}`;
 
+    const sectorRows = [...parseSectors(kospiData.raw,"kospi"),...parseSectors(kosdaqData.raw,"kosdaq")];
+    let sectorSaveStatus = "skipped";
     const marketData = {
-      version: 1, capturedAt: now.toISOString(),
+      version: 2, capturedAt: now.toISOString(),
       kospi: indexSnapshot(kospiData.raw,rawFlowData.markets?.kospi,breadthSource === "LIVE"),
       kosdaq: indexSnapshot(kosdaqData.raw,rawFlowData.markets?.kosdaq,breadthSource === "LIVE"),
     };
@@ -1701,6 +1704,16 @@ export async function GET(req: Request) {
       }
 
       saveResult = await saveLogToSupabase(rowToSave);
+      if (sectorRows.length) {
+        try {
+          await supabaseRequest("/rest/v1/rpc/save_market_sectors", {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({p_date:createdat,p_time:timeStr,p_captured:now.toISOString(),p_sectors:sectorRows})
+          });
+          sectorSaveStatus = "saved";
+        } catch { sectorSaveStatus = "error"; console.warn("업종 저장 실패: 003_market_research.sql 적용 및 DB 상태를 확인하세요."); }
+      }
+
 
       console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", flowData.source, "breadth:", breadthSource, {
         foreign,
@@ -1757,6 +1770,7 @@ export async function GET(req: Request) {
       indivFlow: indiv,
       flowSource: flowData.source,
       rawFlowSource: rawFlowData.source,
+      sectorSaveStatus,
       flowPower,
       prevFlowPower,
       flowTrend,
