@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { OPEN_MINUTE, CLOSE_MINUTE, type MarketEvent, type MarketRow, kstParts, isValidDate, moveDate, minuteLabel, formatNumber, dataStatus, rowsCsv, sourceLabel, breadthLabel } from "@/lib/balta-model";
 import { buildMarketEvents } from "@/lib/balta-signals";
+import Diagnostics from "./Diagnostics";
 import { Brand, Icon } from "./Icon";
 import { useMarketFeed } from "./useMarketFeed";
 import { Modal } from "./Modal";
@@ -103,6 +104,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
         </section>
         {settings.compare&&rows.length>0&&<div className="mini-chart-grid">{comparisonKinds.filter(key=>key!==kind).map(comparisonChart)}</div>}
         {mode==="daily"&&<SessionSummary rows={rows} events={events}/>}
+        <Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>
         <RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>
       </div><aside className="insight-column" aria-label="시장 요약"><MarketSummary row={last}/><FlowPanel row={last}/><SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/></aside></div>
       <footer className="workspace-footer"><span><Icon name="clock" size={13}/>{feed.fetchedAt?"마지막 조회 "+feed.fetchedAt:"조회 대기"} · {last?"데이터 "+last.time+" 기준":"저장 기록 없음"} · KST</span><span>{date&&date===today?(settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"):"과거 기록 조회"}<button className="button ghost small" onClick={()=>setModal("guide")}>지표 읽는 법<Icon name="help" size={13}/></button></span></footer>
