@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { OPEN_MINUTE, CLOSE_MINUTE, type MarketEvent, type MarketRow, kstParts, isValidDate, moveDate, minuteLabel, formatNumber, dataStatus, rowsCsv, sourceLabel, breadthLabel } from "@/lib/balta-model";
 import { buildMarketEvents } from "@/lib/balta-signals";
+import ComparisonReport from "./ComparisonReport";
 import Diagnostics from "./Diagnostics";
 import { Brand, Icon } from "./Icon";
 import { useMarketFeed } from "./useMarketFeed";
@@ -104,6 +105,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
         </section>
         {settings.compare&&rows.length>0&&<div className="mini-chart-grid">{comparisonKinds.filter(key=>key!==kind).map(comparisonChart)}</div>}
         {mode==="daily"&&<SessionSummary rows={rows} events={events}/>}
+        <ComparisonReport rows={rows} events={events} date={date}/>
         <Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>
         <RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>
       </div><aside className="insight-column" aria-label="시장 요약"><MarketSummary row={last}/><FlowPanel row={last}/><SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/></aside></div>
