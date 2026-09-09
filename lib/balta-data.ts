@@ -1,9 +1,11 @@
+import { marketClosedReason, parseAdditionalHolidays } from "./market-calendar";
 import { isValidDate, kstParts, normalizeRows, type MarketRow } from "./balta-model";
 export class MarketDataError extends Error {
   constructor(message: string, public status = 500) { super(message); }
 }
 export async function readMarketDay(date: string, signal?: AbortSignal): Promise<MarketRow[]> {
   if (!isValidDate(date)) throw new MarketDataError("날짜 형식이 올바르지 않습니다.", 400);
+  if (marketClosedReason(date,parseAdditionalHolidays(process.env.MARKET_HOLIDAYS))) return [];
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new MarketDataError("저장 데이터 연결 설정을 확인해 주세요.", 503);
   // Use the collector's KST trade date, not insertion timestamp (late imports differ).

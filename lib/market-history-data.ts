@@ -1,3 +1,4 @@
+import { marketClosedReason, parseAdditionalHolidays } from "./market-calendar";
 import { MarketDataError } from "./balta-data";
 import { dailyFromRecord, type DailyMarket } from "./market-history-model";
 import { isValidDate } from "./balta-model";
@@ -23,5 +24,6 @@ export async function readHistory(start: string,end: string,signal?:AbortSignal)
     if(raw.length<250)break;
     if(offset>=5000)throw new MarketDataError("한 번에 조회할 수 있는 기간을 초과했습니다.",400);
   }
-  return all;
+  const additional=parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
+  return all.filter(day=>!marketClosedReason(day.date,additional));
 }

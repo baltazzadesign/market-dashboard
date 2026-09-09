@@ -77,3 +77,29 @@ test('collector parser keeps zero flows and refuses incomplete investor response
  assert.notEqual(parseFlowFromJson({output:[{frgn_ntby_tr_pbmn:'10000'}]}).complete,true);
  assert.equal(parseFlowFromJson({output:[d('153000','10000','20000','-30000')]}).foreign,100);
 });
+test('closed-day records never enter history, monthly metrics, or estimated positions',()=>{
+ const valid=day('2026-09-04',100,100),weekend=day('2026-09-05',1000,99999),holiday=day('2026-09-25',2000,99999);
+ assert.equal(dailyFromRecord(raw('2026-09-05')),null);assert.equal(dailyFromRecord(raw('2026-09-06')),null);assert.equal(dailyFromRecord(raw('2026-09-25')),null);
+ const report=monthlyReport([valid,weekend,holiday],'2026-09','kospi');
+ assert.equal(report.days.length,1);assert.equal(report.current.days,1);assert.equal(report.current.flowTotals.foreign,100);
+ const result=estimatePositions([valid,weekend,holiday],'kospi','2026-09-01','2026-09-30');
+ assert.equal(result.chart.length,1);assert.equal(result.currentPrice,100);assert.equal(result.positions[0].net,100);
+});
+test('weekday calendar preserves alignment across months and rejects invalid dates',()=>{
+ const {monthWeekdaySlots,marketClosedReason,parseAdditionalHolidays,monthClosedDates}=require('../lib/market-calendar');
+ const slots=monthWeekdaySlots('2026-09');assert.equal(slots.length%5,0);assert.equal(slots[0],null);assert.equal(slots[1],'2026-09-01');assert.equal(slots.includes('2026-09-05'),false);
+ for(const month of ['2026-02','2026-08','2026-09','2026-11']){
+  const dates=monthWeekdaySlots(month);assert.equal(dates.length%5,0);
+  dates.forEach((d:string|null,i:number)=>{if(d)assert.equal(new Date(d+'T00:00:00Z').getUTCDay(),i%5+1);});
+ }
+ assert.equal(marketClosedReason('2026-09-24'),'추석 연휴');assert.equal(marketClosedReason('2026-12-31'),'연말 증시 휴장');assert.equal(marketClosedReason('2026-09-28'),null);
+ const extra=parseAdditionalHolidays(' 2026-09-28,invalid,2026-02-30 ');assert.deepEqual(extra,['2026-09-28']);assert.equal(monthClosedDates('2026-09',extra)['2026-09-28'],'추가 지정 휴장일');
+});
+test('closed days skip intraday storage requests, including configured holidays',async()=>{
+ const original=globalThis.fetch,old=process.env.MARKET_HOLIDAYS;
+ try{
+  process.env.MARKET_HOLIDAYS=' 2026-09-28 ';
+  globalThis.fetch=async()=>{throw new Error('must not fetch on a closed day');};
+  assert.deepEqual(await readMarketDay('2026-09-05'),[]);assert.deepEqual(await readMarketDay('2026-09-25'),[]);assert.deepEqual(await readMarketDay('2026-09-28'),[]);
+ }finally{globalThis.fetch=original;if(old===undefined)delete process.env.MARKET_HOLIDAYS;else process.env.MARKET_HOLIDAYS=old;}
+});

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 // Use the project's TypeScript compiler; no extra test runtime dependency.
 const root=mkdtempSync(join(tmpdir(),'market-tests-'));
 try{
- for(const file of ['lib/balta-model.ts','lib/market-history-model.ts','lib/kis-history.ts','lib/balta-data.ts','lib/market-history-data.ts','lib/market.ts','app/api/market/live/route.ts','tests/history.test.ts']){
+ for(const file of ['lib/balta-model.ts','lib/market-calendar.ts','lib/market-history-model.ts','lib/kis-history.ts','lib/balta-data.ts','lib/market-history-data.ts','lib/market.ts','app/api/market/live/route.ts','tests/history.test.ts']){
   const target=join(root,file.replace(/\.ts$/,'.js'));mkdirSync(dirname(target),{recursive:true});
   let source=readFileSync(file,'utf8');
   if(file==='app/api/market/live/route.ts') source=source.replaceAll('@/lib/','../../../../lib/');

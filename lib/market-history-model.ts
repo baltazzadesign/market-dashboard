@@ -1,3 +1,4 @@
+import { marketClosedReason } from "./market-calendar";
 import { isValidDate, normalizeRow, numeric, record, type RawRecord } from "./balta-model";
 
 export type Market = "kospi" | "kosdaq";
@@ -32,7 +33,7 @@ function readFlows(value: unknown, source: string): Flows {
 export function dailyFromRecord(value: unknown): DailyMarket | null {
   const stored = record(value), raw = record(stored.snapshot ?? value);
   const date = String(stored.trade_date ?? raw.createdat ?? "").slice(0,10);
-  if (!isValidDate(date)) return null;
+  if (!isValidDate(date) || marketClosedReason(date)) return null;
   const row = normalizeRow(raw,date), extra = record(raw.market_data);
   if (row.minute < 540 || row.minute > 930 || row.up+row.down+row.flat <= 0) return null;
   const index = (key: Market): IndexSnapshot => {
@@ -51,7 +52,7 @@ export function dailyFromRecord(value: unknown): DailyMarket | null {
     flows,turnover,pulse:breadthValid?clamp((row.marketScore+100)/2):null,kospi,kosdaq};
 }
 export function monthlySummary(days: DailyMarket[], market: Market, baseline: DailyMarket | undefined) {
-  const closed = days.filter(d=>d.finalized), values=closed.map(d=>d[market].changePct);
+  const closed = days.filter(d=>d.finalized && !marketClosedReason(d.date)), values=closed.map(d=>d[market].changePct);
   const changes=closed.filter(d=>d[market].changePct!==null);
   const mean=average(values), variance=mean!==null && changes.length>1 ? values.reduce<number>((s,v)=>s+(v===null?0:(v-mean)**2),0)/(changes.length-1):null;
   const volatility=variance!==null?Math.sqrt(variance):null;
@@ -82,6 +83,7 @@ export function monthlySummary(days: DailyMarket[], market: Market, baseline: Da
 }
 export function monthlyReport(allDays: DailyMarket[], month: string, market: Market) {
   if (!validMonth(month)) month = "2000-01";
+  allDays=allDays.filter(d=>!marketClosedReason(d.date));
   const days=allDays.filter(d=>d.date.startsWith(month));
   const previousMonth=shiftMonth(month,-1), previousDays=allDays.filter(d=>d.date.startsWith(previousMonth));
   const baseline=previousDays.filter(d=>d.finalized).at(-1);
@@ -95,7 +97,7 @@ export function monthlyReport(allDays: DailyMarket[], month: string, market: Mar
 }
 export type PositionLot = {price:number;units:number;date:string};
 export function estimatePositions(days: DailyMarket[], market: Market, start: string, end: string) {
-  const selected=days.filter(d=>d.date>=start&&d.date<=end).sort((a,b)=>a.date.localeCompare(b.date));
+  const selected=days.filter(d=>d.date>=start&&d.date<=end&&!marketClosedReason(d.date)).sort((a,b)=>a.date.localeCompare(b.date));
   const priceDay=[...selected].reverse().find(d=>d[market].price!==null&&d[market].priceSource==="LIVE");
   const currentPrice=priceDay?.[market].price??null;
   const state=Object.fromEntries(investors.map(key=>[key,{lots:[] as PositionLot[],net:0,observations:0,unmatchedSell:0}])) as Record<Investor,{lots:PositionLot[];net:number;observations:number;unmatchedSell:number}>;

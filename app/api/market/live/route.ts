@@ -1,6 +1,6 @@
 import { indexSnapshot } from "@/lib/kis-history";
 import { kstParts } from "@/lib/balta-model";
-import { HOLIDAYS_2026 } from "@/lib/market";
+import { marketClosedReason, parseAdditionalHolidays } from "@/lib/market-calendar";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -1488,8 +1488,8 @@ export async function GET(req: Request) {
     const createdat = getKstDateString(now);
     const minuteKey = `${createdat} ${timeStr}`;
     const parts = kstParts(now);
-    const extraHolidays = (process.env.MARKET_HOLIDAYS || "").split(",");
-    const isMarketTime = isRegularMarketTime(timeStr) && !parts.weekend && !HOLIDAYS_2026.has(createdat) && !extraHolidays.includes(createdat);
+    const extraHolidays = parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
+    const isMarketTime = isRegularMarketTime(timeStr) && !marketClosedReason(createdat,extraHolidays);
     if (!isMarketTime) return Response.json({ok:true,saved:false,saveAction:"skipped",saveSkipReason:"OUT_OF_REGULAR_HOURS",createdat,time:timeStr});
 
     const [kospiData, kosdaqData, rawFlowData, latestDbRow, latestNormalBreadthRow] = await Promise.all([

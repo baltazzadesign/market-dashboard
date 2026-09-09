@@ -1,3 +1,4 @@
+import { monthClosedDates, parseAdditionalHolidays } from "@/lib/market-calendar";
 import { readHistory } from "@/lib/market-history-data";
 import { validMonth, shiftMonth, monthEnd } from "@/lib/market-history-model";
 import { marketError, MarketDataError } from "@/lib/balta-data";
@@ -13,6 +14,6 @@ export async function GET(request:Request){
     if(!Number.isInteger(months)||months<3||months>24)throw new MarketDataError("조회 기간은 3~24개월입니다.",400);
     const start=shiftMonth(month,-months)+"-01",end=monthEnd(month);
     const days=await readHistory(start,end,request.signal);
-    return Response.json({ok:true,month,start,end,days,asOf:kstParts().clock},{headers:{"Cache-Control":"private, no-store"}});
+    return Response.json({ok:true,month,start,end,days,closedDates:monthClosedDates(month,parseAdditionalHolidays(process.env.MARKET_HOLIDAYS)),holidayCalendarYear:2026,asOf:kstParts().clock},{headers:{"Cache-Control":"private, no-store"}});
   }catch(error){return marketError(error);}
 }
