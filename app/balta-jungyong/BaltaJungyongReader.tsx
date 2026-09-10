@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import styles from "./balta-jungyong.module.css";
 
@@ -49,6 +49,7 @@ export default function BaltaJungyongReader({ chapters }: Props) {
   const [activeNumber, setActiveNumber] = useState(1);
   const [query, setQuery] = useState("");
   const [showContents, setShowContents] = useState(false);
+  const [fontStep, setFontStep] = useState(0);
 
   useEffect(() => {
     const match = window.location.hash.match(/chapter-(\d+)/);
@@ -77,11 +78,11 @@ export default function BaltaJungyongReader({ chapters }: Props) {
     setActiveNumber(number);
     setShowContents(false);
     window.history.replaceState(null, "", `#chapter-${number}`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   };
 
   return (
-    <div className={styles.readerShell}>
+    <div className={styles.readerShell} style={{ "--reading-size": `${20 + fontStep * 2}px`, "--reading-size-mobile": `${18 + fontStep * 2}px` } as CSSProperties}>
       <header className={styles.siteHeader}>
         <Link className={styles.brand} href="/">
           <span className={styles.brandMark}>B′</span>
@@ -109,13 +110,13 @@ export default function BaltaJungyongReader({ chapters }: Props) {
       </div>
 
       <main className={styles.layout}>
-        <aside className={`${styles.contentsPanel} ${showContents ? styles.contentsOpen : ""}`}>
+        <aside id="jungyong-contents" className={`${styles.contentsPanel} ${showContents ? styles.contentsOpen : ""}`}>
           <div className={styles.contentsTop}>
             <div>
               <p className={styles.miniLabel}>卷目</p>
               <h2>발타 중용 목차</h2>
             </div>
-            <span className={styles.chapterCount}>33章</span>
+            <span className={styles.chapterCount}>{chapters.length}章</span>
           </div>
 
           <label className={styles.searchBox}>
@@ -129,11 +130,13 @@ export default function BaltaJungyongReader({ chapters }: Props) {
           </label>
 
           <nav className={styles.chapterList} aria-label="발타 중용 목차">
+            {filtered.length === 0 && <p className={styles.emptyResult} role="status">검색 결과가 없습니다. 다른 단어로 찾아보세요.</p>}
             {filtered.map((item) => (
               <button
                 type="button"
                 key={item.number}
                 onClick={() => moveTo(item.number)}
+                aria-current={item.number === chapter.number ? "page" : undefined}
                 className={item.number === chapter.number ? styles.activeChapter : ""}
               >
                 <span className={styles.chapterNum}>{String(item.number).padStart(2, "0")}</span>
@@ -150,46 +153,42 @@ export default function BaltaJungyongReader({ chapters }: Props) {
         </aside>
 
         <section className={styles.readingColumn} id={`chapter-${chapter.number}`}>
-          <button className={styles.mobileContentsButton} type="button" onClick={() => setShowContents((v) => !v)}>
-            {showContents ? "목차 닫기" : `목차 · 제${chapter.number}장`}
-          </button>
+          <div className={styles.readingTools}>
+            <span className={styles.editionLabel}>發陀中庸 · 정제본</span>
+            <button className={styles.mobileContentsButton} type="button" aria-expanded={showContents} aria-controls="jungyong-contents" onClick={() => { setShowContents((v) => !v); window.scrollTo({ top: 0 }); }}>
+              {showContents ? "목차 닫기" : `목차 · 제${chapter.number}장`}
+            </button>
+            <div className={styles.fontControls} aria-label="본문 글자 크기">
+              <button type="button" aria-label="글자 작게" disabled={fontStep <= -1} onClick={() => setFontStep((s) => Math.max(-1, s - 1))}>가−</button>
+              <span>글자 크기</span>
+              <button type="button" aria-label="글자 크게" disabled={fontStep >= 2} onClick={() => setFontStep((s) => Math.min(2, s + 1))}>가＋</button>
+            </div>
+          </div>
 
           <article className={styles.manuscript}>
-            <div className={styles.paperGrain} aria-hidden="true" />
-            <div className={styles.paperStainOne} aria-hidden="true" />
-            <div className={styles.paperStainTwo} aria-hidden="true" />
 
             <header className={styles.manuscriptHeader}>
               <div className={styles.seal} aria-hidden="true">
                 <span>中</span>
               </div>
-              <p className={styles.kicker}>BALTATOOL · 發陀中庸</p>
+              <p className={styles.kicker}>發 陀 中 庸</p>
               <p className={styles.chapterRoman}>卷 {String(chapter.number).padStart(2, "0")}</p>
-              <h1>제{chapter.number}장</h1>
-              <h2>{chapter.title}</h2>
+              <h1>{chapter.title}</h1>
+              <h2>제{chapter.number}장</h2>
               <div className={styles.ornament} aria-hidden="true">
                 <span />
                 <b>◆</b>
                 <span />
               </div>
-              <p className={styles.subtitle}>흔들리지 않기 위하여, 가운데의 길을 읽습니다.</p>
+              <p className={styles.subtitle}>때를 살피고, 중심을 지키다.</p>
             </header>
 
             <div className={styles.bodyText}>
-              {chapter.blocks.map((block, index) => {
-                const isLast = index === chapter.blocks.length - 1;
-                const isShortEmphasis = block.length < 45 && index > 0;
-
-                if (isLast || isShortEmphasis) {
-                  return (
-                    <blockquote className={isLast ? styles.finalVerse : styles.shortVerse} key={`${chapter.number}-${index}`}>
-                      {block}
-                    </blockquote>
-                  );
-                }
-
-                return <p key={`${chapter.number}-${index}`}>{block}</p>;
-              })}
+              {chapter.blocks.map((block, index) => (
+                index === chapter.blocks.length - 1
+                  ? <p className={styles.finalVerse} key={`${chapter.number}-${index}`}>{block}</p>
+                  : <p key={`${chapter.number}-${index}`}><span className={styles.verseNumber} aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>{block}</p>
+              ))}
             </div>
 
             <footer className={styles.manuscriptFooter}>
@@ -231,7 +230,7 @@ export default function BaltaJungyongReader({ chapters }: Props) {
           </div>
 
           <p className={styles.readerNote}>
-            발타 중용 33장 · 업로드된 「발타중용.xlsx」 본문을 웹 읽기 형식으로 구성한 페이지입니다.
+            발타 중용 {chapters.length}장 · 첨부 원고의 주제를 중용의 문체로 재구성한 창작 패러디입니다. 실제 발언의 직접 인용이나 고전 번역문이 아닙니다.
           </p>
         </section>
       </main>

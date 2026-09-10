@@ -1,4 +1,15 @@
 import type { Metadata } from "next";
+import localFont from "next/font/local";
+
+const bookFont = localFont({
+  src: [
+    { path: "./fonts/regular.woff", weight: "400", style: "normal" },
+    { path: "./fonts/bold.woff", weight: "700", style: "normal" },
+  ],
+  variable: "--font-balta-serif",
+  display: "swap",
+  preload: false,
+});
 import BaltaJungyongReader from "./BaltaJungyongReader";
 import { baltaJungyongChapters } from "./data";
 
@@ -8,5 +19,5 @@ export const metadata: Metadata = {
 };
 
 export default function BaltaJungyongPage() {
-  return <BaltaJungyongReader chapters={baltaJungyongChapters} />;
+  return <div className={bookFont.variable}><BaltaJungyongReader chapters={baltaJungyongChapters} /></div>;
 }
