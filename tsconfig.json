@@ -38,6 +38,7 @@
   ],
   "exclude": [
     "node_modules",
-    "mobile-header-fix"
+    "mobile-header-fix",
+    "baltatool-krx-session-patch"
   ]
 }

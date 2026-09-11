@@ -73,3 +73,6 @@ export function isRecordable(date: Date) {
   if (isHoliday(date)) return false;
   return getSessionType(date) !== "CLOSED";
 }
+// New code uses real instants and explicit KRX sessions. Legacy helpers above
+// deliberately retain their old wall-clock Date contract and recordability.
+export { getKrxMarketStatus, getKrxSession, isRegularObservation, KRX_AFTER_MARKET_EFFECTIVE_DATE } from "./market-calendar";

@@ -1,7 +1,7 @@
 import { parseSectors } from "@/lib/market-research";
 import { indexSnapshot } from "@/lib/kis-history";
 import { kstParts } from "@/lib/balta-model";
-import { marketClosedReason, parseAdditionalHolidays } from "@/lib/market-calendar";
+import { getKrxMarketStatus, isRegularObservation, parseAdditionalHolidays } from "@/lib/market-calendar";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -1490,8 +1490,13 @@ export async function GET(req: Request) {
     const minuteKey = `${createdat} ${timeStr}`;
     const parts = kstParts(now);
     const extraHolidays = parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
-    const isMarketTime = isRegularMarketTime(timeStr) && !marketClosedReason(createdat,extraHolidays);
-    if (!isMarketTime) return Response.json({ok:true,saved:false,saveAction:"skipped",saveSkipReason:"OUT_OF_REGULAR_HOURS",createdat,time:timeStr});
+    const marketStatus = getKrxMarketStatus(now, extraHolidays);
+    const isMarketTime = isRegularObservation(createdat, timeStr, extraHolidays);
+    if (!isMarketTime) return Response.json({
+      ok:true, saved:false, saveAction:"skipped", saveSkipReason:"OUT_OF_REGULAR_HOURS",
+      createdat, time:timeStr, marketSession:marketStatus.session, marketStatus,
+      dataAvailability:marketStatus.session === "CLOSED" ? "CLOSED" : "NOT_CONNECTED",
+    }, { headers: { "Cache-Control": "no-store" } });
 
     const [kospiData, kosdaqData, rawFlowData, latestDbRow, latestNormalBreadthRow] = await Promise.all([
       fetchBreadth("0001"),
@@ -1650,6 +1655,8 @@ export async function GET(req: Request) {
     let sectorSaveStatus = "skipped";
     const marketData = {
       version: 2, capturedAt: now.toISOString(),
+      session: "REGULAR", regime: marketStatus.regime, tradeDate: createdat,
+      closeBasis: "REGULAR_SESSION_OBSERVATION", officialCloseVerified: false,
       kospi: indexSnapshot(kospiData.raw,rawFlowData.markets?.kospi,breadthSource === "LIVE"),
       kosdaq: indexSnapshot(kosdaqData.raw,rawFlowData.markets?.kosdaq,breadthSource === "LIVE"),
     };
@@ -1785,6 +1792,7 @@ export async function GET(req: Request) {
       ok: saveResult.action !== "failed",
       error: saveResult.action === "failed" ? "SAVE_FAILED" : undefined,
       market_data: marketData,
+      marketStatus,
       saved: ["inserted","updated"].includes(saveResult.action),
       saveAction: saveResult.action,
       snapshotInvalidReason,

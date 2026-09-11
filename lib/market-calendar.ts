@@ -56,3 +56,51 @@ export function monthClosedDates(month:string,additional:readonly string[]=[]):R
   }
   return result;
 }
+
+// KRX session regime only. NXT/SOR schedules must be handled independently.
+export const KRX_AFTER_MARKET_EFFECTIVE_DATE = "2026-09-14";
+export type KrxSession = "REGULAR" | "AFTER_HOURS_CLOSE" | "OLD_AFTER_HOURS_SINGLE_PRICE" | "KRX_AFTER_MARKET" | "CLOSED";
+export const KRX_SESSION_LABELS: Record<KrxSession, string> = {
+  REGULAR: "정규장", AFTER_HOURS_CLOSE: "장후종가",
+  OLD_AFTER_HOURS_SINGLE_PRICE: "시간외단일가", KRX_AFTER_MARKET: "애프터마켓", CLOSED: "장마감",
+};
+export function krxRegime(date: string) {
+  return date < KRX_AFTER_MARKET_EFFECTIVE_DATE ? "PRE_20260914" as const : "FROM_20260914" as const;
+}
+export function getKrxSession(date: string, time: string, additional: readonly string[] = []): KrxSession {
+  if (marketClosedReason(date, additional) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) return "CLOSED";
+  if (time >= "09:00" && time < "15:30") return "REGULAR";
+  if (time >= "15:30" && time < "16:00") return "AFTER_HOURS_CLOSE";
+  if (date < KRX_AFTER_MARKET_EFFECTIVE_DATE && time >= "16:00" && time < "18:00") return "OLD_AFTER_HOURS_SINGLE_PRICE";
+  if (date >= KRX_AFTER_MARKET_EFFECTIVE_DATE && time >= "16:00" && time < "20:00") return "KRX_AFTER_MARKET";
+  return "CLOSED";
+}
+// Keep the existing collector's 15:30 observation. This is NOT a claim that
+// a response fetched at 15:30 contains exchange-certified closing prices.
+export function isRegularObservation(date: string, time: string, additional: readonly string[] = []) {
+  return !marketClosedReason(date, additional) && /^(?:09|1[0-4]):[0-5]\d$|^15:(?:[0-2]\d|30)$/.test(time);
+}
+export function getKrxMarketStatus(now: Date = new Date(), additional: readonly string[] = []) {
+  if (!Number.isFinite(now.getTime())) throw new RangeError("Invalid market timestamp");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(now);
+  const part = (key: string) => parts.find(p => p.type === key)!.value;
+  const tradeDate = `${part("year")}-${part("month")}-${part("day")}`;
+  const time = `${part("hour")}:${part("minute")}`;
+  const session = getKrxSession(tradeDate, time, additional);
+  return {
+    exchange: "KRX" as const, timeZone: "Asia/Seoul" as const, tradeDate, time,
+    asOf: now.toISOString(), session, label: KRX_SESSION_LABELS[session],
+    regime: krxRegime(tradeDate), closedReason: marketClosedReason(tradeDate, additional),
+    regularObservationAllowed: isRegularObservation(tradeDate, time, additional),
+    officialCloseTime: "15:30", regularCloseVerified: false,
+    // TODO: verify KIS field semantics, timestamps, venue and session counters
+    // before adding an adapter. Never substitute an index or an old auction quote.
+    afterMarket: { availability: "NOT_CONNECTED" as const, collectionEnabled: false,
+      realtimeSessionSupport: "DOCUMENTED" as const,
+      marketAggregateSupport: "NOT_VERIFIED" as const,
+      price: null, changeFromRegularClosePct: null, volume: null, turnover: null },
+  };
+}

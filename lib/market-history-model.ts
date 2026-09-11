@@ -32,6 +32,10 @@ function readFlows(value: unknown, source: string): Flows {
 }
 export function dailyFromRecord(value: unknown): DailyMarket | null {
   const stored = record(value), raw = record(stored.snapshot ?? value);
+  // Legacy untagged records remain valid. Explicit other/unknown sessions never
+  // enter regular daily, monthly, position or Pulse calculations.
+  const extraSession = record(raw.market_data).session;
+  if ([stored.session, raw.session, extraSession].some(s => s != null && s !== "REGULAR")) return null;
   const date = String(stored.trade_date ?? raw.createdat ?? "").slice(0,10);
   if (!isValidDate(date) || marketClosedReason(date)) return null;
   const row = normalizeRow(raw,date), extra = record(raw.market_data);
@@ -129,4 +133,18 @@ export function estimatePositions(days: DailyMarket[], market: Market, start: st
   for(const p of positions)for(const lot of p.lots){const bin=Math.min(9,Math.floor((lot.price-low)/width));distribution[bin][p.key]+=lot.units*lot.price;}
   return {positions,chart,distribution:prices.length?distribution:[],currentPrice,priceDate:priceDay?.date??null,priceTime:priceDay?.time??null,
     closedDays:selected.filter(d=>d.finalized).length,excludedDays:selected.filter(d=>!d.finalized).length};
+}
+
+// Separate contract for future calendar/quote panels. Never merge into DailyMarket
+// or monthlySummary; comparisons must group by session, regime, venue and symbol.
+export type SessionQuote = {
+  tradeDate: string; market: "KOSPI" | "KOSDAQ"; symbol: string;
+  venue: "KRX"; session: "AFTER_HOURS_CLOSE" | "OLD_AFTER_HOURS_SINGLE_PRICE" | "KRX_AFTER_MARKET";
+  timestamp: string; price: number | null; volume: number | null; turnover: number | null;
+  regularClose: number | null; regularCloseVerified: boolean;
+};
+export function afterChangePct(quote: SessionQuote): number | null {
+  return quote.regularCloseVerified && quote.regularClose !== null && Number.isFinite(quote.regularClose)
+    && quote.regularClose > 0 && quote.price !== null && Number.isFinite(quote.price) && quote.price > 0
+    ? (quote.price / quote.regularClose - 1) * 100 : null;
 }
