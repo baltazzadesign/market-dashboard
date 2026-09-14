@@ -169,14 +169,28 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
     signal: AbortSignal.timeout(12000),
   });
 
+  // Supabase/PostgREST의 `Prefer: return=minimal` 응답은
+  // 상태코드가 200/201이어도 body가 비어 있을 수 있습니다.
+  // 빈 body에 res.json()을 호출하면
+  // `Unexpected end of JSON input`이 발생하므로 먼저 text로 안전하게 읽습니다.
+  const responseText = await res.text();
+
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Supabase 요청 실패 ${res.status}: ${text}`);
+    throw new Error(
+      `Supabase 요청 실패 ${res.status}: ${responseText || res.statusText || "empty response"}`
+    );
   }
 
-  if (res.status === 204) return null;
+  if (res.status === 204 || !responseText.trim()) {
+    return null;
+  }
 
-  return res.json();
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    // 정상 응답인데 JSON이 아닌 경우에도 저장 성공 자체를 실패로 오인하지 않습니다.
+    return responseText;
+  }
 }
 
 function normalizeMinuteValue(time: string) {
