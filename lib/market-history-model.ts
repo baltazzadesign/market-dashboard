@@ -39,7 +39,16 @@ export function dailyFromRecord(value: unknown): DailyMarket | null {
   const date = String(stored.trade_date ?? raw.createdat ?? "").slice(0,10);
   if (!isValidDate(date) || marketClosedReason(date)) return null;
   const row = normalizeRow(raw,date), extra = record(raw.market_data);
-  if (row.minute < 540 || row.minute > 930 || row.up+row.down+row.flat <= 0) return null;
+  if (row.minute < 540 || row.minute > 930) return null;
+
+  const breadthTotal = row.up + row.down + row.flat;
+  const breadthSource = String(extra.breadthSource ?? row.breadthSource ?? "UNKNOWN");
+  const breadthUnavailable = ["FALLBACK","ERROR","SKIPPED","EMPTY","FILTERED"].includes(breadthSource);
+
+  // 과거의 출처 미표시 0/0/0 행은 계속 폐기합니다.
+  // 새 collector가 BREADTH_SKIPPED로 명시한 행만 지수/수급 이력을 살려서 사용합니다.
+  if (breadthTotal <= 0 && !breadthUnavailable) return null;
+
   const index = (key: Market): IndexSnapshot => {
     const data = record(extra[key]), source = String(data.flowSource ?? "UNKNOWN");
     return { price: extra.version === 1 ? numeric(data.price) : row[key], changePct: numeric(data.changePct), turnover: numeric(data.turnover),
@@ -47,7 +56,7 @@ export function dailyFromRecord(value: unknown): DailyMarket | null {
       priceSource: String(data.priceSource ?? "UNKNOWN") };
   };
   const kospi=index("kospi"),kosdaq=index("kosdaq");
-  const breadthValid = !["FALLBACK","ERROR","SKIPPED","EMPTY","FILTERED"].includes(row.breadthSource);
+  const breadthValid = breadthTotal > 0 && !breadthUnavailable;
   const flows = readFlows({foreign:row.foreignFlow,institution:row.instFlow,individual:row.indivFlow},row.flowSource);
   const turnover = kospi.turnover !== null && kosdaq.turnover !== null ? kospi.turnover+kosdaq.turnover : null;
   return {date,time:row.time,finalized:row.minute===930,legacy:extra.version!==1,

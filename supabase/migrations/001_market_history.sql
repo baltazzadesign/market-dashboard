@@ -23,13 +23,17 @@ create table if not exists public.market_daily (
  updated_at timestamptz not null default now(),
  constraint market_daily_snapshot_date check (snapshot->>'createdat'=trade_date::text)
 );
-comment on table public.market_daily is 'Latest regular-session snapshot per KST date; flows and turnover are daily cumulative, never summed intraday. 15:30 snapshot is closing observation, not exchange-certified data.';
+comment on table public.market_daily is 'Latest regular-session snapshot per KST date; index/flow snapshots remain valid when breadth is explicitly BREADTH_SKIPPED. Missing breadth must be treated as unavailable, never as zero. 15:30 snapshot is closing observation, not exchange-certified data.';
 create or replace function public.capture_market_daily() returns trigger
 language plpgsql security definer set search_path=pg_catalog,public as $$
 begin
  if new.createdat::text !~ '^\d{4}-\d{2}-\d{2}$'
    or new.time::text !~ '^(09|1[0-4]):[0-5][0-9]$|^15:([0-2][0-9]|30)$'
-   or coalesce(new.up,0)+coalesce(new.down,0)+coalesce(new.flat,0)<=0 then return new; end if;
+   or (
+     coalesce(new.up,0)+coalesce(new.down,0)+coalesce(new.flat,0)<=0
+     and coalesce(new.marketstate,'') not like '%BREADTH_SKIPPED%'
+   )
+ then return new; end if;
  insert into public.market_daily(trade_date,snapshot,updated_at)
  values (new.createdat::date,to_jsonb(new)-'signals',now())
  on conflict(trade_date) do update set snapshot=excluded.snapshot,updated_at=now()
@@ -47,7 +51,10 @@ select distinct on (createdat) createdat::date,to_jsonb(l)-'signals'
 from public.logs l
 where createdat::text ~ '^\d{4}-\d{2}-\d{2}$'
  and time::text ~ '^(09|1[0-4]):[0-5][0-9]$|^15:([0-2][0-9]|30)$'
- and coalesce(up,0)+coalesce(down,0)+coalesce(flat,0)>0
+ and (
+   coalesce(up,0)+coalesce(down,0)+coalesce(flat,0)>0
+   or coalesce(marketstate,'') like '%BREADTH_SKIPPED%'
+ )
 order by createdat,time desc,id desc
 on conflict(trade_date) do update set snapshot=excluded.snapshot,updated_at=now()
 where (excluded.snapshot->>'time') >= (market_daily.snapshot->>'time');

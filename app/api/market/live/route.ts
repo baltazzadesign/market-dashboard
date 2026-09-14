@@ -18,9 +18,6 @@ let cachedToken: string | null = null;
 let cachedTokenExpireAt = 0;
 let tokenPromise: Promise<string> | null = null;
 let tokenCooldownUntil = 0;
-let cachedWsApprovalKey: string | null = null;
-let cachedWsApprovalExpireAt = 0;
-let wsApprovalPromise: Promise<string> | null = null;
 let lastSavedMinute = "";
 let memoryPrevDiff = 0;
 let memoryPrevFlowPower = 0;
@@ -38,11 +35,6 @@ let memoryLastBreadth: {
 const FLOW_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
 const KIS_FETCH_TIMEOUT_MS = Number(process.env.KIS_FETCH_TIMEOUT_MS ?? 8000);
 const KIS_BASE = process.env.KIS_BASE ?? "https://openapi.koreainvestment.com:9443";
-const KIS_WS_URL = process.env.KIS_WS_URL ?? "ws://ops.koreainvestment.com:21000";
-const KIS_WS_TIMEOUT_MS = Number(process.env.KIS_WS_TIMEOUT_MS ?? 10000);
-// KIS 공식 예제는 WebSocket approval key를 24시간 단위로 재인증합니다.
-// 서버리스 메모리 캐시는 그보다 짧은 23시간만 재사용합니다.
-const KIS_WS_APPROVAL_CACHE_MS = 23 * 60 * 60 * 1000;
 const CUSTTYPE = process.env.KIS_CUSTTYPE ?? "P";
 
 type FlowData = {
@@ -71,22 +63,6 @@ type BreadthData = {
   price: number;
   sectorRaw?: any;
   raw?: any;
-};
-
-type RealtimeIndexBreadth = {
-  // H0UPCNT0가 실제 데이터 프레임 안에 돌려준 업종코드입니다.
-  // KOSDAQ 후보키 10001은 반드시 REST KOSDAQ 지수값과 교차검증한 뒤에만 사용합니다.
-  code: string;
-  up: number;
-  down: number;
-  flat: number;
-  price: number;
-  receivedAt: number;
-};
-
-type RealtimeIndexBreadthPair = {
-  kospi?: RealtimeIndexBreadth;
-  kosdaq?: RealtimeIndexBreadth;
 };
 
 const MIN_NORMAL_BREADTH_TOTAL = 1500;
@@ -385,11 +361,22 @@ function getMarketSnapshotInvalidReason(row: SupabaseLogPayload) {
   const down = toNumber(row.down);
   const flat = toNumber(row.flat);
   const total = up + down + flat;
+  const marketData = row.market_data ?? {};
+  const breadthSource = String(
+    marketData.breadthSource ??
+      (/BREADTH_([A-Z]+)/.exec(String(row.marketstate ?? ""))?.[1] ?? "LIVE")
+  );
+  const breadthMissing = ["SKIPPED", "EMPTY", "ERROR", "FILTERED"].includes(breadthSource);
 
-  if (total <= 0) return `breadth total is zero: total=${total}`;
-  if (total < MIN_NORMAL_BREADTH_TOTAL) return `breadth total too small: total=${total}`;
-  if (total >= MAX_NORMAL_BREADTH_TOTAL) return `breadth total too large: total=${total}`;
-  if (up <= 0 || down <= 0) return `breadth up/down invalid: up=${up}, down=${down}`;
+  // breadth가 명시적으로 결측이어도 지수/수급 snapshot 자체는 유효합니다.
+  // 단, LIVE로 표시된 breadth는 기존 강한 검증을 그대로 적용합니다.
+  if (!breadthMissing && breadthSource === "LIVE") {
+    if (total <= 0) return `breadth total is zero: total=${total}`;
+    if (total < MIN_NORMAL_BREADTH_TOTAL) return `breadth total too small: total=${total}`;
+    if (total >= MAX_NORMAL_BREADTH_TOTAL) return `breadth total too large: total=${total}`;
+    if (up <= 0 || down <= 0) return `breadth up/down invalid: up=${up}, down=${down}`;
+  }
+
   if (toNumber(row.kospi) <= MIN_VALID_INDEX_KOSPI) return `kospi invalid: kospi=${row.kospi}`;
   if (toNumber(row.kosdaq) <= MIN_VALID_INDEX_KOSDAQ) return `kosdaq invalid: kosdaq=${row.kosdaq}`;
 
@@ -912,402 +899,6 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
   }
 }
 
-
-// KIS WebSocket 접속키 발급.
-// 공식 샘플의 /oauth2/Approval + secretkey 규격을 그대로 사용합니다.
-async function getKisWsApprovalKey() {
-  const appkey = process.env.KIS_APPKEY;
-  const appsecret = process.env.KIS_APPSECRET;
-
-  if (!appkey || !appsecret) {
-    throw new Error("KIS_APPKEY 또는 KIS_APPSECRET 없음");
-  }
-
-  const now = Date.now();
-  if (cachedWsApprovalKey && now < cachedWsApprovalExpireAt) {
-    return cachedWsApprovalKey;
-  }
-
-  if (wsApprovalPromise) {
-    return wsApprovalPromise;
-  }
-
-  wsApprovalPromise = (async () => {
-    const res = await fetchWithTimeout(
-      `${KIS_BASE}/oauth2/Approval`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "client_credentials",
-          appkey,
-          secretkey: appsecret,
-        }),
-        cache: "no-store",
-      },
-      Math.min(KIS_FETCH_TIMEOUT_MS, 6000)
-    );
-
-    const raw = await res.text();
-    let json: any = null;
-
-    try {
-      json = JSON.parse(raw);
-    } catch {
-      throw new Error(`KIS WebSocket approval 응답 JSON 파싱 실패: ${raw.slice(0, 300)}`);
-    }
-
-    if (!res.ok || !json?.approval_key) {
-      throw new Error(
-        `KIS WebSocket approval 발급 실패 ${res.status}: ${String(
-          json?.error_description ?? json?.msg1 ?? raw
-        ).slice(0, 300)}`
-      );
-    }
-
-    cachedWsApprovalKey = String(json.approval_key);
-    cachedWsApprovalExpireAt = Date.now() + KIS_WS_APPROVAL_CACHE_MS;
-    return cachedWsApprovalKey;
-  })();
-
-  try {
-    return await wsApprovalPromise;
-  } finally {
-    wsApprovalPromise = null;
-  }
-}
-
-function buildKisWsSubscribeMessage(approvalKey: string, code: "0001" | "10001") {
-  return JSON.stringify({
-    header: {
-      approval_key: approvalKey,
-      custtype: CUSTTYPE,
-      tr_type: "1",
-      "content-type": "utf-8",
-    },
-    body: {
-      input: {
-        tr_id: "H0UPCNT0",
-        tr_key: code,
-      },
-    },
-  });
-}
-
-async function websocketDataToText(data: any) {
-  if (typeof data === "string") return data;
-
-  if (data instanceof ArrayBuffer) {
-    return new TextDecoder().decode(data);
-  }
-
-  if (ArrayBuffer.isView(data)) {
-    return new TextDecoder().decode(
-      new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-    );
-  }
-
-  if (data && typeof data.text === "function") {
-    return await data.text();
-  }
-
-  return String(data ?? "");
-}
-
-function parseH0upcnt0Row(values: string[]): RealtimeIndexBreadth | null {
-  // KIS H0UPCNT0 컬럼 순서 (0-based):
-  // 0 bstp_cls_code, 2 prpr_nmix,
-  // 23 ascn_issu_cnt, 24 stnr_issu_cnt, 25 down_issu_cnt
-  const code = String(values[0] ?? "").trim();
-  if (!code) return null;
-
-  const up = toNumber(values[23]);
-  const flat = toNumber(values[24]);
-  const down = toNumber(values[25]);
-  const price = toNumber(values[2]);
-
-  if (!Number.isFinite(price) || price <= 0) return null;
-
-  return {
-    code,
-    up,
-    down,
-    flat,
-    price,
-    receivedAt: Date.now(),
-  };
-}
-
-function isRealtimeIndexPriceClose(actual: number, expected: number, tolerance = 0.02) {
-  if (!Number.isFinite(actual) || actual <= 0) return false;
-  if (!Number.isFinite(expected) || expected <= 0) return false;
-
-  return Math.abs(actual - expected) / expected <= tolerance;
-}
-
-async function fetchRealtimeIndexBreadthPair(
-  expectedKospiPrice: number,
-  expectedKosdaqPrice: number
-): Promise<RealtimeIndexBreadthPair> {
-  const WebSocketCtor = globalThis.WebSocket;
-
-  if (typeof WebSocketCtor !== "function") {
-    throw new Error("현재 Node 런타임에 WebSocket 전역 객체가 없습니다.");
-  }
-
-  const approvalKey = await getKisWsApprovalKey();
-
-  return await new Promise<RealtimeIndexBreadthPair>((resolve) => {
-    const result: RealtimeIndexBreadthPair = {};
-    let settled = false;
-    let socket: WebSocket | null = null;
-
-    const finish = (reason: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-
-      try {
-        if (socket && socket.readyState === 1) socket.close(1000, "breadth snapshot complete");
-      } catch {
-        // 연결 종료 실패는 snapshot 결과에 영향을 주지 않습니다.
-      }
-
-      console.log("BREADTH_WS_FINISH", {
-        reason,
-        kospi: result.kospi
-          ? { up: result.kospi.up, down: result.kospi.down, flat: result.kospi.flat }
-          : null,
-        kosdaq: result.kosdaq
-          ? { up: result.kosdaq.up, down: result.kosdaq.down, flat: result.kosdaq.flat }
-          : null,
-      });
-
-      resolve(result);
-    };
-
-    const timeoutId = setTimeout(() => {
-      console.warn("BREADTH_WS_TIMEOUT", {
-        timeoutMs: KIS_WS_TIMEOUT_MS,
-        receivedKospi: Boolean(result.kospi),
-        receivedKosdaq: Boolean(result.kosdaq),
-      });
-      finish("timeout");
-    }, KIS_WS_TIMEOUT_MS);
-
-    try {
-      socket = new WebSocketCtor(KIS_WS_URL);
-    } catch (error) {
-      clearTimeout(timeoutId);
-      console.warn("BREADTH_WS_CONNECT_FAILED", { error: String(error) });
-      resolve(result);
-      return;
-    }
-
-    socket.addEventListener("open", () => {
-      try {
-        socket?.send(buildKisWsSubscribeMessage(approvalKey, "0001"));
-
-        // KOSDAQ 실시간 지수 후보키 10001을 검증합니다.
-        // 수신 데이터는 REST KOSDAQ 지수값과 2% 이내일 때만 KOSDAQ으로 인정합니다.
-        setTimeout(() => {
-          try {
-            if (socket?.readyState === 1) {
-              socket.send(buildKisWsSubscribeMessage(approvalKey, "10001"));
-            }
-          } catch (error) {
-            console.warn("BREADTH_WS_SUBSCRIBE_FAILED", {
-              code: "10001",
-              error: String(error),
-            });
-          }
-        }, 100);
-      } catch (error) {
-        console.warn("BREADTH_WS_SUBSCRIBE_FAILED", {
-          code: "0001",
-          error: String(error),
-        });
-        finish("subscribe_failed");
-      }
-    });
-
-    socket.addEventListener("message", (event: any) => {
-      void (async () => {
-        try {
-          const raw = await websocketDataToText(event?.data);
-          if (!raw) return;
-
-          // 실시간 데이터: 0|H0UPCNT0|001|...^... 형태
-          if (raw[0] === "0" || raw[0] === "1") {
-            const parts = raw.split("|");
-            if (parts.length < 4 || parts[1] !== "H0UPCNT0") return;
-
-            // 실제 수신 프레임 확인용. snapshot 함수는 두 지수를 받으면 즉시 종료하므로
-            // 정상 상황에서는 로그가 과도하게 쌓이지 않습니다.
-            console.log("BREADTH_WS_RAW", raw.slice(0, 1600));
-
-            // H0UPCNT0는 비암호화(0) 시세를 사용합니다.
-            if (raw[0] !== "0") {
-              console.warn("BREADTH_WS_ENCRYPTED_UNEXPECTED", { trId: parts[1] });
-              return;
-            }
-
-            // KIS H0UPCNT0 공식 응답 컬럼은 총 30개(0~29)입니다.
-            const fieldCount = 30;
-            const count = Math.max(1, Number(parts[2]) || 1);
-            const values = parts.slice(3).join("|").split("^");
-
-            for (let i = 0; i < count; i += 1) {
-              const rowValues = values.slice(i * fieldCount, (i + 1) * fieldCount);
-              const parsed = parseH0upcnt0Row(rowValues);
-              if (!parsed) continue;
-
-              const kospiPriceMatch =
-                parsed.code === "0001" &&
-                isRealtimeIndexPriceClose(parsed.price, expectedKospiPrice);
-
-              // 10001 구독에 대한 실제 데이터 코드가 10001 또는 1001로 돌아올 가능성을
-              // 모두 관찰하되, 가격이 REST KOSDAQ 지수와 일치할 때만 사용합니다.
-              const kosdaqCandidateCode =
-                parsed.code === "10001" || parsed.code === "1001";
-              const kosdaqPriceMatch =
-                kosdaqCandidateCode &&
-                isRealtimeIndexPriceClose(parsed.price, expectedKosdaqPrice);
-
-              if (kospiPriceMatch) {
-                result.kospi = parsed;
-              }
-
-              if (kosdaqPriceMatch) {
-                result.kosdaq = parsed;
-              }
-
-              const market =
-                kospiPriceMatch
-                  ? "KOSPI"
-                  : kosdaqPriceMatch
-                    ? "KOSDAQ"
-                    : "UNMATCHED";
-
-              console.log("BREADTH_WS_RESULT", {
-                market,
-                code: parsed.code,
-                up: parsed.up,
-                down: parsed.down,
-                flat: parsed.flat,
-                total: parsed.up + parsed.down + parsed.flat,
-                price: parsed.price,
-                expectedKospiPrice,
-                expectedKosdaqPrice,
-                kospiPriceMatch,
-                kosdaqPriceMatch,
-              });
-
-              if (market === "UNMATCHED") {
-                console.warn("BREADTH_WS_PRICE_MISMATCH", {
-                  code: parsed.code,
-                  price: parsed.price,
-                  expectedKospiPrice,
-                  expectedKosdaqPrice,
-                });
-              }
-            }
-
-            if (result.kospi && result.kosdaq) {
-              finish("both_received");
-            }
-            return;
-          }
-
-          // 구독 ACK / PINGPONG JSON 메시지
-          if (raw.trim().startsWith("{")) {
-            let message: any = null;
-            try {
-              message = JSON.parse(raw);
-            } catch {
-              return;
-            }
-
-            const trId = String(message?.header?.tr_id ?? "");
-            if (trId === "PINGPONG") {
-              // 공식 샘플 중 send(data) 방식과 동일하게 echo합니다.
-              try {
-                if (socket?.readyState === 1) socket.send(raw);
-              } catch {
-                // 짧은 snapshot 연결에서는 ping 응답 실패 시 timeout으로 자연스럽게 종료됩니다.
-              }
-              return;
-            }
-
-            const rtCd = String(message?.body?.rt_cd ?? "");
-            const msg1 = String(message?.body?.msg1 ?? "");
-            const trKey = String(message?.header?.tr_key ?? "");
-
-            if (rtCd === "1") {
-              console.warn("BREADTH_WS_ACK_ERROR", { trId, trKey, msg1 });
-
-              // approval key 관련 오류일 가능성에 대비해 다음 요청에서 재발급합니다.
-              if (/approval|key|인증|접속/i.test(msg1)) {
-                cachedWsApprovalKey = null;
-                cachedWsApprovalExpireAt = 0;
-              }
-            } else if (rtCd === "0") {
-              console.log("BREADTH_WS_ACK", { trId, trKey, msg1 });
-            }
-          }
-        } catch (error) {
-          console.warn("BREADTH_WS_MESSAGE_ERROR", { error: String(error) });
-        }
-      })();
-    });
-
-    socket.addEventListener("error", (event: any) => {
-      console.warn("BREADTH_WS_ERROR", {
-        message: String(event?.message ?? "WebSocket error"),
-      });
-      finish("error");
-    });
-
-    socket.addEventListener("close", (event: any) => {
-      if (!settled) {
-        console.warn("BREADTH_WS_CLOSED_EARLY", {
-          code: event?.code,
-          reason: event?.reason,
-        });
-        finish("closed_early");
-      }
-    });
-  });
-}
-
-function applyRealtimeIndexBreadth(target: BreadthData, realtime: RealtimeIndexBreadth) {
-  target.up = realtime.up;
-  target.down = realtime.down;
-  target.flat = realtime.flat;
-
-  if (target.price <= 0 && realtime.price > 0) {
-    target.price = realtime.price;
-  }
-
-  const existingOutput1 =
-    target.raw?.output1 && !Array.isArray(target.raw.output1) && typeof target.raw.output1 === "object"
-      ? target.raw.output1
-      : {};
-
-  target.raw = {
-    ...(target.raw ?? {}),
-    output1: {
-      ...existingOutput1,
-      bstp_cls_code: realtime.code,
-      bstp_nmix_prpr: String(target.price > 0 ? target.price : realtime.price),
-      ascn_issu_cnt: String(realtime.up),
-      stnr_issu_cnt: String(realtime.flat),
-      down_issu_cnt: String(realtime.down),
-    },
-    breadthSnapshotTrId: "H0UPCNT0",
-    breadthSnapshotSource: "WEBSOCKET_FALLBACK",
-  };
-}
 
 function normalizeFlowUnit(value: number) {
   // TR_074 금액 필드는 실제 증권사 화면의 억원 단위보다 100배 크게 내려옵니다.
@@ -2063,59 +1654,10 @@ export async function GET(req: Request) {
       getLatestNormalBreadthRowFromSupabase(createdat),
     ]);
 
-    let liveUp = kospiData.up + kosdaqData.up;
-    let liveDown = kospiData.down + kosdaqData.down;
-    let liveFlat = kospiData.flat + kosdaqData.flat;
-    let liveTotal = liveUp + liveDown + liveFlat;
-    let liveBreadthTransport: "REST_063_066" | "H0UPCNT0" = "REST_063_066";
-
-    // 063/066 REST가 지수 가격은 주면서 시장폭만 0으로 반환하는 경우가 있어
-    // 실제 실시간 국내지수 WebSocket(H0UPCNT0)을 1회 조회하고, REST 지수값과 교차검증된 시장만 보완합니다.
-    if (liveTotal <= 0) {
-      try {
-        const wsBreadth = await fetchRealtimeIndexBreadthPair(kospiData.price, kosdaqData.price);
-        const before = { up: liveUp, down: liveDown, flat: liveFlat, total: liveTotal };
-        const applied: string[] = [];
-
-        if (
-          wsBreadth.kospi &&
-          wsBreadth.kospi.up + wsBreadth.kospi.down + wsBreadth.kospi.flat > 0
-        ) {
-          applyRealtimeIndexBreadth(kospiData, wsBreadth.kospi);
-          applied.push("0001");
-        }
-
-        if (
-          wsBreadth.kosdaq &&
-          wsBreadth.kosdaq.up + wsBreadth.kosdaq.down + wsBreadth.kosdaq.flat > 0
-        ) {
-          applyRealtimeIndexBreadth(kosdaqData, wsBreadth.kosdaq);
-          applied.push(`KOSDAQ:${wsBreadth.kosdaq.code}`);
-        }
-
-        liveUp = kospiData.up + kosdaqData.up;
-        liveDown = kospiData.down + kosdaqData.down;
-        liveFlat = kospiData.flat + kosdaqData.flat;
-        liveTotal = liveUp + liveDown + liveFlat;
-
-        if (applied.length > 0) {
-          liveBreadthTransport = "H0UPCNT0";
-          console.warn("BREADTH_WS_FALLBACK_APPLIED", {
-            applied,
-            before,
-            after: { up: liveUp, down: liveDown, flat: liveFlat, total: liveTotal },
-          });
-        } else {
-          console.warn("BREADTH_WS_FALLBACK_EMPTY", {
-            restTotal: before.total,
-            receivedKospi: Boolean(wsBreadth.kospi),
-            receivedKosdaq: Boolean(wsBreadth.kosdaq),
-          });
-        }
-      } catch (error) {
-        console.warn("BREADTH_WS_FALLBACK_FAILED", { error: String(error) });
-      }
-    }
+    const liveUp = kospiData.up + kosdaqData.up;
+    const liveDown = kospiData.down + kosdaqData.down;
+    const liveFlat = kospiData.flat + kosdaqData.flat;
+    const liveTotal = liveUp + liveDown + liveFlat;
 
     const memoryBreadthRow = getMemoryBreadthFallbackRow();
     const prevNormalRow =
@@ -2125,60 +1667,82 @@ export async function GET(req: Request) {
     const prevNormalTotal = getBreadthTotal(prevNormalRow);
 
     let breadthSource: BreadthSource = "LIVE";
-    let breadthFallbackReason =
-      liveBreadthTransport === "H0UPCNT0"
-        ? "REST 063/066 breadth=0 -> H0UPCNT0 WebSocket live fallback"
-        : "";
+    let breadthFallbackReason = "";
 
     let up = liveUp;
     let down = liveDown;
     let flat = liveFlat;
 
-    if (shouldFallbackBreadth(liveTotal, prevNormalTotal) && prevNormalRow) {
-      breadthSource = "FALLBACK";
-      breadthFallbackReason =
-        liveTotal < MIN_NORMAL_BREADTH_TOTAL
-          ? `live breadth 합산 총합 비정상/결측: current=${liveTotal}, prev=${prevNormalTotal}`
-          : `live breadth 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
-      up = toNumber(prevNormalRow.up);
-      down = toNumber(prevNormalRow.down);
-      flat = toNumber(prevNormalRow.flat);
+    if (shouldFallbackBreadth(liveTotal, prevNormalTotal)) {
+      if (prevNormalRow) {
+        breadthSource = "FALLBACK";
+        breadthFallbackReason =
+          liveTotal < MIN_NORMAL_BREADTH_TOTAL
+            ? `live breadth 합산 총합 비정상/결측: current=${liveTotal}, prev=${prevNormalTotal}`
+            : `live breadth 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
+        up = toNumber(prevNormalRow.up);
+        down = toNumber(prevNormalRow.down);
+        flat = toNumber(prevNormalRow.flat);
 
-      console.warn("⚠️ live breadth 급감 감지, 직전 정상값으로 대체:", {
-        time: timeStr,
-        liveTotal,
-        prevNormalTotal,
-        live: { up: liveUp, down: liveDown, flat: liveFlat },
-        fallback: { up, down, flat },
-      });
+        console.warn("⚠️ live breadth 급감 감지, 직전 정상값으로 대체:", {
+          time: timeStr,
+          liveTotal,
+          prevNormalTotal,
+          live: { up: liveUp, down: liveDown, flat: liveFlat },
+          fallback: { up, down, flat },
+        });
+      } else {
+        // 지수/수급은 정상인데 KIS breadth만 결측인 경우 전체 snapshot을 버리지 않습니다.
+        // 0은 실제 시장폭으로 취급하지 않고 명시적으로 SKIPPED 상태로 저장합니다.
+        breadthSource = "SKIPPED";
+        breadthFallbackReason = `breadth unavailable: liveTotal=${liveTotal}, no normal fallback`;
+        up = 0;
+        down = 0;
+        flat = 0;
+
+        console.warn("⚠️ breadth 결측 - 지수/수급 snapshot은 계속 저장:", {
+          time: timeStr,
+          liveTotal,
+          prevNormalTotal,
+          kospi: kospiData.price,
+          kosdaq: kosdaqData.price,
+        });
+      }
     }
 
     const diff = up - down;
     const total = up + down + flat;
+    const breadthAvailable =
+      breadthSource === "LIVE" &&
+      total >= MIN_NORMAL_BREADTH_TOTAL &&
+      total < MAX_NORMAL_BREADTH_TOTAL &&
+      up > 0 &&
+      down > 0;
 
-    const upRatio = total > 0 ? up / total : 0;
-    const downRatio = total > 0 ? down / total : 0;
+    const upRatio = breadthAvailable ? up / total : 0;
+    const downRatio = breadthAvailable ? down / total : 0;
 
     const recentRowsFromMemory = memoryRecentRows.slice(-3);
     const recentRows = recentRowsFromMemory.length > 0
       ? recentRowsFromMemory
-      : latestDbRow
+      : prevNormalRow
         ? [
             {
-              diff: toNumber(latestDbRow.diff),
-              foreignFlow: toNumber(latestDbRow.foreignflow),
-              instFlow: toNumber(latestDbRow.instflow),
+              diff: toNumber(prevNormalRow.diff),
+              foreignFlow: toNumber(prevNormalRow.foreignflow),
+              instFlow: toNumber(prevNormalRow.instflow),
             },
           ]
         : [];
 
-    const prevDiff = toNumber(latestDbRow?.diff ?? memoryPrevDiff);
-    const accel = diff - prevDiff;
+    // 결측 breadth row가 저장되어도 다음 정상 breadth의 accel 기준을 오염시키지 않습니다.
+    const prevDiff = toNumber(prevNormalRow?.diff ?? memoryPrevDiff);
+    const accel = breadthAvailable ? diff - prevDiff : 0;
 
     const kospi = kospiData.price > 0 ? kospiData.price : toNumber(prevNormalRow?.kospi ?? latestDbRow?.kospi);
     const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(prevNormalRow?.kosdaq ?? latestDbRow?.kosdaq);
 
-    if (breadthSource === "LIVE") {
+    if (breadthAvailable) {
       rememberBreadthSnapshot(up, down, flat, kospi, kosdaq);
     }
 
@@ -2208,7 +1772,8 @@ export async function GET(req: Request) {
           : null,
         memoryLastFlow,
         memoryLastBreadth,
-        liveBreadthTransport,
+        breadthSource,
+        breadthAvailable,
         breadthFallbackReason,
       });
     }
@@ -2234,32 +1799,38 @@ export async function GET(req: Request) {
     const flowTrend = flowPower - prevFlowPower;
     const flowMomentum = Math.round(prevFlowPower * 0.7 + flowPower * 0.3);
 
-    const baseAlert = buildAlert(diff, accel, upRatio, downRatio);
-    const marketTone = buildTone(diff);
-    const marketScore = buildMarketScore(diff, upRatio, downRatio);
+    const baseAlert = breadthAvailable ? buildAlert(diff, accel, upRatio, downRatio) : "시장폭 데이터 없음";
+    const marketTone = breadthAvailable ? buildTone(diff) : "시장폭 데이터 없음";
+    const marketScore = breadthAvailable ? buildMarketScore(diff, upRatio, downRatio) : 0;
 
-    const baseSignals = buildSignals(diff, prevDiff, accel, marketScore);
+    const baseSignals = breadthAvailable ? buildSignals(diff, prevDiff, accel, marketScore) : [];
+    // breadth 결측 시 NaN을 전달하면 순수 수급/수급추세 신호는 유지되고
+    // 시장폭과 결합되는 divergence 조건만 자연스럽게 비활성화됩니다.
+    const signalDiff = breadthAvailable ? diff : Number.NaN;
+    const signalAccel = breadthAvailable ? accel : Number.NaN;
     const flowSignals = buildFlowSignals(
       foreign,
       inst,
       indiv,
-      diff,
-      accel,
+      signalDiff,
+      signalAccel,
       flowData.source,
       prevFlowPower,
-      recentRows
+      breadthAvailable ? recentRows : []
     );
     const signals = sortSignals([...baseSignals, ...flowSignals]);
     const signalAlert = buildSignalAlert(signals);
     const alert = signalAlert ?? baseAlert;
-    const baseMarketState = buildMarketState(
-      diff,
-      accel,
-      marketScore,
-      flowPower,
-      flowTrend,
-      Array.isArray(signals) && signals.length > 0 ? signals[0] : null
-    );
+    const baseMarketState = breadthAvailable
+      ? buildMarketState(
+          diff,
+          accel,
+          marketScore,
+          flowPower,
+          flowTrend,
+          Array.isArray(signals) && signals.length > 0 ? signals[0] : null
+        )
+      : "BREADTH_UNAVAILABLE";
     const marketState = `${baseMarketState}|FLOW_${flowData.source}|BREADTH_${breadthSource}`;
 
     const sectorRows = [...parseSectors(kospiData.sectorRaw ?? {},"kospi"),...parseSectors(kosdaqData.sectorRaw ?? {},"kosdaq")];
@@ -2268,8 +1839,11 @@ export async function GET(req: Request) {
       version: 2, capturedAt: now.toISOString(),
       session: "REGULAR", regime: marketStatus.regime, tradeDate: createdat,
       closeBasis: "REGULAR_SESSION_OBSERVATION", officialCloseVerified: false,
-      kospi: indexSnapshot(kospiData.raw,rawFlowData.markets?.kospi,breadthSource === "LIVE"),
-      kosdaq: indexSnapshot(kosdaqData.raw,rawFlowData.markets?.kosdaq,breadthSource === "LIVE"),
+      breadthSource,
+      breadthAvailable,
+      breadthReason: breadthFallbackReason || null,
+      kospi: indexSnapshot(kospiData.raw,rawFlowData.markets?.kospi,breadthAvailable),
+      kosdaq: indexSnapshot(kosdaqData.raw,rawFlowData.markets?.kosdaq,breadthAvailable),
     };
     const rowToSave: SupabaseLogPayload = {
       market_data: marketData,
@@ -2308,14 +1882,16 @@ export async function GET(req: Request) {
       saveSkipReason = "";
       lastSavedMinute = minuteKey;
 
-      memoryRecentRows.push({
-        diff,
-        foreignFlow: foreign,
-        instFlow: inst,
-      });
-      memoryRecentRows = memoryRecentRows.slice(-10);
+      if (breadthAvailable) {
+        memoryRecentRows.push({
+          diff,
+          foreignFlow: foreign,
+          instFlow: inst,
+        });
+        memoryRecentRows = memoryRecentRows.slice(-10);
+        memoryPrevDiff = diff;
+      }
 
-      memoryPrevDiff = diff;
       memoryPrevFlowPower = flowPower;
       if (hasFlowValue({ foreign, inst, indiv })) {
         memoryLastFlow = { foreign, inst, indiv, updatedAt: Date.now() };
@@ -2337,6 +1913,7 @@ export async function GET(req: Request) {
         foreign,
         inst,
         indiv,
+        breadthAvailable,
       });
     } else {
       console.warn(isMarketTime ? "⚠️ 비정상 데이터라 저장 생략:" : "⏸️ 정규장 시간이 아니라 저장 생략:", {
@@ -2379,6 +1956,7 @@ export async function GET(req: Request) {
       savedBreadthTotal: total,
       prevNormalBreadthTotal: prevNormalTotal,
       breadthSource,
+      breadthAvailable,
       breadthFallbackReason,
       foreign,
       inst,
