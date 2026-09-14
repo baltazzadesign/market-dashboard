@@ -39,7 +39,7 @@ const FLOW_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
 const KIS_FETCH_TIMEOUT_MS = Number(process.env.KIS_FETCH_TIMEOUT_MS ?? 8000);
 const KIS_BASE = process.env.KIS_BASE ?? "https://openapi.koreainvestment.com:9443";
 const KIS_WS_URL = process.env.KIS_WS_URL ?? "ws://ops.koreainvestment.com:21000";
-const KIS_WS_TIMEOUT_MS = Number(process.env.KIS_WS_TIMEOUT_MS ?? 4500);
+const KIS_WS_TIMEOUT_MS = Number(process.env.KIS_WS_TIMEOUT_MS ?? 10000);
 // KIS 공식 예제는 WebSocket approval key를 24시간 단위로 재인증합니다.
 // 서버리스 메모리 캐시는 그보다 짧은 23시간만 재사용합니다.
 const KIS_WS_APPROVAL_CACHE_MS = 23 * 60 * 60 * 1000;
@@ -74,7 +74,10 @@ type BreadthData = {
 };
 
 type RealtimeIndexBreadth = {
-  code: "0001" | "1001";
+  // H0UPCNT0 WebSocket 전용 코드:
+  // KOSPI=0001, KOSDAQ 후보=0002.
+  // REST의 KOSDAQ 코드 1001과 혼용하지 않습니다.
+  code: "0001" | "0002";
   up: number;
   down: number;
   flat: number;
@@ -975,7 +978,7 @@ async function getKisWsApprovalKey() {
   }
 }
 
-function buildKisWsSubscribeMessage(approvalKey: string, code: "0001" | "1001") {
+function buildKisWsSubscribeMessage(approvalKey: string, code: "0001" | "0002") {
   return JSON.stringify({
     header: {
       approval_key: approvalKey,
@@ -1017,9 +1020,9 @@ function parseH0upcnt0Row(values: string[]): RealtimeIndexBreadth | null {
   // 0 bstp_cls_code, 2 prpr_nmix,
   // 23 ascn_issu_cnt, 24 stnr_issu_cnt, 25 down_issu_cnt
   const rawCode = String(values[0] ?? "").trim();
-  if (rawCode !== "0001" && rawCode !== "1001") return null;
+  if (rawCode !== "0001" && rawCode !== "0002") return null;
 
-  const code = rawCode as "0001" | "1001";
+  const code = rawCode as "0001" | "0002";
   const up = toNumber(values[23]);
   const flat = toNumber(values[24]);
   const down = toNumber(values[25]);
@@ -1099,11 +1102,13 @@ async function fetchRealtimeIndexBreadthPair(): Promise<RealtimeIndexBreadthPair
         setTimeout(() => {
           try {
             if (socket?.readyState === 1) {
-              socket.send(buildKisWsSubscribeMessage(approvalKey, "1001"));
+              // REST KOSDAQ 코드(1001)와 달리 H0UPCNT0 WebSocket은
+              // KOSDAQ 실시간 지수 후보 코드 0002를 사용해 확인합니다.
+              socket.send(buildKisWsSubscribeMessage(approvalKey, "0002"));
             }
           } catch (error) {
             console.warn("BREADTH_WS_SUBSCRIBE_FAILED", {
-              code: "1001",
+              code: "0002",
               error: String(error),
             });
           }
@@ -1128,13 +1133,18 @@ async function fetchRealtimeIndexBreadthPair(): Promise<RealtimeIndexBreadthPair
             const parts = raw.split("|");
             if (parts.length < 4 || parts[1] !== "H0UPCNT0") return;
 
+            // 실제 수신 프레임 확인용. snapshot 함수는 두 지수를 받으면 즉시 종료하므로
+            // 정상 상황에서는 로그가 과도하게 쌓이지 않습니다.
+            console.log("BREADTH_WS_RAW", raw.slice(0, 1600));
+
             // H0UPCNT0는 비암호화(0) 시세를 사용합니다.
             if (raw[0] !== "0") {
               console.warn("BREADTH_WS_ENCRYPTED_UNEXPECTED", { trId: parts[1] });
               return;
             }
 
-            const fieldCount = 31;
+            // KIS H0UPCNT0 공식 응답 컬럼은 총 30개(0~29)입니다.
+            const fieldCount = 30;
             const count = Math.max(1, Number(parts[2]) || 1);
             const values = parts.slice(3).join("|").split("^");
 
@@ -1144,9 +1154,10 @@ async function fetchRealtimeIndexBreadthPair(): Promise<RealtimeIndexBreadthPair
               if (!parsed) continue;
 
               if (parsed.code === "0001") result.kospi = parsed;
-              if (parsed.code === "1001") result.kosdaq = parsed;
+              if (parsed.code === "0002") result.kosdaq = parsed;
 
               console.log("BREADTH_WS_RESULT", {
+                market: parsed.code === "0001" ? "KOSPI" : "KOSDAQ",
                 code: parsed.code,
                 up: parsed.up,
                 down: parsed.down,
@@ -2033,7 +2044,7 @@ export async function GET(req: Request) {
           wsBreadth.kosdaq.up + wsBreadth.kosdaq.down + wsBreadth.kosdaq.flat > 0
         ) {
           applyRealtimeIndexBreadth(kosdaqData, wsBreadth.kosdaq);
-          applied.push("1001");
+          applied.push("0002");
         }
 
         liveUp = kospiData.up + kosdaqData.up;
