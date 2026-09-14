@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const bundle=path.dirname(fileURLToPath(import.meta.url));
+const root=path.resolve(process.argv[2]||process.cwd());
+const candidates=['components/dashboard/Workspace.tsx','src/components/dashboard/Workspace.tsx'].map(p=>path.join(root,p)).filter(p=>fs.existsSync(p));
+const fail=m=>{console.error(m);process.exit(1)};
+if(candidates.length!==1) fail('Workspace.tsx를 확인하지 못했습니다. package.json이 있는 프로젝트 최상위 폴더에서 실행해 주세요.');
+const target=candidates[0];const before=fs.readFileSync(target,'utf8');const marker='<div className="topbar-meta">';const signature='data-baltagyeong-link="true"';const existing=before.split(signature).length-1;
+if(existing>1) fail('발타경 버튼이 중복되어 있습니다.');
+if(!existing&&before.split(marker).length!==2) fail('현재 헤더 구조가 다릅니다. Workspace.tsx를 확인해 주세요.');
+const source=path.join(bundle,'public','baltagyeong.html');const payload=fs.readFileSync(source);const txt=payload.toString('utf8');
+if(!txt.includes('id="part-65"')||!txt.includes('목차 · 1차~65차')) fail('65차 HTML이 완전하지 않습니다.');
+const link='<a href="/baltagyeong.html" className="button ghost" data-baltagyeong-link="true" title="발타경 읽기" aria-label="발타경 읽기" style={{display:"inline-flex",alignItems:"center",gap:7,color:"#d2b584",whiteSpace:"nowrap",flexShrink:0}}><svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5.5C9 3.8 5.5 3.5 2.5 4.5v15c3-1 6.5-.7 9.5 1 3-1.7 6.5-2 9.5-1v-15c-3-1-6.5-.7-9.5 1Z"/><path d="M12 5.5v15M6 8h2.5M6 11h2.5M15.5 8H18M15.5 11H18"/></svg><span>발타경</span></a>';
+const after=existing?before:before.replace(marker,marker+link);const dest=path.join(root,'public','baltagyeong.html');const backup=fs.mkdtempSync(path.join(root,'.baltagyeong-backup-'));fs.copyFileSync(target,path.join(backup,'Workspace.tsx'));if(fs.existsSync(dest))fs.copyFileSync(dest,path.join(backup,'baltagyeong.html'));fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,payload);fs.writeFileSync(target,after);console.log('발타경 1차~65차 업데이트 완료');console.log('변경: '+path.relative(root,target)+', public/baltagyeong.html');console.log('백업: '+path.basename(backup));
