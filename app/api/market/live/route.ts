@@ -695,9 +695,16 @@ function pickNumber(obj: any, keys: string[]) {
 // 공식 명세: 국내업종 현재지수[v1_국내주식-063].xlsx.
 // 063 output -> 지수/시장폭, 066 output2 -> 업종 목록. 서로 합산하지 않습니다.
 async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
-  const empty: BreadthData = { up: 0, down: 0, flat: 0, price: 0 };
+  const empty: BreadthData = {
+    up: 0,
+    down: 0,
+    flat: 0,
+    price: 0,
+  };
+
   try {
     const token = await getAccessToken();
+
     const headers = {
       "content-type": "application/json; charset=utf-8",
       authorization: `Bearer ${token}`,
@@ -705,57 +712,178 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
       appsecret: process.env.KIS_APPSECRET!,
       custtype: CUSTTYPE,
     };
-    const qs = new URLSearchParams({ FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: code });
-    const res = await fetchWithTimeout(
-      `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price?${qs}`,
-      { headers: { ...headers, tr_id: "FHPUP02100000" }, cache: "no-store" }
-    );
-    const data = await res.json();
-    if (!res.ok || String(data?.rt_cd) !== "0") {
-      console.warn("BREADTH_063_ERROR", { code, httpStatus: res.status, msgCode: data?.msg_cd });
-      return empty;
-    }
-    const out = data?.output;
-    const fields = ["ascn_issu_cnt", "down_issu_cnt", "stnr_issu_cnt"];
-    const validCounts = out && !Array.isArray(out) && fields.every((field) => {
-      const value = out[field];
-      if (value === null || value === undefined || String(value).trim() === "") return false;
-      const count = Number(String(value).replace(/,/g, "").trim());
-      return Number.isSafeInteger(count) && count >= 0;
-    });
-    if (!validCounts) {
-      console.warn("BREADTH_063_INVALID_FIELDS", { code, outputKeys: Object.keys(out ?? {}) });
-      return empty;
-    }
-    const result: BreadthData = {
-      up: toNumber(out.ascn_issu_cnt), down: toNumber(out.down_issu_cnt),
-      flat: toNumber(out.stnr_issu_cnt), price: toNumber(out.bstp_nmix_prpr),
-      // 기존 indexSnapshot의 output1 우선 읽기와도 호환되는 명시적 어댑터입니다.
-      raw: { ...data, output1: out, snapshotTrId: "FHPUP02100000" },
-    };
-    console.log("BREADTH_063_RESULT", { code, up: result.up, down: result.down,
-      flat: result.flat, total: result.up + result.down + result.flat, price: result.price });
 
-    // 업종 조회 실패가 정상 시장폭/지수 저장을 막지 않도록 별도 처리합니다.
+    // 1) 063 국내업종 현재지수: 지수 + 시장폭 1차 소스
+    const qs063 = new URLSearchParams({
+      FID_COND_MRKT_DIV_CODE: "U",
+      FID_INPUT_ISCD: code,
+    });
+
+    const res063 = await fetchWithTimeout(
+      `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price?${qs063}`,
+      {
+        headers: {
+          ...headers,
+          tr_id: "FHPUP02100000",
+        },
+        cache: "no-store",
+      }
+    );
+
+    const data063 = await res063.json();
+
+    if (!res063.ok || String(data063?.rt_cd) !== "0") {
+      console.warn("BREADTH_063_ERROR", {
+        code,
+        httpStatus: res063.status,
+        msgCode: data063?.msg_cd,
+        msg: data063?.msg1,
+      });
+    }
+
+    const out063 =
+      data063?.output && !Array.isArray(data063.output)
+        ? data063.output
+        : {};
+
+    let up = toNumber(out063?.ascn_issu_cnt);
+    let down = toNumber(out063?.down_issu_cnt);
+    let flat = toNumber(out063?.stnr_issu_cnt);
+    let price = toNumber(out063?.bstp_nmix_prpr);
+
+    const total063 = up + down + flat;
+
+    console.log("BREADTH_063_RESULT", {
+      code,
+      up,
+      down,
+      flat,
+      total: total063,
+      price,
+      rawCounts: {
+        ascn_issu_cnt: out063?.ascn_issu_cnt,
+        down_issu_cnt: out063?.down_issu_cnt,
+        stnr_issu_cnt: out063?.stnr_issu_cnt,
+        uplm_issu_cnt: out063?.uplm_issu_cnt,
+        lslm_issu_cnt: out063?.lslm_issu_cnt,
+      },
+    });
+
+    // 2) 066 국내업종 구분별전체시세:
+    //    기존 업종 데이터는 그대로 유지하고, output1의 시장폭을 063 장애 시 fallback으로 사용
+    let sectorData: any = null;
+
     try {
-      const sectorQs = new URLSearchParams({
-        FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: code,
-        FID_COND_SCR_DIV_CODE: "20214", FID_MRKT_CLS_CODE: code === "0001" ? "K" : "Q",
+      const qs066 = new URLSearchParams({
+        FID_COND_MRKT_DIV_CODE: "U",
+        FID_INPUT_ISCD: code,
+        FID_COND_SCR_DIV_CODE: "20214",
+        FID_MRKT_CLS_CODE: code === "0001" ? "K" : "Q",
         FID_BLNG_CLS_CODE: "0",
       });
-      const sectorRes = await fetchWithTimeout(
-        `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-category-price?${sectorQs}`,
-        { headers: { ...headers, tr_id: "FHPUP02140000" }, cache: "no-store" }
+
+      const res066 = await fetchWithTimeout(
+        `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-category-price?${qs066}`,
+        {
+          headers: {
+            ...headers,
+            tr_id: "FHPUP02140000",
+          },
+          cache: "no-store",
+        }
       );
-      const sectorData = await sectorRes.json();
-      if (sectorRes.ok && String(sectorData?.rt_cd) === "0") result.sectorRaw = sectorData;
-      else console.warn("SECTOR_066_ERROR", { code, httpStatus: sectorRes.status, msgCode: sectorData?.msg_cd });
-    } catch {
-      console.warn("SECTOR_066_REQUEST_FAILED", { code });
+
+      sectorData = await res066.json();
+
+      if (!res066.ok || String(sectorData?.rt_cd) !== "0") {
+        console.warn("SECTOR_066_ERROR", {
+          code,
+          httpStatus: res066.status,
+          msgCode: sectorData?.msg_cd,
+          msg: sectorData?.msg1,
+        });
+      } else {
+        const raw066 = Array.isArray(sectorData?.output1)
+          ? sectorData.output1[0]
+          : sectorData?.output1 ?? {};
+
+        const up066 = toNumber(raw066?.ascn_issu_cnt);
+        const down066 = toNumber(raw066?.down_issu_cnt);
+        const flat066 = toNumber(raw066?.stnr_issu_cnt);
+        const price066 = toNumber(raw066?.bstp_nmix_prpr);
+        const total066 = up066 + down066 + flat066;
+
+        console.log("BREADTH_066_SUMMARY", {
+          code,
+          up: up066,
+          down: down066,
+          flat: flat066,
+          total: total066,
+          price: price066,
+        });
+
+        if (total063 <= 0 && total066 > 0) {
+          up = up066;
+          down = down066;
+          flat = flat066;
+
+          if (price <= 0) {
+            price = price066;
+          }
+
+          console.warn("BREADTH_066_FALLBACK", {
+            code,
+            reason: "063 breadth total is zero",
+            up,
+            down,
+            flat,
+            total: up + down + flat,
+          });
+        }
+
+        if (total063 <= 0 && total066 <= 0) {
+          console.warn("BREADTH_KIS_ALL_ZERO", {
+            code,
+            source063: {
+              up: toNumber(out063?.ascn_issu_cnt),
+              down: toNumber(out063?.down_issu_cnt),
+              flat: toNumber(out063?.stnr_issu_cnt),
+              price: toNumber(out063?.bstp_nmix_prpr),
+            },
+            source066: {
+              up: up066,
+              down: down066,
+              flat: flat066,
+              price: price066,
+            },
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("SECTOR_066_REQUEST_FAILED", {
+        code,
+        error: String(error),
+      });
     }
-    return result;
-  } catch {
-    console.warn("BREADTH_063_REQUEST_FAILED", { code });
+
+    return {
+      up,
+      down,
+      flat,
+      price,
+      sectorRaw: sectorData,
+      raw: {
+        ...data063,
+        output1: out063,
+        snapshotTrId: "FHPUP02100000",
+      },
+    };
+  } catch (error) {
+    console.warn("BREADTH_063_REQUEST_FAILED", {
+      code,
+      error: String(error),
+    });
+
     return empty;
   }
 }
