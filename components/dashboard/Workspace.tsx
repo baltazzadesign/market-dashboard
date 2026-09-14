@@ -58,9 +58,9 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   useEffect(()=>{if(!toast)return;const id=setTimeout(()=>setToast(""),5500);return()=>clearTimeout(id);},[toast]);
   const feed=useMarketFeed(date,mode==="overview"&&date===today,settings.autoRefresh);
   const rows=feed.rows,last=rows.at(-1);
-  // 자동 신호는 기존 정규장 데이터로만 계산합니다. 장후 기록은 표/차트 조회용으로만 이어 붙입니다.
+  // 자동 신호/정규장 리포트는 기존 정규장 데이터로만 계산합니다.
+  // 상단 지표와 우측 브리핑/수급은 현재 세션의 최신 기록(last)을 사용합니다.
   const signalRows=useMemo(()=>rows.filter(row=>row.session==="REGULAR"),[rows]);
-  const regularLast=signalRows.at(-1);
   const events=useMemo(()=>buildMarketEvents(signalRows),[signalRows]);
   const status=useMemo(()=>dataStatus(last,date,feed.error,now??new Date(0)),[last,date,feed.error,now]);
   const domain=useMemo<Domain>(()=>range==="custom"?customDomain:range==="all"?[OPEN_MINUTE,CLOSE_MINUTE]:fit((last?.minute??CLOSE_MINUTE)-Number(range),last?.minute??CLOSE_MINUTE),[range,customDomain,last?.minute]);
@@ -114,7 +114,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
       {!feed.error&&feed.warning&&<div className="notice" role="status"><Icon name="warning"/><span>{feed.warning}</span></div>}
       {!feed.error&&!feed.warning&&!feed.loading&&status.tone==="warn"&&<div className="notice" role="status"><Icon name="clock"/><span>{status.detail} · {sourceLabel(last?.flowSource)} · {breadthLabel(last?.breadthSource)}</span></div>}
       <div className="toolbar" style={{marginBottom:16}}><Link className="button small" href={"/research?date="+date}>섹터 · 날짜 비교 · 기간 성과 · 메모 검색</Link></div>
-      <Metrics rows={signalRows} loading={feed.loading}/>
+      <Metrics rows={rows} loading={feed.loading}/>
       <div className="dashboard-grid"><div className="main-column">
         <PanelLayout scope={mode} items={[
           {id:"main-chart",title:"장중 흐름",content:(<section className="panel" id="market-charts" style={{scrollMarginTop:24}} aria-labelledby="chart-heading"><div className="panel-header"><div><h2 className="panel-title" id="chart-heading">장중 흐름</h2><p className="panel-subtitle">{date||"선택 날짜"} · {rows.length}개 기록{selectedMinute!==null?" · "+minuteLabel(selectedMinute)+" 선택":""}</p></div><div className="toolbar">{ranges()}<button className="button icon small" onClick={()=>openChart(kind)} aria-label="차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={16}/></button></div></div>
@@ -128,7 +128,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
           {id:"diagnostics",title:"시장 모니터",content:<Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>},
           {id:"records",title:"기록 탐색",content:<RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>}
         ]}/>
-      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketSummary row={regularLast}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={regularLast}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
+      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketSummary row={last}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
       <footer className="workspace-footer"><span><Icon name="clock" size={13}/>{feed.fetchedAt?"마지막 조회 "+feed.fetchedAt:"조회 대기"} · {last?"데이터 "+last.time+" 기준":"저장 기록 없음"} · KST</span><span>{date&&date===today?(settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"):"과거 기록 조회"}<button className="button ghost small" onClick={()=>setModal("guide")}>지표 읽는 법<Icon name="help" size={13}/></button></span></footer>
     </main>
     <nav className="mobile-nav" aria-label="모바일 메뉴"><Link href="/" className={mode==="overview"?"active":""} aria-current={mode==="overview"?"page":undefined}><Icon name="grid"/><span>대시보드</span></Link><Link href="/daily" className={mode==="daily"?"active":""} aria-current={mode==="daily"?"page":undefined}><Icon name="chart"/><span>일별 분석</span></Link><Link href="/history"><Icon name="calendar"/><span>캘린더</span></Link><button onClick={()=>setModal("settings")}><Icon name="settings"/><span>설정</span></button></nav>
