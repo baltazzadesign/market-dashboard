@@ -74,10 +74,9 @@ type BreadthData = {
 };
 
 type RealtimeIndexBreadth = {
-  // H0UPCNT0 WebSocket 전용 코드:
-  // KOSPI=0001, KOSDAQ 후보=0002.
-  // REST의 KOSDAQ 코드 1001과 혼용하지 않습니다.
-  code: "0001" | "0002";
+  // H0UPCNT0가 실제 데이터 프레임 안에 돌려준 업종코드입니다.
+  // KOSDAQ 후보키 10001은 반드시 REST KOSDAQ 지수값과 교차검증한 뒤에만 사용합니다.
+  code: string;
   up: number;
   down: number;
   flat: number;
@@ -978,7 +977,7 @@ async function getKisWsApprovalKey() {
   }
 }
 
-function buildKisWsSubscribeMessage(approvalKey: string, code: "0001" | "0002") {
+function buildKisWsSubscribeMessage(approvalKey: string, code: "0001" | "10001") {
   return JSON.stringify({
     header: {
       approval_key: approvalKey,
@@ -1016,17 +1015,18 @@ async function websocketDataToText(data: any) {
 }
 
 function parseH0upcnt0Row(values: string[]): RealtimeIndexBreadth | null {
-  // KIS 공식 H0UPCNT0 컬럼 순서 (0-based):
+  // KIS H0UPCNT0 컬럼 순서 (0-based):
   // 0 bstp_cls_code, 2 prpr_nmix,
   // 23 ascn_issu_cnt, 24 stnr_issu_cnt, 25 down_issu_cnt
-  const rawCode = String(values[0] ?? "").trim();
-  if (rawCode !== "0001" && rawCode !== "0002") return null;
+  const code = String(values[0] ?? "").trim();
+  if (!code) return null;
 
-  const code = rawCode as "0001" | "0002";
   const up = toNumber(values[23]);
   const flat = toNumber(values[24]);
   const down = toNumber(values[25]);
   const price = toNumber(values[2]);
+
+  if (!Number.isFinite(price) || price <= 0) return null;
 
   return {
     code,
@@ -1038,7 +1038,17 @@ function parseH0upcnt0Row(values: string[]): RealtimeIndexBreadth | null {
   };
 }
 
-async function fetchRealtimeIndexBreadthPair(): Promise<RealtimeIndexBreadthPair> {
+function isRealtimeIndexPriceClose(actual: number, expected: number, tolerance = 0.02) {
+  if (!Number.isFinite(actual) || actual <= 0) return false;
+  if (!Number.isFinite(expected) || expected <= 0) return false;
+
+  return Math.abs(actual - expected) / expected <= tolerance;
+}
+
+async function fetchRealtimeIndexBreadthPair(
+  expectedKospiPrice: number,
+  expectedKosdaqPrice: number
+): Promise<RealtimeIndexBreadthPair> {
   const WebSocketCtor = globalThis.WebSocket;
 
   if (typeof WebSocketCtor !== "function") {
@@ -1098,17 +1108,16 @@ async function fetchRealtimeIndexBreadthPair(): Promise<RealtimeIndexBreadthPair
       try {
         socket?.send(buildKisWsSubscribeMessage(approvalKey, "0001"));
 
-        // 공식 샘플처럼 구독 요청 사이에 아주 짧은 간격을 둡니다.
+        // KOSDAQ 실시간 지수 후보키 10001을 검증합니다.
+        // 수신 데이터는 REST KOSDAQ 지수값과 2% 이내일 때만 KOSDAQ으로 인정합니다.
         setTimeout(() => {
           try {
             if (socket?.readyState === 1) {
-              // REST KOSDAQ 코드(1001)와 달리 H0UPCNT0 WebSocket은
-              // KOSDAQ 실시간 지수 후보 코드 0002를 사용해 확인합니다.
-              socket.send(buildKisWsSubscribeMessage(approvalKey, "0002"));
+              socket.send(buildKisWsSubscribeMessage(approvalKey, "10001"));
             }
           } catch (error) {
             console.warn("BREADTH_WS_SUBSCRIBE_FAILED", {
-              code: "0002",
+              code: "10001",
               error: String(error),
             });
           }
@@ -1153,18 +1162,55 @@ async function fetchRealtimeIndexBreadthPair(): Promise<RealtimeIndexBreadthPair
               const parsed = parseH0upcnt0Row(rowValues);
               if (!parsed) continue;
 
-              if (parsed.code === "0001") result.kospi = parsed;
-              if (parsed.code === "0002") result.kosdaq = parsed;
+              const kospiPriceMatch =
+                parsed.code === "0001" &&
+                isRealtimeIndexPriceClose(parsed.price, expectedKospiPrice);
+
+              // 10001 구독에 대한 실제 데이터 코드가 10001 또는 1001로 돌아올 가능성을
+              // 모두 관찰하되, 가격이 REST KOSDAQ 지수와 일치할 때만 사용합니다.
+              const kosdaqCandidateCode =
+                parsed.code === "10001" || parsed.code === "1001";
+              const kosdaqPriceMatch =
+                kosdaqCandidateCode &&
+                isRealtimeIndexPriceClose(parsed.price, expectedKosdaqPrice);
+
+              if (kospiPriceMatch) {
+                result.kospi = parsed;
+              }
+
+              if (kosdaqPriceMatch) {
+                result.kosdaq = parsed;
+              }
+
+              const market =
+                kospiPriceMatch
+                  ? "KOSPI"
+                  : kosdaqPriceMatch
+                    ? "KOSDAQ"
+                    : "UNMATCHED";
 
               console.log("BREADTH_WS_RESULT", {
-                market: parsed.code === "0001" ? "KOSPI" : "KOSDAQ",
+                market,
                 code: parsed.code,
                 up: parsed.up,
                 down: parsed.down,
                 flat: parsed.flat,
                 total: parsed.up + parsed.down + parsed.flat,
                 price: parsed.price,
+                expectedKospiPrice,
+                expectedKosdaqPrice,
+                kospiPriceMatch,
+                kosdaqPriceMatch,
               });
+
+              if (market === "UNMATCHED") {
+                console.warn("BREADTH_WS_PRICE_MISMATCH", {
+                  code: parsed.code,
+                  price: parsed.price,
+                  expectedKospiPrice,
+                  expectedKosdaqPrice,
+                });
+              }
             }
 
             if (result.kospi && result.kosdaq) {
@@ -2024,10 +2070,10 @@ export async function GET(req: Request) {
     let liveBreadthTransport: "REST_063_066" | "H0UPCNT0" = "REST_063_066";
 
     // 063/066 REST가 지수 가격은 주면서 시장폭만 0으로 반환하는 경우가 있어
-    // 실제 실시간 국내지수 WebSocket(H0UPCNT0)에서 KOSPI/KOSDAQ 시장폭을 1회 snapshot으로 보완합니다.
+    // 실제 실시간 국내지수 WebSocket(H0UPCNT0)을 1회 조회하고, REST 지수값과 교차검증된 시장만 보완합니다.
     if (liveTotal <= 0) {
       try {
-        const wsBreadth = await fetchRealtimeIndexBreadthPair();
+        const wsBreadth = await fetchRealtimeIndexBreadthPair(kospiData.price, kosdaqData.price);
         const before = { up: liveUp, down: liveDown, flat: liveFlat, total: liveTotal };
         const applied: string[] = [];
 
@@ -2044,7 +2090,7 @@ export async function GET(req: Request) {
           wsBreadth.kosdaq.up + wsBreadth.kosdaq.down + wsBreadth.kosdaq.flat > 0
         ) {
           applyRealtimeIndexBreadth(kosdaqData, wsBreadth.kosdaq);
-          applied.push("0002");
+          applied.push(`KOSDAQ:${wsBreadth.kosdaq.code}`);
         }
 
         liveUp = kospiData.up + kosdaqData.up;
