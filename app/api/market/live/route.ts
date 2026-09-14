@@ -61,6 +61,7 @@ type BreadthData = {
   down: number;
   flat: number;
   price: number;
+  sectorRaw?: any;
   raw?: any;
 };
 
@@ -691,92 +692,71 @@ function pickNumber(obj: any, keys: string[]) {
   return 0;
 }
 
+// 공식 명세: 국내업종 현재지수[v1_국내주식-063].xlsx.
+// 063 output -> 지수/시장폭, 066 output2 -> 업종 목록. 서로 합산하지 않습니다.
 async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
+  const empty: BreadthData = { up: 0, down: 0, flat: 0, price: 0 };
   try {
-    const appkey = process.env.KIS_APPKEY!;
-    const appsecret = process.env.KIS_APPSECRET!;
     const token = await getAccessToken();
-
-    const qs = new URLSearchParams({
-      FID_COND_MRKT_DIV_CODE: "U",
-      FID_INPUT_ISCD: code,
-      FID_COND_SCR_DIV_CODE: "20214",
-      FID_MRKT_CLS_CODE: code === "0001" ? "K" : "Q",
-      FID_BLNG_CLS_CODE: "0",
-    });
-
+    const headers = {
+      "content-type": "application/json; charset=utf-8",
+      authorization: `Bearer ${token}`,
+      appkey: process.env.KIS_APPKEY!,
+      appsecret: process.env.KIS_APPSECRET!,
+      custtype: CUSTTYPE,
+    };
+    const qs = new URLSearchParams({ FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: code });
     const res = await fetchWithTimeout(
-      `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-category-price?${qs.toString()}`,
-      {
-        method: "GET",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          authorization: `Bearer ${token}`,
-          appkey,
-          appsecret,
-          tr_id: "FHPUP02140000",
-          custtype: CUSTTYPE,
-        },
-        cache: "no-store",
-      }
+      `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price?${qs}`,
+      { headers: { ...headers, tr_id: "FHPUP02100000" }, cache: "no-store" }
     );
-
-    const data = await res.json().catch((error) => ({
-      rt_cd: "JSON_PARSE_ERROR",
-      msg1: String(error),
-    }));
-
-    if (!res.ok || String(data?.rt_cd ?? "0") !== "0") {
-      console.warn("066 ERROR", code, JSON.stringify(data).slice(0, 1000));
-      return { up: 0, down: 0, flat: 0, price: 0, raw: data };
+    const data = await res.json();
+    if (!res.ok || String(data?.rt_cd) !== "0") {
+      console.warn("BREADTH_063_ERROR", { code, httpStatus: res.status, msgCode: data?.msg_cd });
+      return empty;
     }
-
-    const out = pickOutput(data);
-
-    // 시장 데이터 필드만 기록합니다. 요청 헤더, 키, 토큰은 기록하지 않습니다.
-    if (
-      toNumber(out.ascn_issu_cnt ?? out.up_cnt) +
-      toNumber(out.down_issu_cnt ?? out.down_cnt) +
-      toNumber(out.stnr_issu_cnt ?? out.flat_cnt) === 0
-    ) {
-      const inspectOutput = (value: any) => {
-        const rows = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
-        const fields = ["bstp_cls_code", "hts_kor_isnm", "bstp_nmix_prpr",
-          "ascn_issu_cnt", "down_issu_cnt", "stnr_issu_cnt", "uplm_issu_cnt", "lslm_issu_cnt",
-          "up_cnt", "down_cnt", "flat_cnt"];
-        return {
-          rowCount: rows.length,
-          rows: rows.slice(0, 3).map((row: any) => ({
-            keys: row && typeof row === "object" ? Object.keys(row) : [],
-            values: Object.fromEntries(fields.map((field) => [field, row?.[field] ?? null])),
-          })),
-        };
-      };
-      console.warn("BREADTH_DIAGNOSTIC_V2", JSON.stringify({
-        code, requestParams: Object.fromEntries(qs.entries()), trId: "FHPUP02140000", httpStatus: res.status, rt_cd: data?.rt_cd,
-        selectedKeys: Object.keys(out),
-        output: inspectOutput(data?.output),
-        output1: inspectOutput(data?.output1),
-        output2: inspectOutput(data?.output2),
-      }));
+    const out = data?.output;
+    const fields = ["ascn_issu_cnt", "down_issu_cnt", "stnr_issu_cnt"];
+    const validCounts = out && !Array.isArray(out) && fields.every((field) => {
+      const value = out[field];
+      if (value === null || value === undefined || String(value).trim() === "") return false;
+      const count = Number(String(value).replace(/,/g, "").trim());
+      return Number.isSafeInteger(count) && count >= 0;
+    });
+    if (!validCounts) {
+      console.warn("BREADTH_063_INVALID_FIELDS", { code, outputKeys: Object.keys(out ?? {}) });
+      return empty;
     }
+    const result: BreadthData = {
+      up: toNumber(out.ascn_issu_cnt), down: toNumber(out.down_issu_cnt),
+      flat: toNumber(out.stnr_issu_cnt), price: toNumber(out.bstp_nmix_prpr),
+      // 기존 indexSnapshot의 output1 우선 읽기와도 호환되는 명시적 어댑터입니다.
+      raw: { ...data, output1: out, snapshotTrId: "FHPUP02100000" },
+    };
+    console.log("BREADTH_063_RESULT", { code, up: result.up, down: result.down,
+      flat: result.flat, total: result.up + result.down + result.flat, price: result.price });
 
-    return {
-      up: toNumber(out.ascn_issu_cnt ?? out.up_cnt),
-      down: toNumber(out.down_issu_cnt ?? out.down_cnt),
-      flat: toNumber(out.stnr_issu_cnt ?? out.flat_cnt),
-      price: toNumber(out.bstp_nmix_prpr ?? out.stck_prpr ?? out.prpr),
-      raw: data,
-    };
-  } catch (error) {
-    console.warn("066 API 요청 실패 → breadth fallback 대상으로 처리:", code, error);
-    return {
-      up: 0,
-      down: 0,
-      flat: 0,
-      price: 0,
-      raw: { error: String(error), code },
-    };
+    // 업종 조회 실패가 정상 시장폭/지수 저장을 막지 않도록 별도 처리합니다.
+    try {
+      const sectorQs = new URLSearchParams({
+        FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: code,
+        FID_COND_SCR_DIV_CODE: "20214", FID_MRKT_CLS_CODE: code === "0001" ? "K" : "Q",
+        FID_BLNG_CLS_CODE: "0",
+      });
+      const sectorRes = await fetchWithTimeout(
+        `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-category-price?${sectorQs}`,
+        { headers: { ...headers, tr_id: "FHPUP02140000" }, cache: "no-store" }
+      );
+      const sectorData = await sectorRes.json();
+      if (sectorRes.ok && String(sectorData?.rt_cd) === "0") result.sectorRaw = sectorData;
+      else console.warn("SECTOR_066_ERROR", { code, httpStatus: sectorRes.status, msgCode: sectorData?.msg_cd });
+    } catch {
+      console.warn("SECTOR_066_REQUEST_FAILED", { code });
+    }
+    return result;
+  } catch {
+    console.warn("BREADTH_063_REQUEST_FAILED", { code });
+    return empty;
   }
 }
 
@@ -1557,13 +1537,13 @@ export async function GET(req: Request) {
       breadthSource = "FALLBACK";
       breadthFallbackReason =
         liveTotal < MIN_NORMAL_BREADTH_TOTAL
-          ? `066 합산 총합 비정상/결측: current=${liveTotal}, prev=${prevNormalTotal}`
-          : `066 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
+          ? `063 합산 총합 비정상/결측: current=${liveTotal}, prev=${prevNormalTotal}`
+          : `063 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
       up = toNumber(prevNormalRow.up);
       down = toNumber(prevNormalRow.down);
       flat = toNumber(prevNormalRow.flat);
 
-      console.warn("⚠️ 066 breadth 급감 감지, 직전 정상값으로 대체:", {
+      console.warn("⚠️ 063 breadth 급감 감지, 직전 정상값으로 대체:", {
         time: timeStr,
         liveTotal,
         prevNormalTotal,
@@ -1679,7 +1659,7 @@ export async function GET(req: Request) {
     );
     const marketState = `${baseMarketState}|FLOW_${flowData.source}|BREADTH_${breadthSource}`;
 
-    const sectorRows = [...parseSectors(kospiData.raw,"kospi"),...parseSectors(kosdaqData.raw,"kosdaq")];
+    const sectorRows = [...parseSectors(kospiData.sectorRaw ?? {},"kospi"),...parseSectors(kosdaqData.sectorRaw ?? {},"kosdaq")];
     let sectorSaveStatus = "skipped";
     const marketData = {
       version: 2, capturedAt: now.toISOString(),
