@@ -96,7 +96,17 @@ export function normalizeRows(values: unknown[], date: string) {
   const rows = new Map<number, MarketRow>();
   for (const value of values) {
     const row = normalizeRow(value, date);
-    if (row.minute < OPEN_MINUTE || row.minute > CLOSE_MINUTE || row.up + row.down + row.flat <= 0) continue;
+
+    if (row.minute < OPEN_MINUTE || row.minute > CLOSE_MINUTE) continue;
+
+    const breadthUnavailable = ["FALLBACK", "ERROR", "SKIPPED", "EMPTY", "FILTERED"].includes(
+      row.breadthSource
+    );
+
+    // breadth가 정상 소스인데도 종목 수 합계가 0이면 비정상 행으로 제외합니다.
+    // 반대로 SKIPPED/EMPTY 등 명시적 결측 상태면 지수·수급 데이터는 유지합니다.
+    if (row.up + row.down + row.flat <= 0 && !breadthUnavailable) continue;
+
     const prior = rows.get(row.minute);
     if (!prior || row.id >= prior.id) rows.set(row.minute, row);
   }
@@ -118,6 +128,8 @@ export function breadthLabel(source?: string) {
 }
 export function marketTone(row?: MarketRow) {
   if (!row) return "시장 데이터 대기";
+  if (["FALLBACK", "ERROR", "SKIPPED", "EMPTY", "FILTERED"].includes(row.breadthSource))
+    return "시장 폭 데이터 없음";
   if (row.diff >= 800) return "강한 상승 확산";
   if (row.diff >= 300) return "상승 종목 우세";
   if (row.diff <= -800) return "강한 하락 확산";
@@ -126,6 +138,8 @@ export function marketTone(row?: MarketRow) {
 }
 export function marketNarrative(row?: MarketRow) {
   if (!row) return "기록이 들어오면 시장 폭과 수급을 함께 보여줍니다.";
+  if (["FALLBACK", "ERROR", "SKIPPED", "EMPTY", "FILTERED"].includes(row.breadthSource))
+    return "시장 폭 데이터는 현재 사용할 수 없습니다. 지수와 투자자 수급은 정상 기록을 사용합니다.";
   const breadth = row.diff >= 0 ? "상승" : "하락";
   const flow = !verifiedFlow(row) ? "수급 상태를 함께 확인하세요." : (row.flowPower ?? 0) >= 0 ? "외국인·기관 합산 수급은 순매수입니다." : "외국인·기관 합산 수급은 순매도입니다.";
   return breadth + " 종목이 " + formatNumber(Math.abs(row.diff)) + "개 더 많습니다. " + flow;
