@@ -13,12 +13,23 @@ import { useMarketFeed } from "./useMarketFeed";
 import { Modal } from "./Modal";
 import { Metrics, MarketSummary, FlowPanel, SignalPanel, SessionSummary } from "./Insights";
 import RecordsPanel, { downloadCsv, type RecordView } from "./RecordsPanel";
-import { chartNames as chartLabels, fitDomain as fit, type ChartKind, type Domain } from "./chart-model";
+import { chartNames as chartLabels, type ChartKind, type Domain } from "./chart-model";
 
 const MarketChart = dynamic(() => import("./MarketCharts"), { ssr: false, loading: () => <div className="chart-loading"><Icon name="refresh" className="spin"/>차트 준비 중</div> });
 const chartKeys = Object.keys(chartLabels) as ChartKind[];
 type Settings = { autoRefresh: boolean; markers: boolean; compare: boolean; autoScale: boolean; notifications: boolean };
 const defaults: Settings = { autoRefresh:true,markers:true,compare:true,autoScale:true,notifications:false };
+
+function fit(start:number,end:number):Domain {
+  const minWindow=5,total=CLOSE_MINUTE-OPEN_MINUTE;
+  let left=Math.round(Math.min(start,end)),right=Math.round(Math.max(start,end));
+  const width=Math.max(minWindow,right-left);
+  if(width>=total)return [OPEN_MINUTE,CLOSE_MINUTE];
+  left=Math.max(OPEN_MINUTE,Math.min(CLOSE_MINUTE-width,left));
+  right=left+width;
+  return [left,right];
+}
+
 export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   const [date,setDate] = useState(""),[today,setToday] = useState(""),[clock,setClock] = useState(""),[now,setNow] = useState<Date | null>(null),[followToday,setFollowToday] = useState(true);
   const [settings,setSettings] = useState<Settings>(defaults),[settingsLoaded,setSettingsLoaded] = useState(false);
@@ -47,7 +58,10 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   useEffect(()=>{if(!toast)return;const id=setTimeout(()=>setToast(""),5500);return()=>clearTimeout(id);},[toast]);
   const feed=useMarketFeed(date,mode==="overview"&&date===today,settings.autoRefresh);
   const rows=feed.rows,last=rows.at(-1);
-  const events=useMemo(()=>buildMarketEvents(rows),[rows]);
+  // 자동 신호는 기존 정규장 데이터로만 계산합니다. 장후 기록은 표/차트 조회용으로만 이어 붙입니다.
+  const signalRows=useMemo(()=>rows.filter(row=>row.session==="REGULAR"),[rows]);
+  const regularLast=signalRows.at(-1);
+  const events=useMemo(()=>buildMarketEvents(signalRows),[signalRows]);
   const status=useMemo(()=>dataStatus(last,date,feed.error,now??new Date(0)),[last,date,feed.error,now]);
   const domain=useMemo<Domain>(()=>range==="custom"?customDomain:range==="all"?[OPEN_MINUTE,CLOSE_MINUTE]:fit((last?.minute??CLOSE_MINUTE)-Number(range),last?.minute??CLOSE_MINUTE),[range,customDomain,last?.minute]);
   const overviewKinds: ChartKind[] = ["breadth", "ratio"];
@@ -100,7 +114,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
       {!feed.error&&feed.warning&&<div className="notice" role="status"><Icon name="warning"/><span>{feed.warning}</span></div>}
       {!feed.error&&!feed.warning&&!feed.loading&&status.tone==="warn"&&<div className="notice" role="status"><Icon name="clock"/><span>{status.detail} · {sourceLabel(last?.flowSource)} · {breadthLabel(last?.breadthSource)}</span></div>}
       <div className="toolbar" style={{marginBottom:16}}><Link className="button small" href={"/research?date="+date}>섹터 · 날짜 비교 · 기간 성과 · 메모 검색</Link></div>
-      <Metrics rows={rows} loading={feed.loading}/>
+      <Metrics rows={signalRows} loading={feed.loading}/>
       <div className="dashboard-grid"><div className="main-column">
         <PanelLayout scope={mode} items={[
           {id:"main-chart",title:"장중 흐름",content:(<section className="panel" id="market-charts" style={{scrollMarginTop:24}} aria-labelledby="chart-heading"><div className="panel-header"><div><h2 className="panel-title" id="chart-heading">장중 흐름</h2><p className="panel-subtitle">{date||"선택 날짜"} · {rows.length}개 기록{selectedMinute!==null?" · "+minuteLabel(selectedMinute)+" 선택":""}</p></div><div className="toolbar">{ranges()}<button className="button icon small" onClick={()=>openChart(kind)} aria-label="차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={16}/></button></div></div>
@@ -109,12 +123,12 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
           <div className="chart-footer"><span className="num">{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</span><span className="desktop-hint">5분까지 확대 · 모든 차트 시간축 연동</span><button className="button ghost small" onClick={()=>{setRange("all");setSelectedMinute(null);}}>확대 초기화</button></div>
         </section>)},
           ...[...overviewKinds,...comparisonKinds].map(key=>({id:"chart-"+key,title:chartLabels[key]+" 차트",content:settings.compare&&rows.length>0&&key!==kind?comparisonChart(key):<p className="panel-subtitle">비교 차트 설정이 꺼져 있거나 현재 주 차트와 같은 지표입니다.</p>})),
-          {id:"summary",title:"일별 요약",content:<SessionSummary rows={rows} events={events}/>},
-          {id:"report",title:"동시간대 비교 · 리포트",content:<ComparisonReport rows={rows} events={events} date={date}/>},
+          {id:"summary",title:"일별 요약",content:<SessionSummary rows={signalRows} events={events}/>},
+          {id:"report",title:"동시간대 비교 · 리포트",content:<ComparisonReport rows={signalRows} events={events} date={date}/>},
           {id:"diagnostics",title:"시장 모니터",content:<Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>},
           {id:"records",title:"기록 탐색",content:<RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>}
         ]}/>
-      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketSummary row={last}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
+      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketSummary row={regularLast}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={regularLast}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
       <footer className="workspace-footer"><span><Icon name="clock" size={13}/>{feed.fetchedAt?"마지막 조회 "+feed.fetchedAt:"조회 대기"} · {last?"데이터 "+last.time+" 기준":"저장 기록 없음"} · KST</span><span>{date&&date===today?(settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"):"과거 기록 조회"}<button className="button ghost small" onClick={()=>setModal("guide")}>지표 읽는 법<Icon name="help" size={13}/></button></span></footer>
     </main>
     <nav className="mobile-nav" aria-label="모바일 메뉴"><Link href="/" className={mode==="overview"?"active":""} aria-current={mode==="overview"?"page":undefined}><Icon name="grid"/><span>대시보드</span></Link><Link href="/daily" className={mode==="daily"?"active":""} aria-current={mode==="daily"?"page":undefined}><Icon name="chart"/><span>일별 분석</span></Link><Link href="/history"><Icon name="calendar"/><span>캘린더</span></Link><button onClick={()=>setModal("settings")}><Icon name="settings"/><span>설정</span></button></nav>

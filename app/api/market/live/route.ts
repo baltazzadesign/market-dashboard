@@ -151,6 +151,13 @@ function getKstDateString(date = new Date()) {
   }).format(date);
 }
 
+class SupabaseHttpError extends Error {
+  constructor(public status: number, public operation: string, public code: string | null) {
+    super("Supabase 요청 실패 " + status + (code ? ": " + code : ""));
+    this.name = "SupabaseHttpError";
+  }
+}
+
 async function supabaseRequest(path: string, init: RequestInit = {}) {
   const config = getSupabaseConfig();
 
@@ -166,7 +173,7 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
       ...(init.headers ?? {}),
     },
     cache: "no-store",
-    signal: AbortSignal.timeout(12000),
+    signal: init.signal ?? AbortSignal.timeout(12000),
   });
 
   // Supabase/PostgREST의 `Prefer: return=minimal` 응답은
@@ -176,9 +183,10 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
   const responseText = await res.text();
 
   if (!res.ok) {
-    throw new Error(
-      `Supabase 요청 실패 ${res.status}: ${responseText || res.statusText || "empty response"}`
-    );
+    let code: string | null = null;
+    try { const parsed = JSON.parse(responseText); if (typeof parsed?.code === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(parsed.code)) code = parsed.code; } catch {}
+    console.error("SUPABASE_HTTP_ERROR", { operation: path.split("?")[0], status: res.status, code });
+    throw new SupabaseHttpError(res.status, path.split("?")[0], code);
   }
 
   if (res.status === 204 || !responseText.trim()) {
@@ -493,37 +501,37 @@ function rememberBreadthSnapshot(up: number, down: number, flat: number, kospi: 
   };
 }
 
-async function saveLogToSupabase(row: SupabaseLogPayload) {
-  try {
-    const sameMinuteRow = await getLogByMinuteFromSupabase(row.createdat, row.time);
+type SaveResult = { action: "upserted" | "failed"; id: null };
 
-    if (sameMinuteRow?.id) {
-      await supabaseRequest(`/rest/v1/logs?id=eq.${sameMinuteRow.id}`, {
-        method: "PATCH",
-        headers: {
-          "content-type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify(row),
+async function saveLogToSupabase(row: SupabaseLogPayload): Promise<SaveResult> {
+  // Serialize once: retries retain the observation's date, minute and values.
+  const body = JSON.stringify(row);
+  const captured = Date.parse(String(row.market_data?.capturedAt ?? ""));
+  const deadline = Math.min(Date.now() + 26000, Number.isFinite(captured) ? captured + 45000 : Infinity);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    try {
+      await supabaseRequest("/rest/v1/logs?on_conflict=createdat,time", {
+        method: "POST",
+        headers: { "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+        body,
+        signal: AbortSignal.timeout(Math.max(1, Math.min(8000, remaining))),
       });
-
-      return { action: "updated", id: sameMinuteRow.id };
+      return { action: "upserted", id: null };
+    } catch (error) {
+      const status = error instanceof SupabaseHttpError ? error.status : null;
+      const name = error instanceof Error ? error.name : "Unknown";
+      const transient = status !== null ? [408, 429, 500, 502, 503, 504].includes(status)
+        : ["TypeError", "AbortError", "TimeoutError"].includes(name);
+      console.warn("MARKET_SAVE_ATTEMPT_FAILED", { date: row.createdat, time: row.time, attempt, status, errorName: name, retryable: transient });
+      if (!transient || attempt === 3) break;
+      const delay = 500 * attempt;
+      if (Date.now() + delay >= deadline) break;
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-
-    await supabaseRequest("/rest/v1/logs", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify(row),
-    });
-
-    return { action: "inserted", id: null };
-  } catch (error) {
-    console.warn("Supabase 로그 저장 실패:", error);
-    return { action: "failed", id: null };
   }
+  return { action: "failed", id: null };
 }
 
 
@@ -1620,7 +1628,6 @@ function buildFinalAlertLevel(alert: string, signals: MarketSignal[]) {
 
   return buildAlertLevel(alert);
 }
-
 export async function GET(req: Request) {
   const cronSecret = process.env.CRON_SECRET;
 
@@ -1654,11 +1661,28 @@ export async function GET(req: Request) {
     const extraHolidays = parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
     const marketStatus = getKrxMarketStatus(now, extraHolidays);
     const isMarketTime = isRegularObservation(createdat, timeStr, extraHolidays);
-    if (!isMarketTime) return Response.json({
-      ok:true, saved:false, saveAction:"skipped", saveSkipReason:"OUT_OF_REGULAR_HOURS",
-      createdat, time:timeStr, marketSession:marketStatus.session, marketStatus,
-      dataAvailability:marketStatus.session === "CLOSED" ? "CLOSED" : "NOT_CONNECTED",
-    }, { headers: { "Cache-Control": "no-store" } });
+    const recordSession = isMarketTime ? "REGULAR" : marketStatus.session;
+    const shouldCollectSession =
+      isMarketTime ||
+      marketStatus.session === "AFTER_HOURS_CLOSE" ||
+      marketStatus.session === "KRX_AFTER_MARKET";
+
+    if (!shouldCollectSession) {
+      return Response.json(
+        {
+          ok: true,
+          saved: false,
+          saveAction: "skipped",
+          saveSkipReason: "OUT_OF_SUPPORTED_SESSION",
+          createdat,
+          time: timeStr,
+          marketSession: marketStatus.session,
+          marketStatus,
+          dataAvailability: marketStatus.session === "CLOSED" ? "CLOSED" : "NOT_CONNECTED",
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
 
     const [kospiData, kosdaqData, rawFlowData, latestDbRow, latestNormalBreadthRow] = await Promise.all([
       fetchBreadth("0001"),
@@ -1688,7 +1712,7 @@ export async function GET(req: Request) {
     let flat = liveFlat;
 
     if (shouldFallbackBreadth(liveTotal, prevNormalTotal)) {
-      if (prevNormalRow) {
+      if (isMarketTime && prevNormalRow) {
         breadthSource = "FALLBACK";
         breadthFallbackReason =
           liveTotal < MIN_NORMAL_BREADTH_TOTAL
@@ -1706,16 +1730,19 @@ export async function GET(req: Request) {
           fallback: { up, down, flat },
         });
       } else {
-        // 지수/수급은 정상인데 KIS breadth만 결측인 경우 전체 snapshot을 버리지 않습니다.
-        // 0은 실제 시장폭으로 취급하지 않고 명시적으로 SKIPPED 상태로 저장합니다.
+        // 장후 세션에서는 정규장 breadth를 복사하지 않습니다.
+        // 제공되지 않거나 비정상인 항목은 SKIPPED + 0으로 저장하고 UI에서는 결측(—/차트 gap)으로 표시합니다.
         breadthSource = "SKIPPED";
-        breadthFallbackReason = `breadth unavailable: liveTotal=${liveTotal}, no normal fallback`;
+        breadthFallbackReason = isMarketTime
+          ? `breadth unavailable: liveTotal=${liveTotal}, no normal fallback`
+          : `breadth unavailable for ${recordSession}: liveTotal=${liveTotal}`;
         up = 0;
         down = 0;
         flat = 0;
 
         console.warn("⚠️ breadth 결측 - 지수/수급 snapshot은 계속 저장:", {
           time: timeStr,
+          recordSession,
           liveTotal,
           prevNormalTotal,
           kospi: kospiData.price,
@@ -1753,16 +1780,26 @@ export async function GET(req: Request) {
     const prevDiff = toNumber(prevNormalRow?.diff ?? memoryPrevDiff);
     const accel = breadthAvailable ? diff - prevDiff : 0;
 
-    const kospi = kospiData.price > 0 ? kospiData.price : toNumber(prevNormalRow?.kospi ?? latestDbRow?.kospi);
-    const kosdaq = kosdaqData.price > 0 ? kosdaqData.price : toNumber(prevNormalRow?.kosdaq ?? latestDbRow?.kosdaq);
+    const kospi = kospiData.price > 0
+      ? kospiData.price
+      : isMarketTime
+        ? toNumber(prevNormalRow?.kospi ?? latestDbRow?.kospi)
+        : 0;
+    const kosdaq = kosdaqData.price > 0
+      ? kosdaqData.price
+      : isMarketTime
+        ? toNumber(prevNormalRow?.kosdaq ?? latestDbRow?.kosdaq)
+        : 0;
 
-    if (breadthAvailable) {
+    if (isMarketTime && breadthAvailable) {
       rememberBreadthSnapshot(up, down, flat, kospi, kosdaq);
     }
 
     // GAS 방식과 동일하게 074 LIVE 실패 시에는 직전 정상 수급값을 대체 표시/저장합니다.
     // 대신 marketstate에 FLOW_FALLBACK 마커를 남겨 page.tsx에서 상태를 구분할 수 있게 합니다.
-    const flowData = applyGasStyleFlowFallback(rawFlowData, latestDbRow);
+    const flowData = isMarketTime
+      ? applyGasStyleFlowFallback(rawFlowData, latestDbRow)
+      : rawFlowData;
 
     // 수급 필드 확인용 디버그입니다.
     // /api/market/live?debug=flow 호출 시 066 지수 원본 + 074 수급 원본 + fallback 적용 후 값을 함께 확인합니다.
@@ -1792,7 +1829,7 @@ export async function GET(req: Request) {
       });
     }
 
-    if (hasFlowValue(flowData)) {
+    if (isMarketTime && hasFlowValue(flowData)) {
       memoryLastFlow = {
         foreign: normalizeFlowDisplayUnit(flowData.foreign),
         inst: normalizeFlowDisplayUnit(flowData.inst),
@@ -1832,9 +1869,9 @@ export async function GET(req: Request) {
       prevFlowPower,
       breadthAvailable ? recentRows : []
     );
-    const signals = sortSignals([...baseSignals, ...flowSignals]);
+    const signals = isMarketTime ? sortSignals([...baseSignals, ...flowSignals]) : [];
     const signalAlert = buildSignalAlert(signals);
-    const alert = signalAlert ?? baseAlert;
+    const alert = isMarketTime ? (signalAlert ?? baseAlert) : `${recordSession} 기록`;
     const baseMarketState = breadthAvailable
       ? buildMarketState(
           diff,
@@ -1845,14 +1882,15 @@ export async function GET(req: Request) {
           Array.isArray(signals) && signals.length > 0 ? signals[0] : null
         )
       : "BREADTH_UNAVAILABLE";
-    const marketState = `${baseMarketState}|FLOW_${flowData.source}|BREADTH_${breadthSource}`;
+    const marketState = `${baseMarketState}|SESSION_${recordSession}|FLOW_${flowData.source}|BREADTH_${breadthSource}`;
 
     const sectorRows = [...parseSectors(kospiData.sectorRaw ?? {},"kospi"),...parseSectors(kosdaqData.sectorRaw ?? {},"kosdaq")];
     let sectorSaveStatus = "skipped";
     const marketData = {
       version: 2, capturedAt: now.toISOString(),
-      session: "REGULAR", regime: marketStatus.regime, tradeDate: createdat,
-      closeBasis: "REGULAR_SESSION_OBSERVATION", officialCloseVerified: false,
+      session: recordSession, regime: marketStatus.regime, tradeDate: createdat,
+      closeBasis: isMarketTime ? "REGULAR_SESSION_OBSERVATION" : "EXTENDED_SESSION_OBSERVATION",
+      officialCloseVerified: false,
       breadthSource,
       breadthAvailable,
       breadthReason: breadthFallbackReason || null,
@@ -1890,29 +1928,34 @@ export async function GET(req: Request) {
       id: null,
     };
     const snapshotInvalidReason = getMarketSnapshotInvalidReason(rowToSave);
-    let saveSkipReason = isMarketTime ? snapshotInvalidReason : "OUT_OF_REGULAR_HOURS";
+    let saveSkipReason = snapshotInvalidReason;
 
-    if (isMarketTime && !snapshotInvalidReason) {
+    if (shouldCollectSession && !snapshotInvalidReason) {
       saveSkipReason = "";
       lastSavedMinute = minuteKey;
 
-      if (breadthAvailable) {
-        memoryRecentRows.push({
-          diff,
-          foreignFlow: foreign,
-          instFlow: inst,
-        });
-        memoryRecentRows = memoryRecentRows.slice(-10);
-        memoryPrevDiff = diff;
-      }
+      // 정규장 메모리/신호 기준은 장후 데이터로 오염시키지 않습니다.
+      if (isMarketTime) {
+        if (breadthAvailable) {
+          memoryRecentRows.push({
+            diff,
+            foreignFlow: foreign,
+            instFlow: inst,
+          });
+          memoryRecentRows = memoryRecentRows.slice(-10);
+          memoryPrevDiff = diff;
+        }
 
-      memoryPrevFlowPower = flowPower;
-      if (hasFlowValue({ foreign, inst, indiv })) {
-        memoryLastFlow = { foreign, inst, indiv, updatedAt: Date.now() };
+        memoryPrevFlowPower = flowPower;
+        if (hasFlowValue({ foreign, inst, indiv })) {
+          memoryLastFlow = { foreign, inst, indiv, updatedAt: Date.now() };
+        }
       }
 
       saveResult = await saveLogToSupabase(rowToSave);
-      if (sectorRows.length) {
+
+      // 업종 리서치 저장은 기존 정규장에만 유지합니다.
+      if (isMarketTime && sectorRows.length && Date.now() - now.getTime() < 45000) {
         try {
           await supabaseRequest("/rest/v1/rpc/save_market_sectors", {
             method:"POST", headers:{"Content-Type":"application/json"},
@@ -1922,17 +1965,16 @@ export async function GET(req: Request) {
         } catch { sectorSaveStatus = "error"; console.warn("업종 저장 실패: 003_market_research.sql 적용 및 DB 상태를 확인하세요."); }
       }
 
-
-      console.log("✅ LIVE 저장 처리:", timeStr, saveResult.action, "수급:", flowData.source, "breadth:", breadthSource, {
+      console.log(saveResult.action === "failed" ? "❌ LIVE 저장 실패:" : "✅ LIVE 저장 처리:", timeStr, recordSession, saveResult.action, "수급:", flowData.source, "breadth:", breadthSource, {
         foreign,
         inst,
         indiv,
         breadthAvailable,
       });
     } else {
-      console.warn(isMarketTime ? "⚠️ 비정상 데이터라 저장 생략:" : "⏸️ 정규장 시간이 아니라 저장 생략:", {
+      console.warn("⚠️ 비정상 데이터라 저장 생략:", {
         time: timeStr,
-        marketSession: isMarketTime ? "REGULAR" : "OUT_OF_REGULAR_HOURS",
+        marketSession: recordSession,
         up,
         down,
         flat,
@@ -1965,7 +2007,7 @@ export async function GET(req: Request) {
       kospiDown: kospiData.down,
       kosdaqUp: kosdaqData.up,
       kosdaqDown: kosdaqData.down,
-      marketSession: isMarketTime ? "REGULAR" : "OUT_OF_REGULAR_HOURS",
+      marketSession: recordSession,
       liveBreadthTotal: liveTotal,
       savedBreadthTotal: total,
       prevNormalBreadthTotal: prevNormalTotal,
@@ -1992,15 +2034,15 @@ export async function GET(req: Request) {
       marketScore,
       marketState,
       signals,
-      ok: saveResult.action !== "failed",
+      ok: ["inserted", "updated", "upserted"].includes(saveResult.action),
       error: saveResult.action === "failed" ? "SAVE_FAILED" : undefined,
       market_data: marketData,
       marketStatus,
-      saved: ["inserted","updated"].includes(saveResult.action),
+      saved: ["inserted","updated","upserted"].includes(saveResult.action),
       saveAction: saveResult.action,
       snapshotInvalidReason,
       saveSkipReason,
-    });
+    }, { status: saveResult.action === "failed" ? 503 : 200 });
   } catch (error: any) {
     console.error("/api/market/live 전체 처리 실패:", error);
 
@@ -2024,6 +2066,6 @@ export async function GET(req: Request) {
       saved: false,
       saveAction: "skipped",
       saveSkipReason: "LIVE_PROCESS_FAILED",
-    });
+    }, { status: 503 });
   }
 }

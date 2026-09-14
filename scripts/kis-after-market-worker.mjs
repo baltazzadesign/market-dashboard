@@ -45,7 +45,10 @@ let captureFile = null;
 const lastCapturedSecondBySymbol = new Map();
 
 async function supabase(pathname, init = {}) {
-  if (!HAS_SUPABASE) throw new Error('Supabase 환경변수가 설정되지 않았습니다.');
+  if (!HAS_SUPABASE) {
+    throw new Error('Supabase 환경변수가 설정되지 않았습니다.');
+  }
+
   const res = await fetch(`${SUPABASE_URL}${pathname}`, {
     ...init,
     headers: {
@@ -54,8 +57,17 @@ async function supabase(pathname, init = {}) {
       ...(init.headers ?? {}),
     },
   });
-  if (!res.ok) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
-  return res.status === 204 ? null : res.json();
+
+  const text = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`Supabase ${res.status}: ${text}`);
+  }
+
+  // return=minimal 등으로 성공 응답 본문이 비어 있을 수 있음
+  if (!text.trim()) return null;
+
+  return JSON.parse(text);
 }
 
 async function heartbeat() {
@@ -88,14 +100,36 @@ async function resolveColumns() {
   if (override) return override;
 
   try {
-    const res = await fetch(OFFICIAL_SAMPLE_URL, { signal: AbortSignal.timeout(10_000) });
+    const res = await fetch(OFFICIAL_SAMPLE_URL, {
+      signal: AbortSignal.timeout(10_000),
+    });
+
     if (!res.ok) throw new Error(`schema fetch ${res.status}`);
+
     const source = await res.text();
     const discovered = extractCcnlKrxColumnsFromPython(source);
-    if (discovered?.length) return discovered;
+
+    // 공식 샘플이 MARKET_CLS_CODE까지 반영된 경우에만 우선 사용.
+    if (discovered?.length && hasAfterMarketSchema(discovered)) {
+      console.log(
+        `[schema] official schema adopted: fields=${discovered.length}`
+      );
+      return discovered;
+    }
+
+    if (discovered?.length) {
+      console.warn(
+        `[schema] official sample is still ${discovered.length} fields without MARKET_CLS_CODE; ` +
+        `using runtime-verified local ${CURRENT_H0STCNT0_COLUMNS.length}-field schema`
+      );
+    }
   } catch (error) {
-    console.warn('[schema] 공식 샘플 자동 확인 실패, 안전한 로컬 스키마로 대기:', String(error));
+    console.warn(
+      '[schema] 공식 샘플 자동 확인 실패, runtime-verified 로컬 스키마 사용:',
+      String(error)
+    );
   }
+
   return CURRENT_H0STCNT0_COLUMNS;
 }
 
@@ -160,21 +194,71 @@ async function maybeCaptureFrame(raw) {
 async function handleRealtimeFrame(raw) {
   const parts = raw.split('|');
   if (parts.length < 4 || parts[1] !== 'H0STCNT0') return;
+
   lastMessageAt = new Date().toISOString();
 
   await maybeCaptureFrame(raw);
 
-  const mapped = mapAfterMarketQuote(parts[3], columns, symbolMarket);
-  if (!mapped.ok) {
-    if (mapped.reason === 'SCHEMA_NOT_READY') {
-      console.log(`[probe] H0STCNT0 fields=${String(parts[3]).split('^').length}; MARKET_CLS_CODE 공식 위치 대기 중`);
-    }
+  if (!hasAfterMarketSchema(columns)) {
+    console.log(
+      `[probe] H0STCNT0 fields=${String(parts[3]).split('^').length}; ` +
+      `MARKET_CLS_CODE 공식 위치 대기 중`
+    );
     return;
   }
 
-  lastAfterMarketAt = new Date().toISOString();
-  console.log('[after-market]', mapped.row.symbol, mapped.row.market, mapped.row.price, mapped.row.observed_at);
-  if (PERSIST) await saveQuote(mapped.row);
+  const values = String(parts[3] ?? '').split('^');
+  const recordSize = columns.length;
+
+  if (recordSize <= 0 || values.length % recordSize !== 0) {
+    console.warn(
+      `[ws:frame] unexpected field count: received=${values.length}, ` +
+      `recordSize=${recordSize}, itemCount=${parts[2]}`
+    );
+    return;
+  }
+
+  const actualCount = values.length / recordSize;
+  const advertisedCount = Number(parts[2] ?? 0);
+
+  if (
+    Number.isFinite(advertisedCount) &&
+    advertisedCount > 0 &&
+    advertisedCount !== actualCount
+  ) {
+    console.warn(
+      `[ws:frame] item count mismatch: advertised=${advertisedCount}, actual=${actualCount}`
+    );
+  }
+
+  for (let i = 0; i < actualCount; i += 1) {
+    const start = i * recordSize;
+    const payload = values.slice(start, start + recordSize).join('^');
+
+    const mapped = mapAfterMarketQuote(
+      payload,
+      columns,
+      symbolMarket
+    );
+
+    if (!mapped.ok) {
+      continue;
+    }
+
+    lastAfterMarketAt = new Date().toISOString();
+
+    console.log(
+      '[after-market]',
+      mapped.row.symbol,
+      mapped.row.market,
+      mapped.row.price,
+      mapped.row.observed_at
+    );
+
+    if (PERSIST) {
+      await saveQuote(mapped.row);
+    }
+  }
 }
 
 async function runOnce() {
@@ -208,11 +292,30 @@ async function runOnce() {
             await handleRealtimeFrame(raw);
             return;
           }
-          const msg = JSON.parse(raw);
-          if (msg?.header?.tr_id === 'PINGPONG') {
-            ws.send(raw);
-            return;
-          }
+          const trimmed = raw.trim();
+
+// 빈 프레임 무시
+if (!trimmed) return;
+
+// JSON 형태가 아닌 제어 프레임 무시
+if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+  console.warn('[ws:skip] non-json frame:', trimmed.slice(0, 120));
+  return;
+}
+
+let msg;
+
+try {
+  msg = JSON.parse(trimmed);
+} catch {
+  console.warn('[ws:skip] malformed json:', trimmed.slice(0, 120));
+  return;
+}
+
+if (msg?.header?.tr_id === 'PINGPONG') {
+  ws.send(raw);
+  return;
+}
           if (msg?.body?.rt_cd === '1') console.warn('[ws:kis]', msg?.body?.msg1 ?? raw);
         } catch (error) {
           lastError = String(error);

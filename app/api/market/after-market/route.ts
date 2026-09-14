@@ -3,17 +3,6 @@ import { getKrxMarketStatus, parseAdditionalHolidays } from '@/lib/market-calend
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
 
-type HealthRow = {
-  connected?: boolean;
-  schema_ready?: boolean;
-  persistence_enabled?: boolean;
-  last_message_at?: string | null;
-  last_after_market_at?: string | null;
-  last_error?: string | null;
-  symbols?: unknown;
-  updated_at?: string | null;
-};
-
 function config() {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, '').replace(/\/rest\/v1$/, '');
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -23,53 +12,80 @@ function config() {
 async function sb(path: string) {
   const c = config();
   if (!c) throw new Error('SUPABASE_CONFIG_MISSING');
+
   const res = await fetch(`${c.url}${path}`, {
     headers: { apikey: c.key, authorization: `Bearer ${c.key}` },
     cache: 'no-store',
     signal: AbortSignal.timeout(10_000),
   });
+
   if (!res.ok) throw new Error(`SUPABASE_${res.status}`);
-  return res.json();
+  const text = await res.text();
+  return text.trim() ? JSON.parse(text) : null;
 }
 
-function fresh(ts: string | null | undefined, ms = 75_000) {
-  if (!ts) return false;
-  const value = new Date(ts).getTime();
-  return Number.isFinite(value) && Date.now() - value <= ms;
+function minuteOf(value: unknown) {
+  const match = String(value ?? '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return -1;
+  return Number(match[1]) * 60 + Number(match[2]);
 }
 
-export async function GET() {
+function sessionOf(row: any) {
+  const direct = String(row?.market_data?.session ?? row?.marketData?.session ?? '').trim();
+  if (direct) return direct;
+
+  const state = String(row?.marketstate ?? row?.marketState ?? '');
+  const marker = state.match(/(?:^|\|)SESSION_([A-Z_]+)(?:\||$)/);
+  if (marker?.[1]) return marker[1];
+
+  const minute = minuteOf(row?.time);
+  if (minute > 15 * 60 + 30 && minute < 16 * 60) return 'AFTER_HOURS_CLOSE';
+  if (minute >= 16 * 60 && minute < 20 * 60) return 'KRX_AFTER_MARKET';
+  return '';
+}
+
+function isExtendedRow(row: any) {
+  const session = sessionOf(row);
+  return session === 'AFTER_HOURS_CLOSE' || session === 'KRX_AFTER_MARKET';
+}
+
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
     const extraHolidays = parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
-    const marketStatus = getKrxMarketStatus(new Date(), extraHolidays);
-    const [healthRows, quoteRows] = await Promise.all([
-      sb('/rest/v1/market_session_collector_health?select=*&id=eq.kis_after_market&limit=1'),
-      marketStatus.session === 'KRX_AFTER_MARKET'
-        ? sb(`/rest/v1/market_session_quotes?select=trade_date,market,symbol,venue,session,observed_at,price,volume,turnover,regular_close,regular_close_verified,source&trade_date=eq.${encodeURIComponent(marketStatus.tradeDate)}&session=eq.KRX_AFTER_MARKET&order=observed_at.desc&limit=200`)
-        : Promise.resolve([]),
-    ]);
+    const currentStatus = getKrxMarketStatus(new Date(), extraHolidays);
+    const requestedDate = url.searchParams.get('date') ?? currentStatus.tradeDate;
 
-    const health: HealthRow | null = Array.isArray(healthRows) ? healthRows[0] ?? null : null;
-    const connected = Boolean(health?.connected) && fresh(health?.updated_at);
-    const bySymbol = new Map<string, any>();
-    if (Array.isArray(quoteRows)) {
-      for (const row of quoteRows) if (row?.symbol && !bySymbol.has(row.symbol)) bySymbol.set(row.symbol, row);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+      return Response.json(
+        { ok: false, error: 'INVALID_DATE' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
-    const availability = connected && health?.schema_ready && health?.persistence_enabled
-      ? 'CONNECTED'
-      : connected
-        ? 'PROBE_CONNECTED'
-        : 'NOT_CONNECTED';
+    // 기존 daily API가 정규장 행만 반환하더라도 장후 기록을 잃지 않도록
+    // 같은 logs 테이블에서 해당 날짜의 확장 세션 행을 별도로 읽습니다.
+    const rawRows = await sb(
+      `/rest/v1/logs?select=*&createdat=eq.${encodeURIComponent(requestedDate)}&order=id.asc&limit=1000`,
+    );
 
-    return Response.json({
-      ok: true,
-      marketStatus,
-      availability,
-      collector: health,
-      quotes: [...bySymbol.values()],
-    }, { headers: { 'Cache-Control': 'no-store' } });
+    const rows = Array.isArray(rawRows)
+      ? rawRows.filter(isExtendedRow)
+      : [];
+
+    return Response.json(
+      {
+        ok: true,
+        date: requestedDate,
+        marketStatus: currentStatus,
+        rows,
+      },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
   } catch (error) {
-    return Response.json({ ok: false, error: String(error) }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+    return Response.json(
+      { ok: false, error: String(error) },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 }

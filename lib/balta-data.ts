@@ -3,7 +3,7 @@ import { isValidDate, kstParts, normalizeRows, type MarketRow } from "./balta-mo
 export class MarketDataError extends Error {
   constructor(message: string, public status = 500) { super(message); }
 }
-export async function readMarketDay(date: string, signal?: AbortSignal): Promise<MarketRow[]> {
+export async function readRawMarketDay(date: string, signal?: AbortSignal): Promise<unknown[]> {
   if (!isValidDate(date)) throw new MarketDataError("날짜 형식이 올바르지 않습니다.", 400);
   if (marketClosedReason(date,parseAdditionalHolidays(process.env.MARKET_HOLIDAYS))) return [];
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -13,18 +13,36 @@ export async function readMarketDay(date: string, signal?: AbortSignal): Promise
   for (let offset = 0; ; offset += 500) {
     const query = new URLSearchParams({ select: "*", createdat: "eq." + date, order: "id.desc", limit: "500", offset: String(offset) });
     const combined = signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
-    const response = await fetch(url.replace(/\/$/, "").replace(/\/rest\/v1$/, "") + "/rest/v1/logs?" + query.toString(), {
+    let response: Response;
+    try { response = await fetch(url.replace(/\/$/, "").replace(/\/rest\/v1$/, "") + "/rest/v1/logs?" + query.toString(), {
       headers: { apikey: key, authorization: "Bearer " + key, "content-type": "application/json" },
       cache: "no-store", signal: combined,
     });
-    if (!response.ok) throw new MarketDataError("저장 데이터를 읽지 못했습니다. 잠시 후 다시 시도해 주세요.", 502);
-    const values: unknown = await response.json();
+    } catch (error) {
+      console.error("MARKET_DAY_FETCH_FAILED", { date, offset, errorName: error instanceof Error ? error.name : "Unknown" });
+      throw new MarketDataError("저장 데이터 연결이 실패하거나 지연됐습니다. 잠시 후 다시 시도해 주세요.", 502);
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const code = typeof body?.code === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(body.code) ? body.code : null;
+      console.error("MARKET_DAY_HTTP_ERROR", { date, offset, status: response.status, code });
+      throw new MarketDataError("저장 데이터를 읽지 못했습니다. 잠시 후 다시 시도해 주세요.", 502);
+    }
+    let values: unknown;
+    try { values = await response.json(); }
+    catch {
+      console.error("MARKET_DAY_INVALID_JSON", { date, offset, status: response.status });
+      throw new MarketDataError("저장 데이터 응답 형식을 확인해 주세요.", 502);
+    }
     if (!Array.isArray(values)) throw new MarketDataError("저장 데이터 응답 형식을 확인해 주세요.", 502);
     all.push(...values);
     if (values.length < 500) break;
     if (offset >= 100000) throw new MarketDataError("하루 기록 수가 너무 많습니다. 중복 수집 설정을 확인해 주세요.", 502);
   }
-  return normalizeRows(all, date);
+  return all;
+}
+export async function readMarketDay(date: string, signal?: AbortSignal): Promise<MarketRow[]> {
+  return normalizeRows(await readRawMarketDay(date, signal), date);
 }
 export function requestedDate(request: Request) {
   const date = new URL(request.url).searchParams.get("date") || kstParts().date;

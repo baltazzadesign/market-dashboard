@@ -1,8 +1,8 @@
 export const KRX_AFTER_MARKET_EFFECTIVE_DATE = "2026-09-14";
 
-// Official KIS GitHub sample as of 2026-09-11. MARKET_CLS_CODE is intentionally
-// absent here because KIS announced it for 2026-09-14 but had not yet published
-// its exact output position in the sample. Never guess its index.
+// 2026-09-14 live H0STCNT0 payload verification:
+// 47 fields per trade record, with MARKET_CLS_CODE observed at index 46.
+// Official sample may still expose the previous 46-field layout.
 export const CURRENT_H0STCNT0_COLUMNS = [
   "MKSC_SHRN_ISCD", "STCK_CNTG_HOUR", "STCK_PRPR", "PRDY_VRSS_SIGN",
   "PRDY_VRSS", "PRDY_CTRT", "WGHN_AVRG_STCK_PRC", "STCK_OPRC",
@@ -15,7 +15,8 @@ export const CURRENT_H0STCNT0_COLUMNS = [
   "NEW_MKOP_CLS_CODE", "TRHT_YN", "ASKP_RSQN1", "BIDP_RSQN1",
   "TOTAL_ASKP_RSQN", "TOTAL_BIDP_RSQN", "VOL_TNRT",
   "PRDY_SMNS_HOUR_ACML_VOL", "PRDY_SMNS_HOUR_ACML_VOL_RATE",
-  "HOUR_CLS_CODE", "MRKT_TRTM_CLS_CODE", "VI_STND_PRC"
+  "HOUR_CLS_CODE", "MRKT_TRTM_CLS_CODE", "VI_STND_PRC",
+  "MARKET_CLS_CODE"
 ];
 
 export function parseSymbolConfig(value) {

@@ -1,18 +1,48 @@
 "use client";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Area, AreaChart, Brush, ComposedChart, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine, ReferenceDot, ReferenceArea } from "recharts";
-import { type MarketRow, type MarketEvent, OPEN_MINUTE, CLOSE_MINUTE, minuteLabel, formatNumber, record, numeric, sourceLabel } from "@/lib/balta-model";
+import { type MarketRow, type MarketEvent, OPEN_MINUTE, REGULAR_CLOSE_MINUTE, CLOSE_MINUTE, minuteLabel, formatNumber, record, numeric, sourceLabel } from "@/lib/balta-model";
 import { Icon } from "./Icon";
-import { chartColors as colors, chartNames, chartPoints, fitDomain, MIN_WINDOW, panDomain, seriesMap, seriesValue, zoomDomain, type ChartKind, type Domain, type Series } from "./chart-model";
+import { chartColors as colors, chartNames, MIN_WINDOW, seriesMap, seriesValue, type ChartKind, type Domain, type Series } from "./chart-model";
 export type { ChartKind, Domain } from "./chart-model";
-export { chartNames, fitDomain } from "./chart-model";
+export { chartNames } from "./chart-model";
+
+export function fitDomain(start: number, end: number): Domain {
+  const total = CLOSE_MINUTE - OPEN_MINUTE;
+  let left = Math.round(Math.min(start, end));
+  let right = Math.round(Math.max(start, end));
+  let width = Math.max(MIN_WINDOW, right - left);
+  if (width >= total) return [OPEN_MINUTE, CLOSE_MINUTE];
+  left = Math.max(OPEN_MINUTE, Math.min(CLOSE_MINUTE - width, left));
+  right = left + width;
+  if (right > CLOSE_MINUTE) { right = CLOSE_MINUTE; left = Math.max(OPEN_MINUTE, right - width); }
+  return [left, right];
+}
+function zoomDomain(domain: Domain, factor: number, anchor = (domain[0] + domain[1]) / 2): Domain {
+  const width = domain[1] - domain[0];
+  const nextWidth = Math.max(MIN_WINDOW, Math.min(CLOSE_MINUTE - OPEN_MINUTE, Math.round(width * factor)));
+  const fraction = width > 0 ? (anchor - domain[0]) / width : .5;
+  return fitDomain(anchor - nextWidth * fraction, anchor + nextWidth * (1 - fraction));
+}
+function panDomain(domain: Domain, delta: number): Domain {
+  const width = domain[1] - domain[0];
+  return fitDomain(domain[0] + delta, domain[0] + delta + width);
+}
 
 function activeMinute(event: unknown) {
   const minute = numeric(record(event).activeLabel);
   return minute === null ? null : Math.round(Math.max(OPEN_MINUTE, Math.min(CLOSE_MINUTE, minute)));
 }
+const BREADTH_SERIES = new Set(["up", "down", "flat", "diff", "accel", "upRatio", "downRatio", "marketScore"]);
+const FLOW_SERIES = new Set(["foreignFlow", "instFlow", "indivFlow", "flowPower", "flowTrend", "flowMomentum"]);
+function chartSeriesValue(row: MarketRow | undefined, series: Series) {
+  if (!row) return null;
+  if (BREADTH_SERIES.has(series.key) && !["LIVE", "FALLBACK"].includes(row.breadthSource)) return null;
+  if (FLOW_SERIES.has(series.key) && !["LIVE", "FALLBACK"].includes(row.flowSource)) return null;
+  return seriesValue(row, series);
+}
 function displayValue(row: MarketRow | undefined, series: Series) {
-  const value = seriesValue(row, series);
+  const value = chartSeriesValue(row, series);
   return formatNumber(value, series.digits ?? 0, series.signed) + (value === null ? "" : series.unit ?? "");
 }
 function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: readonly unknown[]; label?: unknown }) {
@@ -41,7 +71,17 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
   const allSeries = seriesMap[kind], visible = allSeries.filter(s => !hidden.includes(s.key));
   const latest = rows.at(-1), fullDomain = domain[0] === OPEN_MINUTE && domain[1] === CLOSE_MINUTE;
   const width = domain[1] - domain[0];
-  const allPoints = useMemo(() => chartPoints(rows), [rows]);
+  const allPoints = useMemo(() => {
+    const rowByMinute = new Map(rows.map(row => [row.minute, row]));
+    return Array.from({ length: CLOSE_MINUTE - OPEN_MINUTE + 1 }, (_, index) => {
+      const minute = OPEN_MINUTE + index;
+      const row = rowByMinute.get(minute);
+      const point: Record<string, unknown> = { minute, time: minuteLabel(minute) };
+      if (row) Object.assign(point, row);
+      for (const series of allSeries) point[series.key] = chartSeriesValue(row, series);
+      return point;
+    });
+  }, [rows, allSeries]);
   const points = useMemo(() => allPoints.slice(domain[0] - OPEN_MINUTE, domain[1] - OPEN_MINUTE + 1), [allPoints, domain]);
   const inspectedMinute = onHoverMinute ? hoverMinute : localHover;
   const inspectedRow = inspectedMinute === null ? undefined : rows.find(row => row.minute === inspectedMinute);
@@ -70,7 +110,7 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
     if (kind === "score") return [-100, 100];
     if (kind === "ratio") return [0, 100];
     if (["index", "kospi", "kosdaq"].includes(kind) || autoScale) return ["auto", "auto"];
-    const max = Math.max(kind === "flow" ? 1200 : 1800, ...rows.filter(row => row.minute >= domain[0] && row.minute <= domain[1]).flatMap(row => visible.map(s => Math.abs(seriesValue(row, s) ?? 0))));
+    const max = Math.max(kind === "flow" ? 1200 : 1800, ...rows.filter(row => row.minute >= domain[0] && row.minute <= domain[1]).flatMap(row => visible.map(s => Math.abs(chartSeriesValue(row, s) ?? 0))));
     return [-Math.ceil(max * 1.05), Math.ceil(max * 1.05)];
   }, [kind, autoScale, rows, domain, visible]);
   const step = width <= 15 ? 2 : width <= 45 ? 5 : width <= 120 ? 15 : compact ? 60 : 30;
@@ -91,7 +131,7 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
       {kind === "flow" && latest && latest.flowSource !== "LIVE" && <div className="chart-source-note"><Icon name="warning" size={13}/>{sourceLabel(latest.flowSource)}</div>}
     </div>
     <div className="chart-controls">
-      <div className="chart-control-group"><button className="button ghost icon small" aria-label="차트 확대" title="확대 (+)" disabled={!onDomainChange || width <= MIN_WINDOW} onClick={() => zoom(.5)}>+</button><button className="button ghost icon small" aria-label="차트 축소" title="축소 (−)" disabled={!onDomainChange || fullDomain} onClick={() => zoom(2)}>−</button><span className="chart-zoom num">{(390 / width).toFixed(1)}×</span><button className="button ghost icon small" aria-label="이전 시간대로 이동" disabled={!onDomainChange || domain[0] <= OPEN_MINUTE} onClick={() => pan(-1)}><Icon name="left" size={14}/></button><button className="button ghost icon small" aria-label="다음 시간대로 이동" disabled={!onDomainChange || domain[1] >= CLOSE_MINUTE} onClick={() => pan(1)}><Icon name="right" size={14}/></button></div>
+      <div className="chart-control-group"><button className="button ghost icon small" aria-label="차트 확대" title="확대 (+)" disabled={!onDomainChange || width <= MIN_WINDOW} onClick={() => zoom(.5)}>+</button><button className="button ghost icon small" aria-label="차트 축소" title="축소 (−)" disabled={!onDomainChange || fullDomain} onClick={() => zoom(2)}>−</button><span className="chart-zoom num">{((CLOSE_MINUTE - OPEN_MINUTE) / width).toFixed(1)}×</span><button className="button ghost icon small" aria-label="이전 시간대로 이동" disabled={!onDomainChange || domain[0] <= OPEN_MINUTE} onClick={() => pan(-1)}><Icon name="left" size={14}/></button><button className="button ghost icon small" aria-label="다음 시간대로 이동" disabled={!onDomainChange || domain[1] >= CLOSE_MINUTE} onClick={() => pan(1)}><Icon name="right" size={14}/></button></div>
       <div className="chart-control-group">{!compact && <button className="button ghost small" aria-pressed={dragMode === "pan"} onClick={() => setDragMode(old => old === "zoom" ? "pan" : "zoom")} title="드래그 동작 전환">{dragMode === "zoom" ? "드래그: 확대" : "드래그: 이동"}</button>}<button className="button ghost small" onClick={reset} disabled={!onDomainChange}>전체</button>{!compact && <button className="button ghost small" disabled={!latest || !onDomainChange} onClick={() => { if (onLatest) onLatest(); else if (latest) onDomainChange?.(fitDomain(latest.minute - 60, latest.minute)); }}>최근 1시간</button>}{onExpand && <button className="button ghost icon small" aria-label={chartNames[kind] + " 화면 확대"} onClick={onExpand}><Icon name="expand" size={15}/></button>}</div>
     </div>
     <div className="chart-inspection" id={id + "-help"}><span className="num">{inspectedMinute !== null ? "커서 " + minuteLabel(inspectedMinute) : minuteLabel(domain[0]) + "–" + minuteLabel(domain[1])}</span>{inspectedMinute !== null ? inspectedRow ? visible.map(s => <span key={s.key} style={{ color: s.color }}>{s.name} <strong className="num">{displayValue(inspectedRow, s)}</strong></span>) : <span>해당 시각 기록 없음</span> : <span>{compact ? "시간축 연동" : "Ctrl/⌘ + 휠 확대 · 더블클릭 초기화"}</span>}</div>
@@ -109,12 +149,13 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
           <YAxis yAxisId="left" domain={fixedDomain} tick={{ fill: "#999fa9", fontSize: 12 }} tickFormatter={v => Math.abs(Number(v)) >= 10000 ? (Number(v) / 1000).toFixed(1) + "k" : Number(v).toLocaleString("ko-KR", { maximumFractionDigits: 0 })} tickLine={false} axisLine={false} width={62} tickCount={5}/>
           {kind === "index" && <YAxis yAxisId="right" orientation="right" domain={["auto", "auto"]} tick={{ fill: colors.violet, fontSize: 12 }} tickLine={false} axisLine={false} width={52}/>}
           <Tooltip content={<ChartTooltip/>} cursor={false} isAnimationActive={false}/>
+          <ReferenceLine yAxisId="left" x={REGULAR_CLOSE_MINUTE} stroke="#6f7782" strokeOpacity={.45} strokeDasharray="4 5"/>
           {!["index", "kospi", "kosdaq"].includes(kind) && <ReferenceLine yAxisId="left" y={kind === "ratio" ? 50 : 0} stroke="#717780" strokeOpacity={.6} strokeDasharray="4 5"/>}
           {kind === "score" && <><ReferenceLine yAxisId="left" y={70} stroke="#60353a" strokeDasharray="3 6"/><ReferenceLine yAxisId="left" y={-70} stroke="#304361" strokeDasharray="3 6"/></>}
           {visible.map(s => <Area key={s.key} yAxisId={s.axis ?? "left"} dataKey={s.key} name={s.name} type="linear" stroke={s.color} strokeWidth={compact ? 1.65 : 1.9} fill={"url(#" + id + s.key + ")"} baseValue={["index", "kospi", "kosdaq"].includes(kind) ? "dataMin" : 0} dot={false} activeDot={{ r: 4, stroke: "#0d0f12", strokeWidth: 2 }} connectNulls={false} isAnimationActive={false}/>)}
           {markerEvents.map(e => <ReferenceDot key={e.id} yAxisId="left" x={e.minute} y={kind === "score" ? e.marketScore : e.diff} r={3} fill={e.direction === "up" ? colors.red : e.direction === "down" ? colors.blue : colors.yellow} stroke="#0d0f12" strokeWidth={1.5}/>)}
           {currentVisible && <ReferenceLine yAxisId="left" x={latest.minute} stroke="#aeb4bf" strokeOpacity={.3} strokeDasharray="2 5"/>}
-          {currentVisible && visible.map(s => { const value = seriesValue(latest, s); return value === null ? null : <ReferenceDot key={s.key} yAxisId={s.axis ?? "left"} x={latest.minute} y={value} r={3} fill={s.color} stroke="#0d0f12" strokeWidth={1.5}/>; })}
+          {currentVisible && visible.map(s => { const value = chartSeriesValue(latest, s); return value === null ? null : <ReferenceDot key={s.key} yAxisId={s.axis ?? "left"} x={latest.minute} y={value} r={3} fill={s.color} stroke="#0d0f12" strokeWidth={1.5}/>; })}
           {referenceMinute != null && referenceMinute >= domain[0] && referenceMinute <= domain[1] && <ReferenceLine yAxisId="left" x={referenceMinute} stroke="#ccd0d6" strokeDasharray="3 4"/>}
           {drag && dragMode === "zoom" && <ReferenceArea yAxisId="left" x1={Math.min(...drag)} x2={Math.max(...drag)} fill="#9caec7" fillOpacity={.15} stroke="#99a8bd" strokeOpacity={.45}/>}
         </ComposedChart>

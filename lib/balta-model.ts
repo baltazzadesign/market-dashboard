@@ -1,9 +1,11 @@
 export const OPEN_MINUTE = 9 * 60;
-export const CLOSE_MINUTE = 15 * 60 + 30;
+export const REGULAR_CLOSE_MINUTE = 15 * 60 + 30;
+export const CLOSE_MINUTE = 20 * 60;
+export type MarketSession = "REGULAR" | "AFTER_HOURS_CLOSE" | "OLD_AFTER_HOURS_SINGLE_PRICE" | "KRX_AFTER_MARKET" | "CLOSED" | "UNKNOWN";
 export type RawRecord = Record<string, unknown>;
 export type SignalLevel = "강" | "중" | "약";
 export type MarketRow = {
-  id: number; date: string; time: string; minute: number;
+  id: number; date: string; time: string; minute: number; session: MarketSession;
   up: number; down: number; flat: number; diff: number; accel: number;
   upRatio: number; downRatio: number; kospi: number | null; kosdaq: number | null;
   foreignFlow: number | null; instFlow: number | null; indivFlow: number | null;
@@ -67,13 +69,22 @@ export function calcScore(diff: number, upRatio: number, downRatio: number) {
 export function normalizeRow(value: unknown, date: string): MarketRow {
   const r = record(value), n = (key: string) => numeric(r[key]);
   const time = formatTime(r.time);
+  const minute = timeToMinute(time);
+  const marketData = record(r.market_data ?? r.marketData);
+  const state = String(r.marketState ?? r.marketstate ?? "");
+  const stateSession = state.match(/SESSION_(REGULAR|AFTER_HOURS_CLOSE|OLD_AFTER_HOURS_SINGLE_PRICE|KRX_AFTER_MARKET|CLOSED)/i)?.[1]?.toUpperCase();
+  const rawSession = String(r.marketSession ?? r.session ?? marketData.session ?? stateSession ?? "").toUpperCase();
+  const session: MarketSession = (["REGULAR", "AFTER_HOURS_CLOSE", "OLD_AFTER_HOURS_SINGLE_PRICE", "KRX_AFTER_MARKET", "CLOSED"].includes(rawSession)
+    ? rawSession
+    : minute >= OPEN_MINUTE && minute <= REGULAR_CLOSE_MINUTE
+      ? "REGULAR"
+      : "UNKNOWN") as MarketSession;
   const up = n("up") ?? 0, down = n("down") ?? 0, flat = n("flat") ?? 0;
   const total = up + down + flat;
   const diff = n("diff") ?? up - down;
   const ratio = (value: unknown, fallback: number) => Math.max(0, Math.min(1, numeric(value) ?? fallback));
   const upRatio = ratio(r.upRatio ?? r.upratio, total ? up / total : 0);
   const downRatio = ratio(r.downRatio ?? r.downratio, total ? down / total : 0);
-  const state = String(r.marketState ?? r.marketstate ?? "");
   const flowSource = String(r.flowSource ?? r.flowsource ?? r.flowStatus ?? state.match(/FLOW_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED)/i)?.[1] ?? "UNKNOWN").toUpperCase();
   const breadthSource = String(r.breadthSource ?? state.match(/BREADTH_(LIVE|FALLBACK|EMPTY|ERROR|FILTERED|SKIPPED)/i)?.[1] ?? "UNKNOWN").toUpperCase();
   const unavailable = ["EMPTY", "ERROR", "FILTERED"].includes(flowSource);
@@ -83,7 +94,7 @@ export function normalizeRow(value: unknown, date: string): MarketRow {
   const indivFlow = flow(r.indivFlow ?? r.indivflow ?? r.indiv);
   const flowPower = flow(r.flowPower ?? r.flowpower) ?? (foreignFlow !== null && instFlow !== null ? foreignFlow + instFlow : null);
   return {
-    id: n("id") ?? 0, date, time, minute: timeToMinute(time), up, down, flat, diff, accel: n("accel") ?? 0,
+    id: n("id") ?? 0, date, time, minute, session, up, down, flat, diff, accel: n("accel") ?? 0,
     upRatio, downRatio, kospi: (n("kospi") ?? 0) > 0 ? n("kospi") : null, kosdaq: (n("kosdaq") ?? 0) > 0 ? n("kosdaq") : null,
     foreignFlow, instFlow, indivFlow, flowPower, flowTrend: flow(r.flowTrend ?? r.flowtrend), flowMomentum: flow(r.flowMomentum ?? r.flowmomentum),
     flowSource, breadthSource, marketState: state, marketTone: String(r.marketTone ?? r.markettone ?? ""),
@@ -149,8 +160,20 @@ export function dataStatus(row: MarketRow | undefined, date: string, error: stri
   if (error) return { label: "연결 확인 필요", tone: "error", detail: row ? "마지막 조회값 유지" : "데이터를 불러오지 못했습니다" };
   if (date !== kst.date) return { label: "과거 기록", tone: "neutral", detail: date };
   if (!row) return { label: "데이터 대기", tone: "neutral", detail: "선택한 날짜에 기록 없음" };
-  if (kst.weekend || kst.minute < OPEN_MINUTE || kst.minute > CLOSE_MINUTE) return { label: "정규장 시간 외", tone: "neutral", detail: "마지막 기록 " + row.time };
-  const delay = kst.minute - row.minute;
+  if (kst.weekend || kst.minute < OPEN_MINUTE || kst.minute >= CLOSE_MINUTE) return { label: "장마감", tone: "neutral", detail: "마지막 기록 " + row.time };
+  const delay = Math.max(0, kst.minute - row.minute);
+  if (kst.minute > REGULAR_CLOSE_MINUTE && kst.minute < 16 * 60) {
+    if (row.session !== "AFTER_HOURS_CLOSE") return { label: "장후종가 데이터 대기", tone: "warn", detail: "마지막 기록 " + row.time };
+    if (delay >= 3) return { label: "장후종가 데이터 지연", tone: "warn", detail: delay + "분 전 기록" };
+    return { label: "장후종가 기록 중", tone: "", detail: row.time + " 기준" };
+  }
+  if (kst.minute >= 16 * 60 && kst.minute < CLOSE_MINUTE) {
+    if (row.session !== "KRX_AFTER_MARKET") return { label: "애프터마켓 데이터 대기", tone: "warn", detail: "마지막 기록 " + row.time };
+    if (delay >= 3) return { label: "애프터마켓 데이터 지연", tone: "warn", detail: delay + "분 전 기록" };
+    if (["ERROR", "EMPTY", "FILTERED"].includes(row.flowSource) || ["ERROR", "EMPTY", "SKIPPED", "FILTERED"].includes(row.breadthSource))
+      return { label: "애프터마켓 기록 중", tone: "warn", detail: row.time + " · 제공되는 지표만 기록" };
+    return { label: "애프터마켓 기록 중", tone: "", detail: row.time + " 기준" };
+  }
   if (delay >= 3) return { label: "데이터 지연", tone: "warn", detail: delay + "분 전 기록" };
   if (["FALLBACK", "ERROR", "EMPTY", "FILTERED"].includes(row.flowSource) || ["FALLBACK", "ERROR", "EMPTY", "SKIPPED"].includes(row.breadthSource))
     return { label: "일부 데이터 확인", tone: "warn", detail: sourceLabel(row.flowSource) };
@@ -187,8 +210,8 @@ export function csvCell(value: unknown) {
   return '"' + text.replace(/"/g, '""') + '"';
 }
 export function rowsCsv(rows: MarketRow[]) {
-  const headers = ["날짜","시간","상승 종목","하락 종목","보합 종목","시장 폭","가속도","상승 비율(%)","하락 비율(%)","시장점수","KOSPI","KOSDAQ","외국인(억원)","기관(억원)","개인(억원)","합산수급(억원)","수급상태","종목수상태"];
-  const values = rows.map(r => [r.date,r.time,r.up,r.down,r.flat,r.diff,r.accel,Number((r.upRatio*100).toFixed(2)),Number((r.downRatio*100).toFixed(2)),r.marketScore,r.kospi,r.kosdaq,r.foreignFlow,r.instFlow,r.indivFlow,r.flowPower,r.flowSource,r.breadthSource]);
+  const headers = ["날짜","시간","세션","상승 종목","하락 종목","보합 종목","시장 폭","가속도","상승 비율(%)","하락 비율(%)","시장점수","KOSPI","KOSDAQ","외국인(억원)","기관(억원)","개인(억원)","합산수급(억원)","수급상태","종목수상태"];
+  const values = rows.map(r => [r.date,r.time,r.session,r.up,r.down,r.flat,r.diff,r.accel,Number((r.upRatio*100).toFixed(2)),Number((r.downRatio*100).toFixed(2)),r.marketScore,r.kospi,r.kosdaq,r.foreignFlow,r.instFlow,r.indivFlow,r.flowPower,r.flowSource,r.breadthSource]);
   return "\uFEFF" + [headers,...values].map(row => row.map(csvCell).join(",")).join("\r\n");
 }
 export function eventsCsv(events: MarketEvent[]) {
