@@ -733,6 +733,34 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
 
     const out = pickOutput(data);
 
+    // 시장 데이터 필드만 기록합니다. 요청 헤더, 키, 토큰은 기록하지 않습니다.
+    if (
+      toNumber(out.ascn_issu_cnt ?? out.up_cnt) +
+      toNumber(out.down_issu_cnt ?? out.down_cnt) +
+      toNumber(out.stnr_issu_cnt ?? out.flat_cnt) === 0
+    ) {
+      const inspectOutput = (value: any) => {
+        const rows = Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
+        const fields = ["bstp_cls_code", "hts_kor_isnm", "bstp_nmix_prpr",
+          "ascn_issu_cnt", "down_issu_cnt", "stnr_issu_cnt", "uplm_issu_cnt", "lslm_issu_cnt",
+          "up_cnt", "down_cnt", "flat_cnt"];
+        return {
+          rowCount: rows.length,
+          rows: rows.slice(0, 3).map((row: any) => ({
+            keys: row && typeof row === "object" ? Object.keys(row) : [],
+            values: Object.fromEntries(fields.map((field) => [field, row?.[field] ?? null])),
+          })),
+        };
+      };
+      console.warn("BREADTH_DIAGNOSTIC_V1", JSON.stringify({
+        code, trId: "FHPUP02140000", httpStatus: res.status, rt_cd: data?.rt_cd,
+        selectedKeys: Object.keys(out),
+        output: inspectOutput(data?.output),
+        output1: inspectOutput(data?.output1),
+        output2: inspectOutput(data?.output2),
+      }));
+    }
+
     return {
       up: toNumber(out.ascn_issu_cnt ?? out.up_cnt),
       down: toNumber(out.down_issu_cnt ?? out.down_cnt),
