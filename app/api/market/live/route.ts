@@ -698,11 +698,11 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
     const token = await getAccessToken();
 
     const qs = new URLSearchParams({
-      fid_cond_mrkt_div_code: "U",
-      fid_input_iscd: code,
-      fid_cond_scr_div_code: "20214",
-      fid_mrkt_cls_code: code === "0001" ? "K" : "Q",
-      fid_blng_cls_code: "0",
+      FID_COND_MRKT_DIV_CODE: "U",
+      FID_INPUT_ISCD: code,
+      FID_COND_SCR_DIV_CODE: "20214",
+      FID_MRKT_CLS_CODE: code === "0001" ? "K" : "Q",
+      FID_BLNG_CLS_CODE: "0",
     });
 
     const res = await fetchWithTimeout(
@@ -752,8 +752,8 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
           })),
         };
       };
-      console.warn("BREADTH_DIAGNOSTIC_V1", JSON.stringify({
-        code, trId: "FHPUP02140000", httpStatus: res.status, rt_cd: data?.rt_cd,
+      console.warn("BREADTH_DIAGNOSTIC_V2", JSON.stringify({
+        code, requestParams: Object.fromEntries(qs.entries()), trId: "FHPUP02140000", httpStatus: res.status, rt_cd: data?.rt_cd,
         selectedKeys: Object.keys(out),
         output: inspectOutput(data?.output),
         output1: inspectOutput(data?.output1),
