@@ -18,6 +18,9 @@ let cachedToken: string | null = null;
 let cachedTokenExpireAt = 0;
 let tokenPromise: Promise<string> | null = null;
 let tokenCooldownUntil = 0;
+let cachedWsApprovalKey: string | null = null;
+let cachedWsApprovalExpireAt = 0;
+let wsApprovalPromise: Promise<string> | null = null;
 let lastSavedMinute = "";
 let memoryPrevDiff = 0;
 let memoryPrevFlowPower = 0;
@@ -35,6 +38,11 @@ let memoryLastBreadth: {
 const FLOW_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
 const KIS_FETCH_TIMEOUT_MS = Number(process.env.KIS_FETCH_TIMEOUT_MS ?? 8000);
 const KIS_BASE = process.env.KIS_BASE ?? "https://openapi.koreainvestment.com:9443";
+const KIS_WS_URL = process.env.KIS_WS_URL ?? "ws://ops.koreainvestment.com:21000";
+const KIS_WS_TIMEOUT_MS = Number(process.env.KIS_WS_TIMEOUT_MS ?? 4500);
+// KIS 공식 예제는 WebSocket approval key를 24시간 단위로 재인증합니다.
+// 서버리스 메모리 캐시는 그보다 짧은 23시간만 재사용합니다.
+const KIS_WS_APPROVAL_CACHE_MS = 23 * 60 * 60 * 1000;
 const CUSTTYPE = process.env.KIS_CUSTTYPE ?? "P";
 
 type FlowData = {
@@ -63,6 +71,20 @@ type BreadthData = {
   price: number;
   sectorRaw?: any;
   raw?: any;
+};
+
+type RealtimeIndexBreadth = {
+  code: "0001" | "1001";
+  up: number;
+  down: number;
+  flat: number;
+  price: number;
+  receivedAt: number;
+};
+
+type RealtimeIndexBreadthPair = {
+  kospi?: RealtimeIndexBreadth;
+  kosdaq?: RealtimeIndexBreadth;
 };
 
 const MIN_NORMAL_BREADTH_TOTAL = 1500;
@@ -888,6 +910,348 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
   }
 }
 
+
+// KIS WebSocket 접속키 발급.
+// 공식 샘플의 /oauth2/Approval + secretkey 규격을 그대로 사용합니다.
+async function getKisWsApprovalKey() {
+  const appkey = process.env.KIS_APPKEY;
+  const appsecret = process.env.KIS_APPSECRET;
+
+  if (!appkey || !appsecret) {
+    throw new Error("KIS_APPKEY 또는 KIS_APPSECRET 없음");
+  }
+
+  const now = Date.now();
+  if (cachedWsApprovalKey && now < cachedWsApprovalExpireAt) {
+    return cachedWsApprovalKey;
+  }
+
+  if (wsApprovalPromise) {
+    return wsApprovalPromise;
+  }
+
+  wsApprovalPromise = (async () => {
+    const res = await fetchWithTimeout(
+      `${KIS_BASE}/oauth2/Approval`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "client_credentials",
+          appkey,
+          secretkey: appsecret,
+        }),
+        cache: "no-store",
+      },
+      Math.min(KIS_FETCH_TIMEOUT_MS, 6000)
+    );
+
+    const raw = await res.text();
+    let json: any = null;
+
+    try {
+      json = JSON.parse(raw);
+    } catch {
+      throw new Error(`KIS WebSocket approval 응답 JSON 파싱 실패: ${raw.slice(0, 300)}`);
+    }
+
+    if (!res.ok || !json?.approval_key) {
+      throw new Error(
+        `KIS WebSocket approval 발급 실패 ${res.status}: ${String(
+          json?.error_description ?? json?.msg1 ?? raw
+        ).slice(0, 300)}`
+      );
+    }
+
+    cachedWsApprovalKey = String(json.approval_key);
+    cachedWsApprovalExpireAt = Date.now() + KIS_WS_APPROVAL_CACHE_MS;
+    return cachedWsApprovalKey;
+  })();
+
+  try {
+    return await wsApprovalPromise;
+  } finally {
+    wsApprovalPromise = null;
+  }
+}
+
+function buildKisWsSubscribeMessage(approvalKey: string, code: "0001" | "1001") {
+  return JSON.stringify({
+    header: {
+      approval_key: approvalKey,
+      custtype: CUSTTYPE,
+      tr_type: "1",
+      "content-type": "utf-8",
+    },
+    body: {
+      input: {
+        tr_id: "H0UPCNT0",
+        tr_key: code,
+      },
+    },
+  });
+}
+
+async function websocketDataToText(data: any) {
+  if (typeof data === "string") return data;
+
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder().decode(data);
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return new TextDecoder().decode(
+      new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    );
+  }
+
+  if (data && typeof data.text === "function") {
+    return await data.text();
+  }
+
+  return String(data ?? "");
+}
+
+function parseH0upcnt0Row(values: string[]): RealtimeIndexBreadth | null {
+  // KIS 공식 H0UPCNT0 컬럼 순서 (0-based):
+  // 0 bstp_cls_code, 2 prpr_nmix,
+  // 23 ascn_issu_cnt, 24 stnr_issu_cnt, 25 down_issu_cnt
+  const rawCode = String(values[0] ?? "").trim();
+  if (rawCode !== "0001" && rawCode !== "1001") return null;
+
+  const code = rawCode as "0001" | "1001";
+  const up = toNumber(values[23]);
+  const flat = toNumber(values[24]);
+  const down = toNumber(values[25]);
+  const price = toNumber(values[2]);
+
+  return {
+    code,
+    up,
+    down,
+    flat,
+    price,
+    receivedAt: Date.now(),
+  };
+}
+
+async function fetchRealtimeIndexBreadthPair(): Promise<RealtimeIndexBreadthPair> {
+  const WebSocketCtor = globalThis.WebSocket;
+
+  if (typeof WebSocketCtor !== "function") {
+    throw new Error("현재 Node 런타임에 WebSocket 전역 객체가 없습니다.");
+  }
+
+  const approvalKey = await getKisWsApprovalKey();
+
+  return await new Promise<RealtimeIndexBreadthPair>((resolve) => {
+    const result: RealtimeIndexBreadthPair = {};
+    let settled = false;
+    let socket: WebSocket | null = null;
+
+    const finish = (reason: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+
+      try {
+        if (socket && socket.readyState === 1) socket.close(1000, "breadth snapshot complete");
+      } catch {
+        // 연결 종료 실패는 snapshot 결과에 영향을 주지 않습니다.
+      }
+
+      console.log("BREADTH_WS_FINISH", {
+        reason,
+        kospi: result.kospi
+          ? { up: result.kospi.up, down: result.kospi.down, flat: result.kospi.flat }
+          : null,
+        kosdaq: result.kosdaq
+          ? { up: result.kosdaq.up, down: result.kosdaq.down, flat: result.kosdaq.flat }
+          : null,
+      });
+
+      resolve(result);
+    };
+
+    const timeoutId = setTimeout(() => {
+      console.warn("BREADTH_WS_TIMEOUT", {
+        timeoutMs: KIS_WS_TIMEOUT_MS,
+        receivedKospi: Boolean(result.kospi),
+        receivedKosdaq: Boolean(result.kosdaq),
+      });
+      finish("timeout");
+    }, KIS_WS_TIMEOUT_MS);
+
+    try {
+      socket = new WebSocketCtor(KIS_WS_URL);
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.warn("BREADTH_WS_CONNECT_FAILED", { error: String(error) });
+      resolve(result);
+      return;
+    }
+
+    socket.addEventListener("open", () => {
+      try {
+        socket?.send(buildKisWsSubscribeMessage(approvalKey, "0001"));
+
+        // 공식 샘플처럼 구독 요청 사이에 아주 짧은 간격을 둡니다.
+        setTimeout(() => {
+          try {
+            if (socket?.readyState === 1) {
+              socket.send(buildKisWsSubscribeMessage(approvalKey, "1001"));
+            }
+          } catch (error) {
+            console.warn("BREADTH_WS_SUBSCRIBE_FAILED", {
+              code: "1001",
+              error: String(error),
+            });
+          }
+        }, 100);
+      } catch (error) {
+        console.warn("BREADTH_WS_SUBSCRIBE_FAILED", {
+          code: "0001",
+          error: String(error),
+        });
+        finish("subscribe_failed");
+      }
+    });
+
+    socket.addEventListener("message", (event: any) => {
+      void (async () => {
+        try {
+          const raw = await websocketDataToText(event?.data);
+          if (!raw) return;
+
+          // 실시간 데이터: 0|H0UPCNT0|001|...^... 형태
+          if (raw[0] === "0" || raw[0] === "1") {
+            const parts = raw.split("|");
+            if (parts.length < 4 || parts[1] !== "H0UPCNT0") return;
+
+            // H0UPCNT0는 비암호화(0) 시세를 사용합니다.
+            if (raw[0] !== "0") {
+              console.warn("BREADTH_WS_ENCRYPTED_UNEXPECTED", { trId: parts[1] });
+              return;
+            }
+
+            const fieldCount = 31;
+            const count = Math.max(1, Number(parts[2]) || 1);
+            const values = parts.slice(3).join("|").split("^");
+
+            for (let i = 0; i < count; i += 1) {
+              const rowValues = values.slice(i * fieldCount, (i + 1) * fieldCount);
+              const parsed = parseH0upcnt0Row(rowValues);
+              if (!parsed) continue;
+
+              if (parsed.code === "0001") result.kospi = parsed;
+              if (parsed.code === "1001") result.kosdaq = parsed;
+
+              console.log("BREADTH_WS_RESULT", {
+                code: parsed.code,
+                up: parsed.up,
+                down: parsed.down,
+                flat: parsed.flat,
+                total: parsed.up + parsed.down + parsed.flat,
+                price: parsed.price,
+              });
+            }
+
+            if (result.kospi && result.kosdaq) {
+              finish("both_received");
+            }
+            return;
+          }
+
+          // 구독 ACK / PINGPONG JSON 메시지
+          if (raw.trim().startsWith("{")) {
+            let message: any = null;
+            try {
+              message = JSON.parse(raw);
+            } catch {
+              return;
+            }
+
+            const trId = String(message?.header?.tr_id ?? "");
+            if (trId === "PINGPONG") {
+              // 공식 샘플 중 send(data) 방식과 동일하게 echo합니다.
+              try {
+                if (socket?.readyState === 1) socket.send(raw);
+              } catch {
+                // 짧은 snapshot 연결에서는 ping 응답 실패 시 timeout으로 자연스럽게 종료됩니다.
+              }
+              return;
+            }
+
+            const rtCd = String(message?.body?.rt_cd ?? "");
+            const msg1 = String(message?.body?.msg1 ?? "");
+            const trKey = String(message?.header?.tr_key ?? "");
+
+            if (rtCd === "1") {
+              console.warn("BREADTH_WS_ACK_ERROR", { trId, trKey, msg1 });
+
+              // approval key 관련 오류일 가능성에 대비해 다음 요청에서 재발급합니다.
+              if (/approval|key|인증|접속/i.test(msg1)) {
+                cachedWsApprovalKey = null;
+                cachedWsApprovalExpireAt = 0;
+              }
+            } else if (rtCd === "0") {
+              console.log("BREADTH_WS_ACK", { trId, trKey, msg1 });
+            }
+          }
+        } catch (error) {
+          console.warn("BREADTH_WS_MESSAGE_ERROR", { error: String(error) });
+        }
+      })();
+    });
+
+    socket.addEventListener("error", (event: any) => {
+      console.warn("BREADTH_WS_ERROR", {
+        message: String(event?.message ?? "WebSocket error"),
+      });
+      finish("error");
+    });
+
+    socket.addEventListener("close", (event: any) => {
+      if (!settled) {
+        console.warn("BREADTH_WS_CLOSED_EARLY", {
+          code: event?.code,
+          reason: event?.reason,
+        });
+        finish("closed_early");
+      }
+    });
+  });
+}
+
+function applyRealtimeIndexBreadth(target: BreadthData, realtime: RealtimeIndexBreadth) {
+  target.up = realtime.up;
+  target.down = realtime.down;
+  target.flat = realtime.flat;
+
+  if (target.price <= 0 && realtime.price > 0) {
+    target.price = realtime.price;
+  }
+
+  const existingOutput1 =
+    target.raw?.output1 && !Array.isArray(target.raw.output1) && typeof target.raw.output1 === "object"
+      ? target.raw.output1
+      : {};
+
+  target.raw = {
+    ...(target.raw ?? {}),
+    output1: {
+      ...existingOutput1,
+      bstp_cls_code: realtime.code,
+      bstp_nmix_prpr: String(target.price > 0 ? target.price : realtime.price),
+      ascn_issu_cnt: String(realtime.up),
+      stnr_issu_cnt: String(realtime.flat),
+      down_issu_cnt: String(realtime.down),
+    },
+    breadthSnapshotTrId: "H0UPCNT0",
+    breadthSnapshotSource: "WEBSOCKET_FALLBACK",
+  };
+}
+
 function normalizeFlowUnit(value: number) {
   // TR_074 금액 필드는 실제 증권사 화면의 억원 단위보다 100배 크게 내려옵니다.
   // 예: 원본 416,200 -> 화면 4,162억.
@@ -1642,10 +2006,59 @@ export async function GET(req: Request) {
       getLatestNormalBreadthRowFromSupabase(createdat),
     ]);
 
-    const liveUp = kospiData.up + kosdaqData.up;
-    const liveDown = kospiData.down + kosdaqData.down;
-    const liveFlat = kospiData.flat + kosdaqData.flat;
-    const liveTotal = liveUp + liveDown + liveFlat;
+    let liveUp = kospiData.up + kosdaqData.up;
+    let liveDown = kospiData.down + kosdaqData.down;
+    let liveFlat = kospiData.flat + kosdaqData.flat;
+    let liveTotal = liveUp + liveDown + liveFlat;
+    let liveBreadthTransport: "REST_063_066" | "H0UPCNT0" = "REST_063_066";
+
+    // 063/066 REST가 지수 가격은 주면서 시장폭만 0으로 반환하는 경우가 있어
+    // 실제 실시간 국내지수 WebSocket(H0UPCNT0)에서 KOSPI/KOSDAQ 시장폭을 1회 snapshot으로 보완합니다.
+    if (liveTotal <= 0) {
+      try {
+        const wsBreadth = await fetchRealtimeIndexBreadthPair();
+        const before = { up: liveUp, down: liveDown, flat: liveFlat, total: liveTotal };
+        const applied: string[] = [];
+
+        if (
+          wsBreadth.kospi &&
+          wsBreadth.kospi.up + wsBreadth.kospi.down + wsBreadth.kospi.flat > 0
+        ) {
+          applyRealtimeIndexBreadth(kospiData, wsBreadth.kospi);
+          applied.push("0001");
+        }
+
+        if (
+          wsBreadth.kosdaq &&
+          wsBreadth.kosdaq.up + wsBreadth.kosdaq.down + wsBreadth.kosdaq.flat > 0
+        ) {
+          applyRealtimeIndexBreadth(kosdaqData, wsBreadth.kosdaq);
+          applied.push("1001");
+        }
+
+        liveUp = kospiData.up + kosdaqData.up;
+        liveDown = kospiData.down + kosdaqData.down;
+        liveFlat = kospiData.flat + kosdaqData.flat;
+        liveTotal = liveUp + liveDown + liveFlat;
+
+        if (applied.length > 0) {
+          liveBreadthTransport = "H0UPCNT0";
+          console.warn("BREADTH_WS_FALLBACK_APPLIED", {
+            applied,
+            before,
+            after: { up: liveUp, down: liveDown, flat: liveFlat, total: liveTotal },
+          });
+        } else {
+          console.warn("BREADTH_WS_FALLBACK_EMPTY", {
+            restTotal: before.total,
+            receivedKospi: Boolean(wsBreadth.kospi),
+            receivedKosdaq: Boolean(wsBreadth.kosdaq),
+          });
+        }
+      } catch (error) {
+        console.warn("BREADTH_WS_FALLBACK_FAILED", { error: String(error) });
+      }
+    }
 
     const memoryBreadthRow = getMemoryBreadthFallbackRow();
     const prevNormalRow =
@@ -1655,7 +2068,10 @@ export async function GET(req: Request) {
     const prevNormalTotal = getBreadthTotal(prevNormalRow);
 
     let breadthSource: BreadthSource = "LIVE";
-    let breadthFallbackReason = "";
+    let breadthFallbackReason =
+      liveBreadthTransport === "H0UPCNT0"
+        ? "REST 063/066 breadth=0 -> H0UPCNT0 WebSocket live fallback"
+        : "";
 
     let up = liveUp;
     let down = liveDown;
@@ -1665,13 +2081,13 @@ export async function GET(req: Request) {
       breadthSource = "FALLBACK";
       breadthFallbackReason =
         liveTotal < MIN_NORMAL_BREADTH_TOTAL
-          ? `063 합산 총합 비정상/결측: current=${liveTotal}, prev=${prevNormalTotal}`
-          : `063 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
+          ? `live breadth 합산 총합 비정상/결측: current=${liveTotal}, prev=${prevNormalTotal}`
+          : `live breadth 합산 총합 급감: current=${liveTotal}, prev=${prevNormalTotal}`;
       up = toNumber(prevNormalRow.up);
       down = toNumber(prevNormalRow.down);
       flat = toNumber(prevNormalRow.flat);
 
-      console.warn("⚠️ 063 breadth 급감 감지, 직전 정상값으로 대체:", {
+      console.warn("⚠️ live breadth 급감 감지, 직전 정상값으로 대체:", {
         time: timeStr,
         liveTotal,
         prevNormalTotal,
@@ -1735,6 +2151,8 @@ export async function GET(req: Request) {
           : null,
         memoryLastFlow,
         memoryLastBreadth,
+        liveBreadthTransport,
+        breadthFallbackReason,
       });
     }
 
