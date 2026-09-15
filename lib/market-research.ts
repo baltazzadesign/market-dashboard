@@ -1,5 +1,21 @@
 import {type MarketRow, type MarketEvent, numeric, record,signalLabel,eventDirection,eventLevel} from './balta-model';
-export type Sector={code:string;name:string;market:'kospi'|'kosdaq';price:number;change:number|null;turnoverRaw:number|null};
+
+export type Sector={
+ code:string;
+ name:string;
+ market:'kospi'|'kosdaq';
+ price:number;
+ change:number|null;
+ turnoverRaw:number|null;
+};
+
+export type SectorStrength=Sector&{
+ strength:number;
+ rank:number;
+ turnoverShare:number;
+ sizeLevel:1|2|3;
+};
+
 // TR066 output2 fields: KIS official inquire_index_category_price sample.
 export function parseSectors(raw:unknown,market:Sector['market']):Sector[]{
  const body=record(raw);if(String(body.rt_cd)!=='0'||!Array.isArray(body.output2))return [];
@@ -9,6 +25,41 @@ export function parseSectors(raw:unknown,market:Sector['market']):Sector[]{
  found.set(code,{code,name,market,price,change,turnoverRaw:numeric(r.acml_tr_pbmn)});
  }return [...found.values()];
 }
+
+function clamp(value:number,min:number,max:number){return Math.max(min,Math.min(max,value));}
+
+/**
+ * 섹터 강도는 "등락률 + 거래대금 집중도"를 한 화면에서 비교하기 위한 상대 점수입니다.
+ * 절대 투자 신호가 아니라 현재 조회된 섹터 집합 안에서의 상대 순위이며 -100~+100 범위입니다.
+ * 색 강도는 strength, 타일 크기는 turnoverShare/sizeLevel에 사용합니다.
+ */
+export function rankSectorStrength(sectors:Sector[]):SectorStrength[]{
+ if(!sectors.length)return [];
+ const changes=sectors.map(s=>Math.abs(s.change??0)).filter(Number.isFinite);
+ const maxAbsChange=Math.max(0.01,...changes);
+ const turnovers=sectors.map(s=>Math.max(0,s.turnoverRaw??0));
+ const totalTurnover=turnovers.reduce((sum,v)=>sum+v,0);
+ const maxTurnover=Math.max(1,...turnovers);
+
+ const scored=sectors.map((sector,index)=>{
+   const change=sector.change??0;
+   const changeNorm=clamp(change/maxAbsChange,-1,1);
+   const turnover=Math.max(0,sector.turnoverRaw??0);
+   const turnoverNorm=turnover>0?Math.log1p(turnover)/Math.log1p(maxTurnover):0;
+   const direction=change===0?0:Math.sign(change);
+   const strength=Math.round(clamp(changeNorm*78+direction*turnoverNorm*22,-1,1)*100);
+   const turnoverShare=totalTurnover>0?turnover/totalTurnover:0;
+   return {...sector,strength,rank:index+1,turnoverShare,sizeLevel:1 as 1|2|3};
+ });
+
+ scored.sort((a,b)=>b.strength-a.strength||((b.turnoverRaw??0)-(a.turnoverRaw??0))||a.name.localeCompare(b.name,'ko'));
+ const turnoverSorted=[...scored].sort((a,b)=>(b.turnoverRaw??0)-(a.turnoverRaw??0));
+ const largeCut=Math.max(1,Math.ceil(turnoverSorted.length*0.15));
+ const mediumCut=Math.max(largeCut+1,Math.ceil(turnoverSorted.length*0.4));
+ const sizeMap=new Map(turnoverSorted.map((s,i)=>[`${s.market}:${s.code}`,i<largeCut?3:i<mediumCut?2:1] as const));
+ return scored.map((sector,index)=>({...sector,rank:index+1,sizeLevel:(sizeMap.get(`${sector.market}:${sector.code}`)??1) as 1|2|3}));
+}
+
 export function sessionComparison(rows:MarketRow[]){
  const at=(m:number)=>rows.find(r=>r.minute===m);
  return [{label:'오전',start:540,end:720},{label:'오후',start:720,end:930}].map(s=>{
