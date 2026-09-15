@@ -190,11 +190,18 @@ export function signalLabel(type: string) {
     FLOW_DIVERGENCE: "수급 다이버전스", FLOW_FALLBACK: "직전 수급 유지",
     BREADTH_FALLBACK: "직전 종목수 유지", ACCUMULATION: "매집 조건 감지", DISTRIBUTION: "분배 조건 감지",
     REAL_DIVERGENCE: "다이버전스", STRONG_TREND_UP: "강한 상승 추세", STRONG_TREND_DOWN: "강한 하락 추세",
+    BREADTH_REVERSAL_UP: "시장폭 상방 급반전", BREADTH_REVERSAL_DOWN: "시장폭 하방 급반전",
+    FLOW_REVERSAL_BUY: "수급 매수 전환", FLOW_REVERSAL_SELL: "수급 매도 전환",
+    PIVOT_UP_CONFIRMED: "상방 변곡 확인", PIVOT_DOWN_CONFIRMED: "하방 변곡 확인",
+    INDEX_FLOW_DIVERGENCE_BULL: "지수·수급 강세 다이버전스", INDEX_FLOW_DIVERGENCE_BEAR: "지수·수급 약세 다이버전스",
+    INTRADAY_HIGH_TURN: "장중 고점 전환", INTRADAY_LOW_TURN: "장중 저점 전환",
   } as Record<string, string>)[type] ?? type.replace(/_/g, " ");
 }
 export function eventDirection(type: string): MarketEvent["direction"] {
-  if (/UP|BUY|ACCUMULATION|OVERHEAT|매집/.test(type)) return "up";
-  if (/DOWN|SELL|DISTRIBUTION|OVERSOLD|위험/.test(type)) return "down";
+  if (["PIVOT_UP_CONFIRMED","BREADTH_REVERSAL_UP","FLOW_REVERSAL_BUY","INDEX_FLOW_DIVERGENCE_BULL","INTRADAY_LOW_TURN"].includes(type)) return "up";
+  if (["PIVOT_DOWN_CONFIRMED","BREADTH_REVERSAL_DOWN","FLOW_REVERSAL_SELL","INDEX_FLOW_DIVERGENCE_BEAR","INTRADAY_HIGH_TURN"].includes(type)) return "down";
+  if (/UP|BUY|ACCUMULATION|OVERHEAT|BULL|LOW_TURN|매집/.test(type)) return "up";
+  if (/DOWN|SELL|DISTRIBUTION|OVERSOLD|BEAR|HIGH_TURN|위험/.test(type)) return "down";
   return "neutral";
 }
 export function eventLevel(value: unknown): SignalLevel {

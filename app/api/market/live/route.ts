@@ -21,7 +21,16 @@ let tokenCooldownUntil = 0;
 let lastSavedMinute = "";
 let memoryPrevDiff = 0;
 let memoryPrevFlowPower = 0;
-let memoryRecentRows: Array<{ diff: number; foreignFlow: number; instFlow: number }> = [];
+type RecentMarketSnapshot = {
+  diff: number;
+  foreignFlow: number;
+  instFlow: number;
+  flowPower: number;
+  kospi: number;
+  kosdaq: number;
+};
+
+let memoryRecentRows: RecentMarketSnapshot[] = [];
 let memoryLastFlow: { foreign: number; inst: number; indiv: number; updatedAt: number } | null = null;
 let memoryLastBreadth: {
   up: number;
@@ -76,7 +85,7 @@ const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 
 type SignalLevel = "강" | "중" | "약";
 
-type SignalCategory = "FLOW" | "DIVERGENCE" | "ACCEL" | "SCORE" | "CROSS" | "TREND";
+type SignalCategory = "FLOW" | "DIVERGENCE" | "ACCEL" | "SCORE" | "CROSS" | "TREND" | "PIVOT";
 
 type MarketSignal = {
   type: string;
@@ -1530,6 +1539,165 @@ function buildFlowSignals(
   return signals;
 }
 
+
+function buildTurningPointSignals(
+  diff: number,
+  accel: number,
+  foreign: number,
+  inst: number,
+  flowTrend: number,
+  kospi: number,
+  kosdaq: number,
+  flowSource: FlowData["source"],
+  breadthAvailable: boolean,
+  recentRows: RecentMarketSnapshot[]
+): MarketSignal[] {
+  const signals: MarketSignal[] = [];
+  if (!breadthAvailable || flowSource !== "LIVE" || recentRows.length < 3) return signals;
+
+  const history = recentRows.slice(-5);
+  const last = history.at(-1);
+  const three = history.slice(-3);
+  if (!last || three.length < 3) return signals;
+
+  const smartFlow = foreign + inst;
+  const previousFlow = Number.isFinite(last.flowPower) ? last.flowPower : last.foreignFlow + last.instFlow;
+  const recentDiffs = three.map(row => row.diff);
+  const recentFlows = three.map(row => Number.isFinite(row.flowPower) ? row.flowPower : row.foreignFlow + row.instFlow);
+
+  const breadthWasFalling = recentDiffs[0] > recentDiffs[1] && recentDiffs[1] > recentDiffs[2];
+  const breadthWasRising = recentDiffs[0] < recentDiffs[1] && recentDiffs[1] < recentDiffs[2];
+  const flowWasFalling = recentFlows[0] > recentFlows[1] && recentFlows[1] > recentFlows[2];
+  const flowWasRising = recentFlows[0] < recentFlows[1] && recentFlows[1] < recentFlows[2];
+
+  const breadthTurnUp = breadthWasFalling && accel >= 250;
+  const breadthTurnDown = breadthWasRising && accel <= -250;
+  const flowTurnUp = (flowWasFalling && flowTrend >= 1500) || (previousFlow < 0 && smartFlow >= 0 && flowTrend >= 1000);
+  const flowTurnDown = (flowWasRising && flowTrend <= -1500) || (previousFlow > 0 && smartFlow <= 0 && flowTrend <= -1000);
+
+  if (breadthTurnUp) {
+    signals.push(createSignal(
+      "BREADTH_REVERSAL_UP",
+      `시장폭 급반전 상승 · ${last.diff.toLocaleString("ko-KR")} → ${diff.toLocaleString("ko-KR")}`,
+      accel >= 500 ? "강" : "중",
+      accel >= 500 ? 112 : 92,
+      "PIVOT"
+    ));
+  }
+
+  if (breadthTurnDown) {
+    signals.push(createSignal(
+      "BREADTH_REVERSAL_DOWN",
+      `시장폭 급반전 하락 · ${last.diff.toLocaleString("ko-KR")} → ${diff.toLocaleString("ko-KR")}`,
+      accel <= -500 ? "강" : "중",
+      accel <= -500 ? 112 : 92,
+      "PIVOT"
+    ));
+  }
+
+  if (flowTurnUp) {
+    signals.push(createSignal(
+      "FLOW_REVERSAL_BUY",
+      `외국인+기관 수급 매수 방향 전환 · ${previousFlow.toLocaleString("ko-KR")}억 → ${smartFlow.toLocaleString("ko-KR")}억`,
+      flowTrend >= 3000 ? "강" : "중",
+      flowTrend >= 3000 ? 114 : 94,
+      "PIVOT"
+    ));
+  }
+
+  if (flowTurnDown) {
+    signals.push(createSignal(
+      "FLOW_REVERSAL_SELL",
+      `외국인+기관 수급 매도 방향 전환 · ${previousFlow.toLocaleString("ko-KR")}억 → ${smartFlow.toLocaleString("ko-KR")}억`,
+      flowTrend <= -3000 ? "강" : "중",
+      flowTrend <= -3000 ? 114 : 94,
+      "PIVOT"
+    ));
+  }
+
+  if (breadthTurnUp && flowTurnUp) {
+    signals.push(createSignal(
+      "PIVOT_UP_CONFIRMED",
+      "시장폭과 외국인·기관 수급이 동시에 상방으로 전환",
+      "강",
+      128,
+      "PIVOT"
+    ));
+  }
+
+  if (breadthTurnDown && flowTurnDown) {
+    signals.push(createSignal(
+      "PIVOT_DOWN_CONFIRMED",
+      "시장폭과 외국인·기관 수급이 동시에 하방으로 전환",
+      "강",
+      128,
+      "PIVOT"
+    ));
+  }
+
+  const base = history[0];
+  const baseIndex = [base.kospi, base.kosdaq].filter(value => value > 0);
+  const currentIndex = [kospi, kosdaq].filter(value => value > 0);
+  if (baseIndex.length === 2 && currentIndex.length === 2) {
+    const kospiChange = (kospi / base.kospi - 1) * 100;
+    const kosdaqChange = (kosdaq / base.kosdaq - 1) * 100;
+    const indexChange = (kospiChange + kosdaqChange) / 2;
+    const flowChange = smartFlow - (Number.isFinite(base.flowPower) ? base.flowPower : base.foreignFlow + base.instFlow);
+
+    if (indexChange >= 0.12 && flowChange <= -2500 && diff < last.diff) {
+      signals.push(createSignal(
+        "INDEX_FLOW_DIVERGENCE_BEAR",
+        `지수는 +${indexChange.toFixed(2)}%인데 외국인+기관 수급은 ${Math.round(flowChange).toLocaleString("ko-KR")}억 악화`,
+        Math.abs(flowChange) >= 5000 ? "강" : "중",
+        Math.abs(flowChange) >= 5000 ? 120 : 100,
+        "DIVERGENCE"
+      ));
+    }
+
+    if (indexChange <= -0.12 && flowChange >= 2500 && diff > last.diff) {
+      signals.push(createSignal(
+        "INDEX_FLOW_DIVERGENCE_BULL",
+        `지수는 ${indexChange.toFixed(2)}%인데 외국인+기관 수급은 +${Math.round(flowChange).toLocaleString("ko-KR")}억 개선`,
+        flowChange >= 5000 ? "강" : "중",
+        flowChange >= 5000 ? 120 : 100,
+        "DIVERGENCE"
+      ));
+    }
+  }
+
+  const prevIndex = (last.kospi > 0 && last.kosdaq > 0) ? (last.kospi + last.kosdaq) / 2 : 0;
+  const currentIndexLevel = (kospi > 0 && kosdaq > 0) ? (kospi + kosdaq) / 2 : 0;
+  const older = history.slice(0, -1).filter(row => row.kospi > 0 && row.kosdaq > 0);
+  if (prevIndex > 0 && currentIndexLevel > 0 && older.length >= 2) {
+    const olderLevels = older.map(row => (row.kospi + row.kosdaq) / 2);
+    const priorHigh = Math.max(...olderLevels);
+    const priorLow = Math.min(...olderLevels);
+    const indexMoveFromPrev = (currentIndexLevel / prevIndex - 1) * 100;
+
+    if (prevIndex >= priorHigh && indexMoveFromPrev <= -0.05 && (breadthTurnDown || flowTurnDown)) {
+      signals.push(createSignal(
+        "INTRADAY_HIGH_TURN",
+        "장중 단기 고점 형성 후 하방 전환 징후",
+        breadthTurnDown && flowTurnDown ? "강" : "중",
+        breadthTurnDown && flowTurnDown ? 124 : 104,
+        "PIVOT"
+      ));
+    }
+
+    if (prevIndex <= priorLow && indexMoveFromPrev >= 0.05 && (breadthTurnUp || flowTurnUp)) {
+      signals.push(createSignal(
+        "INTRADAY_LOW_TURN",
+        "장중 단기 저점 형성 후 상방 전환 징후",
+        breadthTurnUp && flowTurnUp ? "강" : "중",
+        breadthTurnUp && flowTurnUp ? 124 : 104,
+        "PIVOT"
+      ));
+    }
+  }
+
+  return signals;
+}
+
 function buildMarketState(
   diff: number,
   accel: number,
@@ -1574,6 +1742,10 @@ function buildSignalAlert(signals: MarketSignal[]) {
 
   if (topSignal.level === "강") {
     return `🚨 ${topSignal.message}`;
+  }
+
+  if (topSignal.category === "PIVOT") {
+    return `🔄 ${topSignal.message}`;
   }
 
   if (topSignal.category === "DIVERGENCE") {
@@ -1739,6 +1911,9 @@ export async function GET(req: Request) {
               diff: toNumber(prevNormalRow.diff),
               foreignFlow: toNumber(prevNormalRow.foreignflow),
               instFlow: toNumber(prevNormalRow.instflow),
+              flowPower: toNumber(prevNormalRow.flowpower),
+              kospi: toNumber(prevNormalRow.kospi),
+              kosdaq: toNumber(prevNormalRow.kosdaq),
             },
           ]
         : [];
@@ -1836,7 +2011,21 @@ export async function GET(req: Request) {
       prevFlowPower,
       breadthAvailable ? recentRows : []
     );
-    const signals = isMarketTime ? sortSignals([...baseSignals, ...flowSignals]) : [];
+    const turningSignals = isMarketTime
+      ? buildTurningPointSignals(
+          diff,
+          accel,
+          foreign,
+          inst,
+          flowTrend,
+          kospi,
+          kosdaq,
+          flowData.source,
+          breadthAvailable,
+          recentRows
+        )
+      : [];
+    const signals = isMarketTime ? sortSignals([...baseSignals, ...flowSignals, ...turningSignals]) : [];
     const signalAlert = buildSignalAlert(signals);
     const alert = isMarketTime ? (signalAlert ?? baseAlert) : `${recordSession} 기록`;
     const baseMarketState = breadthAvailable
@@ -1908,6 +2097,9 @@ export async function GET(req: Request) {
             diff,
             foreignFlow: foreign,
             instFlow: inst,
+            flowPower,
+            kospi,
+            kosdaq,
           });
           memoryRecentRows = memoryRecentRows.slice(-10);
           memoryPrevDiff = diff;

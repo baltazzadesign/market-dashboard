@@ -117,7 +117,28 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
   const ticks: number[] = [];
   for (let m = Math.ceil(domain[0] / step) * step; m <= domain[1]; m += step) ticks.push(m);
   if (domain[1] === CLOSE_MINUTE && !ticks.includes(CLOSE_MINUTE)) ticks.push(CLOSE_MINUTE);
-  const markerEvents = showMarkers && visible.length > 0 && ["breadth", "score"].includes(kind) ? events.filter(e => e.level === "강" && e.minute >= domain[0] && e.minute <= domain[1]).filter((e, i, all) => all.findIndex(x => x.minute === e.minute) === i) : [];
+  const markerEvents = useMemo(() => {
+    if (!showMarkers || visible.length === 0) return [];
+    const supportsMarkers = ["breadth", "score", "flow", "kospi", "kosdaq", "index", "accel"].includes(kind);
+    if (!supportsMarkers) return [];
+    const turningType = /^(PIVOT_|BREADTH_REVERSAL_|FLOW_REVERSAL_|INDEX_FLOW_DIVERGENCE_|INTRADAY_(HIGH|LOW)_TURN)/;
+    return events
+      .filter(event => event.minute >= domain[0] && event.minute <= domain[1])
+      .filter(event => event.level === "강" || turningType.test(event.type))
+      .filter((event, index, all) => all.findIndex(other => other.minute === event.minute && other.direction === event.direction) === index);
+  }, [showMarkers, visible.length, kind, events, domain]);
+  const markerPoint = (event: MarketEvent) => {
+    const row = rows.find(item => item.minute === event.minute);
+    if (!row) return null;
+    if (kind === "score") return { y: row.marketScore, axis: "left" };
+    if (kind === "breadth") return { y: row.diff, axis: "left" };
+    if (kind === "flow") return row.flowPower === null ? null : { y: row.flowPower, axis: "left" };
+    if (kind === "kospi") return row.kospi === null ? null : { y: row.kospi, axis: "left" };
+    if (kind === "kosdaq") return row.kosdaq === null ? null : { y: row.kosdaq, axis: "left" };
+    if (kind === "index") return row.kospi === null ? null : { y: row.kospi, axis: "left" };
+    if (kind === "accel") return { y: row.accel, axis: "left" };
+    return null;
+  };
   const currentVisible = latest && latest.minute >= domain[0] && latest.minute <= domain[1];
   return <div className={"terminal-chart" + (compact ? " is-compact" : "")}>
     <div className="chart-readout">
@@ -153,7 +174,11 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
           {!["index", "kospi", "kosdaq"].includes(kind) && <ReferenceLine yAxisId="left" y={kind === "ratio" ? 50 : 0} stroke="#717780" strokeOpacity={.6} strokeDasharray="4 5"/>}
           {kind === "score" && <><ReferenceLine yAxisId="left" y={70} stroke="#60353a" strokeDasharray="3 6"/><ReferenceLine yAxisId="left" y={-70} stroke="#304361" strokeDasharray="3 6"/></>}
           {visible.map(s => <Area key={s.key} yAxisId={s.axis ?? "left"} dataKey={s.key} name={s.name} type="linear" stroke={s.color} strokeWidth={compact ? 1.65 : 1.9} fill={"url(#" + id + s.key + ")"} baseValue={["index", "kospi", "kosdaq"].includes(kind) ? "dataMin" : 0} dot={false} activeDot={{ r: 4, stroke: "#0d0f12", strokeWidth: 2 }} connectNulls={false} isAnimationActive={false}/>)}
-          {markerEvents.map(e => <ReferenceDot key={e.id} yAxisId="left" x={e.minute} y={kind === "score" ? e.marketScore : e.diff} r={3} fill={e.direction === "up" ? colors.red : e.direction === "down" ? colors.blue : colors.yellow} stroke="#0d0f12" strokeWidth={1.5}/>)}
+          {markerEvents.map(event => {
+            const point = markerPoint(event);
+            if (!point) return null;
+            return <ReferenceDot key={event.id} yAxisId={point.axis} x={event.minute} y={point.y} r={event.type.startsWith("PIVOT_") ? 5 : 3.5} fill={event.direction === "up" ? colors.red : event.direction === "down" ? colors.blue : colors.yellow} stroke="#0d0f12" strokeWidth={1.5}/>;
+          })}
           {currentVisible && <ReferenceLine yAxisId="left" x={latest.minute} stroke="#aeb4bf" strokeOpacity={.3} strokeDasharray="2 5"/>}
           {currentVisible && visible.map(s => { const value = chartSeriesValue(latest, s); return value === null ? null : <ReferenceDot key={s.key} yAxisId={s.axis ?? "left"} x={latest.minute} y={value} r={3} fill={s.color} stroke="#0d0f12" strokeWidth={1.5}/>; })}
           {referenceMinute != null && referenceMinute >= domain[0] && referenceMinute <= domain[1] && <ReferenceLine yAxisId="left" x={referenceMinute} stroke="#ccd0d6" strokeDasharray="3 4"/>}
