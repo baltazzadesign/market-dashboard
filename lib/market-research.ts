@@ -69,14 +69,45 @@ export function sessionComparison(rows:MarketRow[]){
  return {...s,count:segment.length,expected:s.end-s.start+1,kospi:change('kospi'),kosdaq:change('kosdaq'),breadth:first?.breadthSource==='LIVE'&&last?.breadthSource==='LIVE'?last.diff-first.diff:null,foreign:flow('foreignFlow'),inst:flow('instFlow'),indiv:flow('indivFlow')};
  });
 }
-export function overlayRows(days:{date:string;rows:MarketRow[]}[],key:'foreignFlow'|'instFlow'|'indivFlow'|'diff'|'kospi'|'kosdaq',relative:boolean){
- const maps=days.map(d=>new Map(d.rows.map(r=>[r.minute,r])));
- const bases=days.map(d=>d.rows.find(r=>r[key]!==null&&Number.isFinite(r[key]))?.[key]);
- return Array.from({length:391},(_,i)=>{
- const point:Record<string,number|null>={minute:540+i};
- days.forEach((d,j)=>{const row=maps[j].get(540+i);let v=row?.[key]??null;if(row&&(key==='diff'?row.breadthSource!=='LIVE':['foreignFlow','instFlow','indivFlow'].includes(key)&&row.flowSource!=='LIVE'))v=null;
- if(relative&&(key==='kospi'||key==='kosdaq'))v=v!==null&&bases[j]&&bases[j]!>0?(v/bases[j]!-1)*100:null;
- point[d.date]=v;});return point;
+export type OverlayMetric='foreignFlow'|'instFlow'|'indivFlow'|'diff'|'kospi'|'kosdaq';
+export type OverlaySession='regular'|'extended';
+export type OverlayTurningPoint={minute:number;time:string;value:number;kind:'high'|'low';prominence:number};
+export type OverlayDaySummary={date:string;validCount:number;coverage:number;first:number|null;last:number|null;change:number|null;min:number|null;max:number|null;turningPoints:OverlayTurningPoint[]};
+
+function overlayBounds(session:OverlaySession){return session==='regular'?{start:540,end:930}:{start:540,end:1200};}
+function rawOverlayValue(row:MarketRow,key:OverlayMetric){
+ if(key==='diff'&&row.breadthSource!=='LIVE')return null;
+ if((key==='foreignFlow'||key==='instFlow'||key==='indivFlow')&&row.flowSource!=='LIVE')return null;
+ const value=row[key];return value!==null&&Number.isFinite(value)?Number(value):null;
+}
+function overlayPointValue(row:MarketRow,key:OverlayMetric,relative:boolean,base:number|null){
+ const value=rawOverlayValue(row,key);if(value===null)return null;
+ if(relative&&(key==='kospi'||key==='kosdaq'))return base&&base>0?(value/base-1)*100:null;
+ return value;
+}
+function turningPoints(points:{minute:number;value:number}[]):OverlayTurningPoint[]{
+ if(points.length<9)return [];
+ const values=points.map(p=>p.value),range=Math.max(...values)-Math.min(...values);if(!Number.isFinite(range)||range<=0)return [];
+ const radius=4,minProminence=range*.07,candidates:OverlayTurningPoint[]=[];
+ for(let i=radius;i<points.length-radius;i++){
+  const p=points[i],left=points.slice(i-radius,i),right=points.slice(i+1,i+1+radius),leftValues=left.map(x=>x.value),rightValues=right.map(x=>x.value);
+  const isHigh=p.value>=Math.max(...leftValues)&&p.value>=Math.max(...rightValues),isLow=p.value<=Math.min(...leftValues)&&p.value<=Math.min(...rightValues);if(!isHigh&&!isLow)continue;
+  const leftAvg=leftValues.reduce((a,b)=>a+b,0)/leftValues.length,rightAvg=rightValues.reduce((a,b)=>a+b,0)/rightValues.length,prominence=Math.min(Math.abs(p.value-leftAvg),Math.abs(p.value-rightAvg));
+  if(prominence<minProminence)continue;candidates.push({minute:p.minute,time:`${String(Math.floor(p.minute/60)).padStart(2,'0')}:${String(p.minute%60).padStart(2,'0')}`,value:p.value,kind:isHigh?'high':'low',prominence});
+ }
+ const ranked=[...candidates].sort((a,b)=>b.prominence-a.prominence),picked:OverlayTurningPoint[]=[];
+ for(const candidate of ranked){if(picked.some(p=>Math.abs(p.minute-candidate.minute)<12))continue;picked.push(candidate);if(picked.length===3)break;}
+ return picked.sort((a,b)=>a.minute-b.minute);
+}
+export function overlayRows(days:{date:string;rows:MarketRow[]}[],key:OverlayMetric,relative:boolean,session:OverlaySession='extended'){
+ const {start,end}=overlayBounds(session),maps=days.map(d=>new Map(d.rows.map(r=>[r.minute,r]))),bases=days.map(d=>d.rows.filter(r=>r.minute>=start&&r.minute<=end).map(r=>rawOverlayValue(r,key)).find((v):v is number=>v!==null)??null);
+ return Array.from({length:end-start+1},(_,i)=>{const minute=start+i,point:Record<string,number|null>={minute};days.forEach((d,j)=>{const row=maps[j].get(minute);point[d.date]=row?overlayPointValue(row,key,relative,bases[j]):null;});return point;});
+}
+export function overlayDaySummaries(days:{date:string;rows:MarketRow[]}[],key:OverlayMetric,relative:boolean,session:OverlaySession='extended'):OverlayDaySummary[]{
+ const {start,end}=overlayBounds(session),expected=end-start+1;
+ return days.map(day=>{const inRange=day.rows.filter(r=>r.minute>=start&&r.minute<=end).sort((a,b)=>a.minute-b.minute),base=inRange.map(r=>rawOverlayValue(r,key)).find((v):v is number=>v!==null)??null,points=inRange.map(r=>({minute:r.minute,value:overlayPointValue(r,key,relative,base)})).filter((p):p is {minute:number;value:number}=>p.value!==null&&Number.isFinite(p.value));
+  if(!points.length)return {date:day.date,validCount:0,coverage:0,first:null,last:null,change:null,min:null,max:null,turningPoints:[]};
+  const values=points.map(p=>p.value),first=values[0],last=values[values.length-1];return {date:day.date,validCount:points.length,coverage:Math.min(1,points.length/expected),first,last,change:last-first,min:Math.min(...values),max:Math.max(...values),turningPoints:turningPoints(points)};
  });
 }
 export function rangeChunks(end:string,months:number){
