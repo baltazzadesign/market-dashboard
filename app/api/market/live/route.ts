@@ -786,22 +786,6 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
 
     const total063 = up + down + flat;
 
-    console.log("BREADTH_063_RESULT", {
-      code,
-      up,
-      down,
-      flat,
-      total: total063,
-      price,
-      rawCounts: {
-        ascn_issu_cnt: out063?.ascn_issu_cnt,
-        down_issu_cnt: out063?.down_issu_cnt,
-        stnr_issu_cnt: out063?.stnr_issu_cnt,
-        uplm_issu_cnt: out063?.uplm_issu_cnt,
-        lslm_issu_cnt: out063?.lslm_issu_cnt,
-      },
-    });
-
     // 2) 066 국내업종 구분별전체시세:
     //    기존 업종 데이터는 그대로 유지하고, output1의 시장폭을 063 장애 시 fallback으로 사용
     let sectorData: any = null;
@@ -845,15 +829,6 @@ async function fetchBreadth(code: "0001" | "1001"): Promise<BreadthData> {
         const flat066 = toNumber(raw066?.stnr_issu_cnt);
         const price066 = toNumber(raw066?.bstp_nmix_prpr);
         const total066 = up066 + down066 + flat066;
-
-        console.log("BREADTH_066_SUMMARY", {
-          code,
-          up: up066,
-          down: down066,
-          flat: flat066,
-          total: total066,
-          price: price066,
-        });
 
         if (total063 <= 0 && total066 > 0) {
           up = up066;
@@ -1198,7 +1173,7 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
     }));
 
     if (!res.ok || String(data?.rt_cd ?? "") !== "0") {
-      console.log("074 ERROR", market, JSON.stringify(data).slice(0, 3000));
+      console.warn("074 ERROR", market, JSON.stringify(data).slice(0, 3000));
 
       return {
         foreign: 0,
@@ -1215,14 +1190,6 @@ async function fetchInvestorFlowByMarket(market: "KOSPI" | "KOSDAQ"): Promise<Fl
 
     const parsed = parseFlowFromJson(data);
     const hasValue = parsed.complete === true;
-
-    console.log("074 RESULT", market, {
-      request: { marketKey, marketCode },
-      source: hasValue ? "LIVE" : "EMPTY",
-      foreign: parsed.foreign,
-      inst: parsed.inst,
-      indiv: parsed.indiv,
-    });
 
     return {
       ...parsed,

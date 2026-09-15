@@ -247,14 +247,6 @@ async function handleRealtimeFrame(raw) {
 
     lastAfterMarketAt = new Date().toISOString();
 
-    console.log(
-      '[after-market]',
-      mapped.row.symbol,
-      mapped.row.market,
-      mapped.row.price,
-      mapped.row.observed_at
-    );
-
     if (PERSIST) {
       await saveQuote(mapped.row);
     }
