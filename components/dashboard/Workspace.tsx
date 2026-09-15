@@ -11,10 +11,11 @@ import Diagnostics from "./Diagnostics";
 import { Brand, Icon } from "./Icon";
 import { useMarketFeed } from "./useMarketFeed";
 import { Modal } from "./Modal";
-import { Metrics, MarketSummary, FlowPanel, SignalPanel, SessionSummary } from "./Insights";
+import { Metrics, FlowPanel, SignalPanel, SessionSummary } from "./Insights";
 import RecordsPanel, { downloadCsv, type RecordView } from "./RecordsPanel";
 import { chartNames as chartLabels, type ChartKind, type Domain } from "./chart-model";
 import SectorHeatmap from "./SectorHeatmap";
+import MarketPulsePanel, { useMarketPulse } from "./MarketPulse";
 
 const MarketChart = dynamic(() => import("./MarketCharts"), { ssr: false, loading: () => <div className="chart-loading"><Icon name="refresh" className="spin"/>차트 준비 중</div> });
 const chartKeys = Object.keys(chartLabels) as ChartKind[];
@@ -70,6 +71,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   useEffect(()=>{if(!toast)return;const id=setTimeout(()=>setToast(""),5500);return()=>clearTimeout(id);},[toast]);
   const feed=useMarketFeed(date,mode==="overview"&&date===today,settings.autoRefresh);
   const rows=feed.rows,last=rows.at(-1);
+  const { pulse, sectorStatus } = useMarketPulse(rows, date, feed.fetchedAt);
   // 자동 신호/정규장 리포트는 기존 정규장 데이터로만 계산합니다.
   // 상단 지표와 우측 브리핑/수급은 현재 세션의 최신 기록(last)을 사용합니다.
   const signalRows=useMemo(()=>rows.filter(row=>row.session==="REGULAR"),[rows]);
@@ -140,7 +142,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
           {id:"diagnostics",title:"시장 모니터",content:<Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>},
           {id:"records",title:"기록 탐색",content:<RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>}
         ]}/>
-      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketSummary row={last}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
+      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
       <footer className="workspace-footer"><span><Icon name="clock" size={13}/>{feed.fetchedAt?"마지막 조회 "+feed.fetchedAt:"조회 대기"} · {last?"데이터 "+last.time+" 기준":"저장 기록 없음"} · KST</span><span>{date&&date===today?(settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"):"과거 기록 조회"}<button className="button ghost small" onClick={()=>setModal("guide")}>지표 읽는 법<Icon name="help" size={13}/></button></span></footer>
     </main>
     <nav className="mobile-nav" aria-label="모바일 메뉴"><Link href="/" className={mode==="overview"?"active":""} aria-current={mode==="overview"?"page":undefined}><Icon name="grid"/><span>대시보드</span></Link><Link href="/daily" className={mode==="daily"?"active":""} aria-current={mode==="daily"?"page":undefined}><Icon name="chart"/><span>일별 분석</span></Link><Link href="/history"><Icon name="calendar"/><span>캘린더</span></Link><button onClick={()=>setModal("settings")}><Icon name="settings"/><span>설정</span></button></nav>
@@ -171,7 +173,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
             {(["flow","breadth","kospi","kosdaq"] as ChartKind[]).map(key=><section className="panel command-chart" key={key}><div className="panel-header"><h3 className="panel-title">{chartLabels[key]}</h3><button className="button icon small" aria-label={chartLabels[key]+" 크게 보기"} onClick={()=>openChart(key)}><Icon name="expand" size={14}/></button></div>{feed.loading?<div className="chart-loading">시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state compact">기록 없음</div>:<MarketChart {...chartProps} kind={key} compact syncGroup="balta-command" onExpand={()=>openChart(key)}/>}</section>)}
           </div>
           <div className="command-center-heatmap"><SectorHeatmap dateOverride={date} compact/></div>
-          <aside className="command-center-insights" aria-label="Command Center 시장 요약"><MarketSummary row={last}/><FlowPanel row={last}/><SignalPanel events={events} onSelect={minute=>{setModal(null);focusMinute(minute);}} onAll={()=>{setModal(null);showRecords();}}/></aside>
+          <aside className="command-center-insights" aria-label="Command Center 시장 요약"><MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/><FlowPanel row={last}/><SignalPanel events={events} onSelect={minute=>{setModal(null);focusMinute(minute);}} onAll={()=>{setModal(null);showRecords();}}/></aside>
         </div>
       </div>
     </Modal>
