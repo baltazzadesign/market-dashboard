@@ -6,3 +6,5 @@ node_modules/
 *.tsbuildinfo
 market-dashboard.zip
 .runtime/
+
+/apps.zip

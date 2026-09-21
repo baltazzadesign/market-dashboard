@@ -1,0 +1,22 @@
+{
+  "lib/market-pulse.ts": {
+    "originalSha256": null,
+    "patchedSha256": "467a1b2a29e02cd3ce6fc8f521bb7b44f9c7e75803d1b6880ae54758c8d02c74"
+  },
+  "components/dashboard/MarketPulse.tsx": {
+    "originalSha256": null,
+    "patchedSha256": "6b2785f8361ec0c0099893b715458428af9d4c3ab61bfd8d1fff8ac7ada39937"
+  },
+  "components/dashboard/Workspace.tsx": {
+    "originalSha256": "20cd9dce98f6ada9e756d0b8b59f72870784632b0d0b96318fcafa2d582bfbc6",
+    "patchedSha256": "effffae19caa884d47e8a7713728ef71c7312519d8b06dd008233cc1a10879a0"
+  },
+  "tests/market-pulse.test.ts": {
+    "originalSha256": null,
+    "patchedSha256": "d5875633b5892a14c2c7e5287e38062f21849510f224166ede9db0c20dd50da6"
+  },
+  "scripts/test.mjs": {
+    "originalSha256": "96ef8c4bfdb15031da4f4e82994a32ff920d7fa22758797202ebf80171033bc2",
+    "patchedSha256": "f58e340a44611c4c8fda0e56dd1f530deef69a6dca82f546e4ba03f37381589a"
+  }
+}

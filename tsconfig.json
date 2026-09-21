@@ -39,6 +39,7 @@
   "exclude": [
     "node_modules",
     "mobile-header-fix",
-    "baltatool-krx-session-patch"
+    "baltatool-krx-session-patch",
+    "apps/mobile"
   ]
 }

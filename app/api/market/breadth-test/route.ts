@@ -343,16 +343,23 @@ async function fetchMarketRanking(
     else unknown += 1;
   }
 
-  const sample = Array.from(unique.values())
-    .slice(0, 3)
+  const moverRows = Array.from(unique.values())
     .map((row) => ({
       code: stockCode(row),
       name: String(row?.hts_kor_isnm ?? row?.stck_kor_isnm ?? ""),
       sign: String(row?.prdy_vrss_sign ?? ""),
-      rate: row?.prdy_ctrt ?? null,
-      diff: row?.prdy_vrss ?? null,
-      keys: Object.keys(row).slice(0, 20),
-    }));
+      rate: num(row?.prdy_ctrt ?? row?.prdy_vrss_rate ?? row?.fluctuation_rate ?? row?.rate),
+      diff: num(row?.prdy_vrss ?? row?.prdy_vrss_amt ?? row?.change),
+      price: num(row?.stck_prpr ?? row?.stck_clpr ?? row?.price),
+      volume: num(row?.acml_vol ?? row?.volume),
+    }))
+    .filter((row) => row.code || row.name);
+
+  const sample = moverRows.slice(0, 3).map((row) => ({ ...row }));
+  const movers = moverRows
+    .slice()
+    .sort((a, b) => Math.abs(b.rate) - Math.abs(a.rate))
+    .slice(0, Math.min(requestedCount, 20));
 
   return {
     market: marketCode === "0001" ? "KOSPI" : "KOSDAQ",
@@ -370,6 +377,7 @@ async function fetchMarketRanking(
     unknown,
     pages,
     sample,
+    movers,
   };
 }
 

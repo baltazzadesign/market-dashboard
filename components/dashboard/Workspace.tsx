@@ -16,6 +16,8 @@ import RecordsPanel, { downloadCsv, type RecordView } from "./RecordsPanel";
 import { chartNames as chartLabels, type ChartKind, type Domain } from "./chart-model";
 import SectorHeatmap from "./SectorHeatmap";
 import MarketPulsePanel, { useMarketPulse } from "./MarketPulse";
+import InvestmentDisclaimer from "./InvestmentDisclaimer";
+import MarketMovers from "./MarketMovers";
 
 const MarketChart = dynamic(() => import("./MarketCharts"), { ssr: false, loading: () => <div className="chart-loading"><Icon name="refresh" className="spin"/>차트 준비 중</div> });
 const chartKeys = Object.keys(chartLabels) as ChartKind[];
@@ -46,8 +48,8 @@ function LiveClock() {
 export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   const [date,setDate] = useState(""),[today,setToday] = useState(""),[now,setNow] = useState<Date | null>(null),[followToday,setFollowToday] = useState(true);
   const [settings,setSettings] = useState<Settings>(defaults),[settingsLoaded,setSettingsLoaded] = useState(false);
-  const [kind,setKind] = useState<ChartKind>("flow"),[range,setRange] = useState("all"),[customDomain,setCustomDomain] = useState<Domain>([OPEN_MINUTE,CLOSE_MINUTE]);
-  const [selectedMinute,setSelectedMinute] = useState<number | null>(null),[modal,setModal] = useState<"settings" | "guide" | "chart" | "board" | "command" | null>(null);
+  const [kind,setKind] = useState<ChartKind>(mode==="overview"?"kospi":"flow"),[range,setRange] = useState("all"),[customDomain,setCustomDomain] = useState<Domain>([OPEN_MINUTE,CLOSE_MINUTE]);
+  const [selectedMinute,setSelectedMinute] = useState<number | null>(null),[modal,setModal] = useState<"settings" | "guide" | "chart" | "board" | "command" | "more" | null>(null);
   const [hoverMinute,setHoverMinute] = useState<number | null>(null),[expandedKind,setExpandedKind] = useState<ChartKind>("flow");
   const [tableView,setTableView] = useState<RecordView>(mode==="daily"?"records":"signals");
   const [returnToModal,setReturnToModal] = useState<"board" | "command" | null>(null);
@@ -99,7 +101,12 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   },[date,today,rows.length,events,settings.notifications,feed.loading,feed.error,feed.warning]);
   function changeDate(value:string){if(!isValidDate(value)||value>today)return;setFollowToday(value===today);setDate(value);}
   function focusMinute(minute:number){window.dispatchEvent(new CustomEvent("balta-reveal-panel",{detail:"main-chart"}));setSelectedMinute(minute);setCustomDomain(fit(minute-30,minute+30));setRange("custom");document.getElementById("market-charts")?.scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});}
-  function showRecords(){window.dispatchEvent(new CustomEvent("balta-reveal-panel",{detail:"records"}));setTableView("signals");document.getElementById("records")?.scrollIntoView({behavior:"smooth",block:"start"});}
+  function showRecords(){
+    if(mode==="overview"){window.location.assign("/daily#records");return;}
+    window.dispatchEvent(new CustomEvent("balta-reveal-panel",{detail:"records"}));
+    setTableView("signals");
+    document.getElementById("records")?.scrollIntoView({behavior:"smooth",block:"start"});
+  }
   function changeDomain(value:Domain){setRange("custom");setCustomDomain(fit(...value));}
   function resetCharts(){setRange("all");setSelectedMinute(null);setHoverMinute(null);}
   function latestCharts(){setRange("60");setSelectedMinute(null);setHoverMinute(null);}
@@ -118,34 +125,157 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   const chartProps={rows,kind,domain,selectedMinute,events,showMarkers:settings.markers,autoScale:settings.autoScale,onDomainChange:changeDomain,hoverMinute,onHoverMinute:setHoverMinute,onReset:resetCharts,onLatest:latestCharts,refreshing:feed.refreshing,dataCaption:feed.warning?"수집 상태 확인":status.tone?status.label:settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"};
   function comparisonChart(key:ChartKind){return <section className="panel comparison-panel" key={key}><div className="panel-header"><h2 className="panel-title">{chartLabels[key]}</h2><span className="panel-subtitle">{date}</span></div><MarketChart {...chartProps} kind={key} compact onExpand={()=>openChart(key)}/></section>;}
   function ranges(){return <div className="segmented" aria-label="차트 시간 범위">{[{value:"all",label:"전체"},{value:"60",label:"1시간"},{value:"30",label:"30분"}].map(item=><button key={item.value} className={range===item.value?"active":""} aria-pressed={range===item.value} onClick={()=>{setRange(item.value);setSelectedMinute(null);}}>{item.label}</button>)}</div>;}
-  return <div className="workspace">
+  function mainChartPanel(){return <section className="panel overview-main-chart" id="market-charts" style={{scrollMarginTop:24}} aria-labelledby="chart-heading"><div className="panel-header"><div><h2 className="panel-title" id="chart-heading">장중 흐름</h2><p className="panel-subtitle">{date||"선택 날짜"} · {rows.length}개 기록{selectedMinute!==null?" · "+minuteLabel(selectedMinute)+" 선택":""}</p></div><div className="toolbar">{ranges()}<button className="button icon small" onClick={()=>openChart(kind)} aria-label="차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={16}/></button></div></div>
+    <div className="chart-tabs" aria-label="차트 지표">{(mode==="overview"?(["kospi","kosdaq"] as ChartKind[]):chartKeys).map(key=><button key={key} className={"chart-tab"+(kind===key?" active":"")} aria-pressed={kind===key} onClick={()=>setKind(key)}>{chartLabels[key]}</button>)}</div>
+    {feed.loading?<div className="chart-loading"><Icon name="refresh" className="spin"/>시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state" style={{minHeight:320}}><Icon name={feed.error?"warning":"chart"} size={34}/><strong>{feed.error?"시장 기록을 불러오지 못했어요":"선택한 날짜의 기록이 없어요"}</strong><p>{feed.error?"데이터 연결을 확인한 뒤 다시 시도해 주세요.":"주말·휴장일이거나 아직 기록이 수집되지 않았을 수 있어요. 다른 날짜를 선택해 보세요."}</p><button className="button" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing}><Icon name="refresh" size={15}/>다시 조회</button></div>:<MarketChart {...chartProps}/>} 
+    <div className="chart-footer"><span className="num">{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</span><span className="desktop-hint">5분까지 확대 · 모든 차트 시간축 연동</span><button className="button ghost small" onClick={()=>{setRange("all");setSelectedMinute(null);}}>확대 초기화</button></div>
+  </section>;}
+  const overviewStats = [
+    {label:"시장 폭", value:last?.diff, unit:"개", signed:true, tone:(last?.diff??0)>0?"positive":(last?.diff??0)<0?"negative":""},
+    {label:"상승 종목", value:last?.up, unit:"개", signed:false, tone:"positive"},
+    {label:"하락 종목", value:last?.down, unit:"개", signed:false, tone:"negative"},
+    {label:"외국인", value:last?.foreignFlow, unit:"억", signed:true, tone:"flow-blue"},
+    {label:"기관", value:last?.instFlow, unit:"억", signed:true, tone:"flow-red"},
+    {label:"개인", value:last?.indivFlow, unit:"억", signed:true, tone:"flow-yellow"},
+  ];
+  const pulseMiniScore = Math.max(0, Math.min(100, pulse.score ?? 50));
+  const pulseMiniAngle = Math.PI * (1 - pulseMiniScore / 100);
+  const pulseMiniX = 65 + 48 * Math.cos(pulseMiniAngle);
+  const pulseMiniY = 61 - 48 * Math.sin(pulseMiniAngle);
+  const pulseMiniLabels = ["수급", "시장폭", "거래대금", "변동성", "추세"];
+  return <div className={"workspace workspace-"+mode}>
     <a className="skip-link" href="#main-content">본문으로 이동</a>
-    <aside className="sidebar" aria-label="주 메뉴"><Link href="/" aria-label="baltatool 대시보드"><Brand/></Link><div className="workspace-label">WORKSPACE</div><nav className="nav-list"><Link href="/" className={"nav-link"+(mode==="overview"?" active":"")} aria-current={mode==="overview"?"page":undefined} title="시장 대시보드"><Icon name="grid"/><span className="nav-label">시장 대시보드</span></Link><Link href="/daily" className={"nav-link"+(mode==="daily"?" active":"")} aria-current={mode==="daily"?"page":undefined} title="일별 분석"><Icon name="chart"/><span className="nav-label">일별 분석</span></Link><Link href="/history" className="nav-link" title="시장 캘린더 · 월간 평가"><Icon name="calendar"/><span className="nav-label">시장 캘린더</span></Link><Link href={"/replay?date="+date} className="nav-link"><Icon name="chart"/><span className="nav-label">시장 복기</span></Link><Link href="/research" className="nav-link"><Icon name="layers"/><span className="nav-label">시장 리서치</span></Link><button className="nav-link" onClick={showRecords} title="신호 기록"><Icon name="bell"/><span className="nav-label">신호 기록</span><span className="nav-end tag">{events.length}</span></button></nav><div className="sidebar-bottom"><button className="nav-link" onClick={()=>setModal("guide")} title="지표 가이드"><Icon name="help"/><span className="nav-label">지표 가이드</span></button><button className="nav-link" onClick={()=>setModal("settings")} title="화면 설정"><Icon name="settings"/><span className="nav-label">화면 설정</span></button><button className="nav-link" onClick={logout} disabled={loggingOut} title="로그아웃"><Icon name="logout"/><span className="nav-label">{loggingOut?"로그아웃 중":"로그아웃"}</span></button><div className="sidebar-note"><Icon name="layers"/><span><strong>KR MARKET</strong>KOSPI · KOSDAQ</span></div></div></aside>
-    <header className="topbar dashboard-topbar"><div className="mobile-brand"><Link href="/"><Brand/></Link></div><div className="breadcrumb"><Icon name="layers" size={15}/><span>워크스페이스</span><Icon name="right" size={12}/><strong>{mode==="overview"?"시장 대시보드":"일별 분석"}</strong></div><div className="topbar-meta"><nav className="topbar-reading-links" aria-label="발타 문서"><a href="/baltagyeong.html" className="button ghost" data-baltagyeong-link="true" title="발타경 읽기" aria-label="발타경 읽기" style={{display:"inline-flex",alignItems:"center",gap:7,color:"#d2b584",whiteSpace:"nowrap",flexShrink:0}}><svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5.5C9 3.8 5.5 3.5 2.5 4.5v15c3-1 6.5-.7 9.5 1 3-1.7 6.5-2 9.5-1v-15c-3-1-6.5-.7-9.5 1Z"/><path d="M12 5.5v15M6 8h2.5M6 11h2.5M15.5 8H18M15.5 11H18"/></svg><span>발타경</span></a><BaltaJungyongHeaderLink /></nav><LiveClock/><span className={"status "+status.tone}><span className="status-dot"/>{feed.loading?"불러오는 중":status.label}</span><button className="button ghost icon topbar-settings" aria-label="화면 설정" onClick={()=>setModal("settings")}><Icon name="settings"/></button></div></header>
+    <aside className="sidebar" aria-label="주 메뉴"><Link href="/" aria-label="발타툴 대시보드"><Brand/></Link><div className="workspace-label">MARKET</div><nav className="nav-list"><Link href="/" className={"nav-link"+(mode==="overview"?" active":"")} aria-current={mode==="overview"?"page":undefined} title="시장 대시보드"><Icon name="grid"/><span className="nav-label">시장 대시보드</span></Link><Link href="/daily" className={"nav-link"+(mode==="daily"?" active":"")} aria-current={mode==="daily"?"page":undefined} title="일별 분석"><Icon name="chart"/><span className="nav-label">일별 분석</span></Link><Link href="/history" className="nav-link" title="시장 캘린더 · 월간 평가"><Icon name="calendar"/><span className="nav-label">시장 캘린더</span></Link><Link href={"/replay?date="+date} className="nav-link"><Icon name="chart"/><span className="nav-label">시장 복기</span></Link><Link href="/research" className="nav-link"><Icon name="layers"/><span className="nav-label">시장 리서치</span></Link><button className="nav-link" onClick={showRecords} title="신호 기록"><Icon name="bell"/><span className="nav-label">신호 기록</span><span className="nav-end tag">{events.length}</span></button></nav><div className="workspace-label reading-label">BALTA ARCHIVE</div><nav className="nav-list reading-nav" aria-label="발타 아카이브"><a href="/baltagyeong.html" className="nav-link"><Icon name="book"/><span className="nav-label">발타경</span></a><Link href="/balta-jungyong" className="nav-link"><Icon name="balance"/><span className="nav-label">발타 중용</span></Link></nav><a href="/baltagyeong.html" className="sidebar-archive-card" aria-label="발타경 읽기"><span className="sidebar-archive-kicker">BALTA PRINCIPLE</span><strong>시장을 읽고,<br/>원칙으로 돌아간다.</strong><span className="sidebar-archive-meta">발타경 · 발타 중용 <Icon name="right" size={12}/></span></a><div className="sidebar-bottom"><button className="nav-link" onClick={()=>setModal("guide")} title="지표 가이드"><Icon name="help"/><span className="nav-label">지표 가이드</span></button><button className="nav-link" onClick={()=>setModal("settings")} title="화면 설정"><Icon name="settings"/><span className="nav-label">화면 설정</span></button><button className="nav-link" onClick={logout} disabled={loggingOut} title="로그아웃"><Icon name="logout"/><span className="nav-label">{loggingOut?"로그아웃 중":"로그아웃"}</span></button><div className="sidebar-note"><Icon name="layers"/><span><strong>KR MARKET</strong>KOSPI · KOSDAQ</span></div></div></aside>
+    <header className="topbar dashboard-topbar mockup-topnav">
+      <div className="mobile-brand"><Link href="/"><Brand/></Link></div>
+      <div className="topnav-left">
+        <Link href="/" className="topnav-brand" aria-label="발타툴 홈"><Brand/></Link>
+        <nav className="topnav-main" aria-label="주요 메뉴">
+          <Link href="/" className={mode==="overview"?"active":""}>대시보드</Link>
+          <Link href="/flow">시장 수급</Link>
+          <button onClick={()=>{setKind("breadth");document.getElementById("market-charts")?.scrollIntoView({behavior:"smooth",block:"start"});}}>시장폭</button>
+          <a href="#market-pulse">Market Pulse</a>
+          <Link href={"/research?date="+date}>섹터 분석</Link>
+          <Link href={"/research?date="+date}>종목 스캐너</Link>
+          <Link href="/history">캘린더</Link>
+        </nav>
+      </div>
+      <div className="topnav-right">
+        <Link className="topnav-search" href={"/research?date="+date} aria-label="시장 리서치 검색"><Icon name="search" size={15}/><span>종목·메모·시장 리서치</span></Link>
+        <nav className="topbar-reading-links" aria-label="발타 문서"><a href="/baltagyeong.html" className="reading-link" data-baltagyeong-link="true" title="발타경 읽기"><Icon name="book" size={16}/><span>발타경</span></a><BaltaJungyongHeaderLink /></nav>
+        <LiveClock/>
+        <span className={"status "+status.tone}><span className="status-dot"/>{feed.loading?"불러오는 중":status.label}</span>
+        <button className="button ghost icon topbar-settings" aria-label="화면 설정" onClick={()=>setModal("settings")}><Icon name="settings"/></button>
+        <button className="button ghost icon mobile-menu-trigger" aria-label="전체 메뉴" onClick={()=>setModal("more")}><Icon name="layers"/></button>
+      </div>
+    </header>
     <main id="main-content" className="main-content">
-      <div className="page-heading"><div><h1>{mode==="overview"?"시장 대시보드":"일별 분석"}</h1><p>{mode==="overview"?"시장 폭과 수급, 지금의 흐름을 한눈에.":"시간대별 흐름과 주요 신호를 다시 살펴보세요."}</p></div><div className="toolbar"><button className="button icon" aria-label="이전 날짜" disabled={!date} onClick={()=>changeDate(moveDate(date,-1))}><Icon name="left" size={16}/></button><label className="date-control"><Icon name="calendar" size={16}/><span className="sr-only">조회 날짜</span><input type="date" value={date} max={today||undefined} onChange={e=>changeDate(e.target.value)} /></label><button className="button icon" aria-label="다음 날짜" disabled={!date||date>=today} onClick={()=>changeDate(moveDate(date,1))}><Icon name="right" size={16}/></button>{date&&date!==today&&<button className="button" onClick={()=>changeDate(today)}>오늘</button>}<button className="button icon" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing||!date} aria-label="데이터 새로고침" title="데이터 새로고침"><Icon name="refresh" className={feed.refreshing?"spin":""}/></button><button className="button command-center-launch" onClick={()=>{setHoverMinute(null);setModal("command");}}><Icon name="grid" size={16}/>Command Center</button><button className="button" onClick={()=>{setHoverMinute(null);setModal("board");}}><Icon name="grid" size={16}/>차트 전체보기</button><button className="button primary" onClick={exportDay} disabled={!rows.length}><Icon name="download" size={16}/><span>내보내기</span></button></div></div>
+      <div className="page-heading dashboard-heading mockup-hero">
+        <div className="dashboard-heading-copy">
+          <span className="dashboard-kicker">BALTA MARKET INTELLIGENCE</span>
+          <h1>{mode==="overview"?<><span>시장을 읽는</span><strong>발바닥의 감각</strong></>:"일별 분석"}</h1>
+          <p>{mode==="overview"?"데이터로 더 나은 판단을, 발타툴과 함께.":"시간대별 흐름과 주요 신호를 다시 살펴보세요."}</p>
+          {mode==="overview"&&<span className="hero-english">GOOD DATA. BETTER DECISIONS.</span>}
+        </div>
+        <div className="dashboard-hero-signature" aria-hidden="true"><span>市場</span><strong>흔들리지 않는 시선이<br/>기회를 만든다.</strong></div>
+        {mode==="daily"&&<div className="toolbar hero-toolbar"><button className="button icon" aria-label="이전 날짜" disabled={!date} onClick={()=>changeDate(moveDate(date,-1))}><Icon name="left" size={16}/></button><label className="date-control"><Icon name="calendar" size={16}/><span className="sr-only">조회 날짜</span><input type="date" value={date} max={today||undefined} onChange={e=>changeDate(e.target.value)} /></label><button className="button icon" aria-label="다음 날짜" disabled={!date||date>=today} onClick={()=>changeDate(moveDate(date,1))}><Icon name="right" size={16}/></button>{date&&date!==today&&<button className="button" onClick={()=>changeDate(today)}>오늘</button>}<button className="button icon" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing||!date} aria-label="데이터 새로고침" title="데이터 새로고침"><Icon name="refresh" className={feed.refreshing?"spin":""}/></button><button className="button command-center-launch" onClick={()=>{setHoverMinute(null);setModal("command");}}><Icon name="grid" size={16}/>Command Center</button><button className="button" onClick={()=>{setHoverMinute(null);setModal("board");}}><Icon name="grid" size={16}/>차트 전체보기</button><button className="button primary" onClick={exportDay} disabled={!rows.length}><Icon name="download" size={16}/><span>내보내기</span></button></div>}
+      </div>
       {feed.error&&<div className="notice" role="alert"><Icon name="warning"/><span>{feed.error}{rows.length>0?" 마지막으로 조회한 기록을 유지하고 있어요.":""}</span><button className="button small" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing}>다시 시도</button></div>}
       {!feed.error&&feed.warning&&<div className="notice" role="status"><Icon name="warning"/><span>{feed.warning}</span></div>}
       {!feed.error&&!feed.warning&&!feed.loading&&status.tone==="warn"&&<div className="notice" role="status"><Icon name="clock"/><span>{status.detail} · {sourceLabel(last?.flowSource)} · {breadthLabel(last?.breadthSource)}</span></div>}
-      <div className="toolbar" style={{marginBottom:16}}><Link className="button small" href={"/research?date="+date}>섹터 · 날짜 비교 · 기간 성과 · 메모 검색</Link></div>
-      <Metrics rows={rows} loading={feed.loading}/>
-      <div className="dashboard-grid"><div className="main-column">
-        <PanelLayout scope={mode} items={[
-          {id:"main-chart",title:"장중 흐름",content:(<section className="panel" id="market-charts" style={{scrollMarginTop:24}} aria-labelledby="chart-heading"><div className="panel-header"><div><h2 className="panel-title" id="chart-heading">장중 흐름</h2><p className="panel-subtitle">{date||"선택 날짜"} · {rows.length}개 기록{selectedMinute!==null?" · "+minuteLabel(selectedMinute)+" 선택":""}</p></div><div className="toolbar">{ranges()}<button className="button icon small" onClick={()=>openChart(kind)} aria-label="차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={16}/></button></div></div>
-          <div className="chart-tabs" aria-label="차트 지표">{chartKeys.map(key=><button key={key} className={"chart-tab"+(kind===key?" active":"")} aria-pressed={kind===key} onClick={()=>setKind(key)}>{chartLabels[key]}</button>)}</div>
-          {feed.loading?<div className="chart-loading"><Icon name="refresh" className="spin"/>시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state" style={{minHeight:320}}><Icon name={feed.error?"warning":"chart"} size={34}/><strong>{feed.error?"시장 기록을 불러오지 못했어요":"선택한 날짜의 기록이 없어요"}</strong><p>{feed.error?"데이터 연결을 확인한 뒤 다시 시도해 주세요.":"주말·휴장일이거나 아직 기록이 수집되지 않았을 수 있어요. 다른 날짜를 선택해 보세요."}</p><button className="button" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing}><Icon name="refresh" size={15}/>다시 조회</button></div>:<MarketChart {...chartProps}/>}
-          <div className="chart-footer"><span className="num">{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</span><span className="desktop-hint">5분까지 확대 · 모든 차트 시간축 연동</span><button className="button ghost small" onClick={()=>{setRange("all");setSelectedMinute(null);}}>확대 초기화</button></div>
-        </section>)},
-          ...[...overviewKinds,...comparisonKinds].map(key=>({id:"chart-"+key,title:chartLabels[key]+" 차트",content:settings.compare&&rows.length>0&&key!==kind?comparisonChart(key):<p className="panel-subtitle">비교 차트 설정이 꺼져 있거나 현재 주 차트와 같은 지표입니다.</p>})),
-          {id:"summary",title:"일별 요약",content:<SessionSummary rows={signalRows} events={events}/>},
-          {id:"report",title:"동시간대 비교 · 리포트",content:<ComparisonReport rows={signalRows} events={events} date={date}/>},
-          {id:"diagnostics",title:"시장 모니터",content:<Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>},
-          {id:"records",title:"기록 탐색",content:<RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>}
-        ]}/>
-      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
-      <footer className="workspace-footer"><span><Icon name="clock" size={13}/>{feed.fetchedAt?"마지막 조회 "+feed.fetchedAt:"조회 대기"} · {last?"데이터 "+last.time+" 기준":"저장 기록 없음"} · KST</span><span>{date&&date===today?(settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"):"과거 기록 조회"}<button className="button ghost small" onClick={()=>setModal("guide")}>지표 읽는 법<Icon name="help" size={13}/></button></span></footer>
+      {mode==="daily"&&<div className="toolbar" style={{marginBottom:16}}><Link className="button small" href={"/research?date="+date}>섹터 · 날짜 비교 · 기간 성과 · 메모 검색</Link></div>}
+      {mode==="overview"?<div className="overview-metric-row">
+        <div className="overview-metrics-source"><Metrics rows={rows} loading={feed.loading}/></div>
+        <section className="metric overview-pulse-metric" id="market-pulse" aria-label="Market Pulse 2.0">
+          <div className="overview-pulse-gauge-side">
+            <div className="metric-label"><span>Market Pulse <small>2.0</small></span></div>
+            <svg className="overview-pulse-gauge" viewBox="0 0 130 78" role={pulse.score==null?undefined:"meter"} aria-valuemin={pulse.score==null?undefined:0} aria-valuemax={pulse.score==null?undefined:100} aria-valuenow={pulse.score??undefined}>
+              <defs><linearGradient id="overview-pulse-arc" x1="10" y1="0" x2="120" y2="0"><stop stopColor="#d8a94b"/><stop offset=".55" stopColor="#f1cf77"/><stop offset="1" stopColor="#9a712d"/></linearGradient></defs>
+              <path d="M17 61 A48 48 0 0 1 113 61" stroke="#2a2822" strokeWidth="10" strokeLinecap="round" fill="none"/>
+              <path d="M17 61 A48 48 0 0 1 113 61" stroke="url(#overview-pulse-arc)" strokeWidth="10" strokeLinecap="round" fill="none" opacity={pulse.score==null?.28:.95}/>
+              {pulse.score!=null&&<circle cx={pulseMiniX} cy={pulseMiniY} r="4.8" fill="#f6e8bf" stroke="#0b0a08" strokeWidth="2"/>}
+              <text x="65" y="53" textAnchor="middle" className="overview-pulse-score">{pulse.score??"—"}</text>
+              <text x="65" y="72" textAnchor="middle" className="overview-pulse-regime-text">{pulse.regime}</text>
+            </svg>
+          </div>
+          <div className="overview-pulse-factor-list">
+            {pulse.factors.slice(0,5).map((factor,index)=><div key={factor.name}><span>{pulseMiniLabels[index]??factor.name}</span><strong className="num">{factor.value==null?"—":Math.round(50+factor.value*50)}</strong></div>)}
+          </div>
+        </section>
+      </div>:<Metrics rows={rows} loading={feed.loading}/>} 
+      {mode==="overview"? <>
+        <div className="dashboard-grid overview-dashboard-grid">
+          <div className="main-column">{mainChartPanel()}</div>
+          <aside className="overview-flow-column" aria-label="투자주체 누적 수급">
+            <section className="panel overview-flow-chart">
+              <div className="panel-header"><div><h2 className="panel-title">투자주체별 누적 수급</h2><p className="panel-subtitle">{last?last.time+" 기준":"기록 대기"} · 억원</p></div><button className="button icon small" onClick={()=>openChart("flow")} aria-label="수급 차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={15}/></button></div>
+              <div className="overview-flow-values"><span><i className="flow-blue"/>외국인 <strong className="num flow-blue">{formatNumber(last?.foreignFlow,0,true)}</strong></span><span><i className="flow-red"/>기관 <strong className="num flow-red">{formatNumber(last?.instFlow,0,true)}</strong></span><span><i className="flow-yellow"/>개인 <strong className="num flow-yellow">{formatNumber(last?.indivFlow,0,true)}</strong></span></div>
+              {feed.loading?<div className="chart-loading compact">시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state compact">수급 기록이 없습니다.</div>:<MarketChart {...chartProps} kind="flow" compact syncGroup="balta-overview-flow" onExpand={()=>openChart("flow")}/>} 
+            </section>
+          </aside>
+        </div>
+        <section className="overview-summary-grid" aria-label="시장 핵심 요약">
+          <section className="panel overview-summary-card overview-live-card">
+            <div className="panel-header"><div><h2 className="panel-title">실시간 주요 지표</h2><p className="panel-subtitle">{last?last.time+" 기준":"기록 대기"} · 실제 수집 데이터</p></div><Link className="overview-summary-link" href={"/daily?date="+date}>상세 보기 <Icon name="right" size={12}/></Link></div>
+            <div className="overview-live-table">{overviewStats.map(item=><div className="overview-live-row" key={item.label}><span>{item.label}</span><strong className={"num "+item.tone}>{formatNumber(item.value,0,item.signed)}{item.value!=null&&<small>{item.unit}</small>}</strong></div>)}</div>
+            <div className="overview-live-foot"><span>{last?sourceLabel(last.flowSource):"수급 기록 대기"}</span><span>{last?breadthLabel(last.breadthSource):"시장폭 기록 대기"}</span></div>
+          </section>
+          <MarketMovers/>
+          <div className="overview-summary-card overview-signal-card"><SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/></div>
+        </section>
+      </>:<>
+        <div className="dashboard-grid"><div className="main-column">
+          <PanelLayout scope={mode} items={[
+            {id:"main-chart",title:"장중 흐름",content:mainChartPanel()},
+            ...[...overviewKinds,...comparisonKinds].map(key=>({id:"chart-"+key,title:chartLabels[key]+" 차트",content:settings.compare&&rows.length>0&&key!==kind?comparisonChart(key):<p className="panel-subtitle">비교 차트 설정이 꺼져 있거나 현재 주 차트와 같은 지표입니다.</p>})),
+            {id:"summary",title:"일별 요약",content:<SessionSummary rows={signalRows} events={events}/>},
+            {id:"report",title:"동시간대 비교 · 리포트",content:<ComparisonReport rows={signalRows} events={events} date={date}/>},
+            {id:"diagnostics",title:"시장 모니터",content:<Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>},
+            {id:"records",title:"기록 탐색",content:<RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>} 
+          ]}/>
+        </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<div id="market-pulse"><MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/></div>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
+      </>}
+      {mode==="overview"&&<section className="mockup-shortcuts" aria-label="빠른 메뉴">
+        <Link href="/history" className="mockup-shortcut-card calendar"><span className="mockup-shortcut-icon"><Icon name="calendar" size={26}/></span><div><strong>시장 캘린더</strong><p>과거를 보면 오늘이 보입니다.</p></div><Icon name="right" size={16}/></Link>
+        <Link href={"/research?date="+date} className="mockup-shortcut-card sector"><span className="mockup-shortcut-icon"><Icon name="layers" size={26}/></span><div><strong>섹터 분석</strong><p>지금 시장을 이끄는 주도 섹터는?</p></div><Icon name="right" size={16}/></Link>
+        <Link href={"/research?date="+date} className="mockup-shortcut-card scanner"><span className="mockup-shortcut-icon"><Icon name="search" size={26}/></span><div><strong>종목 스캐너</strong><p>기회는 늘 움직이고 있습니다.</p></div><Icon name="right" size={16}/></Link>
+        <button className="mockup-shortcut-card charts" onClick={()=>{setHoverMinute(null);setModal("board");}}><span className="mockup-shortcut-icon"><Icon name="chart" size={26}/></span><div><strong>차트 전체보기</strong><p>더 넓은 시야로 시장을 바라보세요.</p></div><Icon name="right" size={16}/></button>
+      </section>}
+      {mode==="daily"&&<section className="balta-library" aria-labelledby="balta-library-title">
+        <div className="balta-library-heading">
+          <div><span>THE BALTA ARCHIVE</span><h2 id="balta-library-title">발타의 서재</h2><p>시장을 읽은 뒤, 다시 원칙으로 돌아가는 공간입니다.</p></div>
+          <div className="balta-library-mantra"><span aria-hidden="true">原則</span><strong>시장을 읽고,<br/>원칙으로 돌아간다.</strong></div>
+        </div>
+        <div className="balta-library-grid">
+          <a className="balta-library-card balta-library-card-gyeong" href="/baltagyeong.html">
+            <div className="balta-library-icon"><Icon name="book" size={24}/></div>
+            <div><span className="balta-library-kicker">BALTA GYEONG · MARKET PRINCIPLES</span><h3>발타경</h3><p>발타의 투자 원칙과 시장관을 한곳에서 읽습니다.</p><span className="balta-library-read">발타경 읽기 <Icon name="right" size={12}/></span></div>
+            <span className="balta-library-card-number" aria-hidden="true">經</span>
+          </a>
+          <Link className="balta-library-card balta-library-card-jungyong" href="/balta-jungyong">
+            <div className="balta-library-icon"><Icon name="balance" size={24}/></div>
+            <div><span className="balta-library-kicker">BALTA JUNGYONG · 33 CHAPTERS</span><h3>발타 중용</h3><p>서른세 장의 문장으로 투자와 시장의 균형을 돌아봅니다.</p><span className="balta-library-read">33장 읽기 <Icon name="right" size={12}/></span></div>
+            <span className="balta-library-card-number" aria-hidden="true">中</span>
+          </Link>
+        </div>
+        <div className="balta-library-foot"><span><Icon name="book" size={12}/> 발타경 · 시장 원칙과 기록</span><span><Icon name="balance" size={12}/> 발타 중용 · 33장</span><span>DATA → PRINCIPLE → DECISION</span></div>
+      </section>}
+      {mode==="overview"&&<footer className="workspace-footer overview-reference-footer">
+        <div className="workspace-footer-status"><Brand/><span>GOOD DATA. BETTER DECISIONS.</span></div>
+        <nav className="overview-footer-links"><a href="/baltagyeong.html">발타경</a><Link href="/balta-jungyong">발타 중용</Link><Link href="/disclaimer">책임면책고지</Link><Link href="/research">문의하기</Link></nav>
+      </footer>}
+      <InvestmentDisclaimer/>
+      {mode!=="overview"&&<footer className="workspace-footer">
+        <div className="workspace-footer-status"><Icon name="clock" size={13}/><span>{feed.fetchedAt?"마지막 조회 "+feed.fetchedAt:"조회 대기"} · {last?"데이터 "+last.time+" 기준":"저장 기록 없음"} · KST</span></div>
+        <div className="workspace-footer-brand"><strong>© 2026 BALTATOOL</strong><span>Market Intelligence Terminal</span></div>
+        <div className="workspace-footer-actions"><span>{date&&date===today?(settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"):"과거 기록 조회"}</span><button className="footer-text-button" onClick={()=>setModal("guide")}>지표 읽는 법</button><Link className="footer-legal-link" href="/disclaimer">투자 정보 이용 안내</Link></div>
+      </footer>}
     </main>
-    <nav className="mobile-nav" aria-label="모바일 메뉴"><Link href="/" className={mode==="overview"?"active":""} aria-current={mode==="overview"?"page":undefined}><Icon name="grid"/><span>대시보드</span></Link><Link href="/daily" className={mode==="daily"?"active":""} aria-current={mode==="daily"?"page":undefined}><Icon name="chart"/><span>일별 분석</span></Link><Link href="/history"><Icon name="calendar"/><span>캘린더</span></Link><button onClick={()=>setModal("settings")}><Icon name="settings"/><span>설정</span></button></nav>
+    <nav className="mobile-nav" aria-label="모바일 메뉴"><Link href="/" className={mode==="overview"?"active":""} aria-current={mode==="overview"?"page":undefined}><Icon name="grid"/><span>대시보드</span></Link><Link href="/daily" className={mode==="daily"?"active":""} aria-current={mode==="daily"?"page":undefined}><Icon name="chart"/><span>일별</span></Link><Link href="/history"><Icon name="calendar"/><span>캘린더</span></Link><Link href="/research"><Icon name="search"/><span>리서치</span></Link><button onClick={()=>setModal("more")}><Icon name="layers"/><span>더보기</span></button></nav>
+    <Modal open={modal==="more"} onClose={()=>setModal(null)} title="발타툴 메뉴"><div className="mobile-more-menu">
+      <div className="mobile-more-brand"><Brand/><span>시장을 읽고, 원칙으로 돌아갑니다.</span></div>
+      <div className="mobile-more-grid"><Link href={"/replay?date="+date} onClick={()=>setModal(null)}><Icon name="chart"/><span><strong>시장 복기</strong><small>선택 날짜의 흐름 다시 보기</small></span></Link><a href="/baltagyeong.html"><Icon name="book"/><span><strong>발타경</strong><small>발타의 시장 원칙</small></span></a><Link href="/balta-jungyong" onClick={()=>setModal(null)}><Icon name="balance"/><span><strong>발타 중용</strong><small>33장으로 읽는 투자와 시장</small></span></Link><button onClick={()=>setModal("guide")}><Icon name="help"/><span><strong>지표 가이드</strong><small>데이터와 신호 읽는 법</small></span></button><button onClick={()=>setModal("settings")}><Icon name="settings"/><span><strong>화면 설정</strong><small>차트와 알림 설정</small></span></button><Link href="/disclaimer" onClick={()=>setModal(null)}><Icon name="shield"/><span><strong>책임면책고지</strong><small>투자 정보 이용 안내</small></span></Link></div>
+    </div></Modal>
     <Modal open={modal==="settings"} onClose={()=>setModal(null)} title="화면 설정"><div className="modal-content">
       {([{key:"autoRefresh",title:"자동 갱신",text:"오늘 기록을 60초마다 갱신합니다. 숨겨진 탭에서는 잠시 쉽니다."},{key:"compare",title:"비교 차트",text:"시장 폭·비율과 개별 지수 차트를 함께 확인합니다."},{key:"markers",title:"차트 신호 표시",text:"시장폭·수급·지수 차트에 강한 신호와 자동 감지 변곡점을 표시합니다."},{key:"autoScale",title:"세로축 자동 조절",text:"끄면 시장 폭·수급 차트를 0 중심의 대칭 범위로 표시합니다."}] as const).map(item=><label className="settings-row" key={item.key}><span><strong>{item.title}</strong><p>{item.text}</p></span><input className="switch" type="checkbox" checked={settings[item.key]} onChange={e=>setSettings(old=>({...old,[item.key]:e.target.checked}))}/></label>)}
       <label className="settings-row"><span><strong>새 강한 신호 알림</strong><p>화면 갱신 중 새로 감지한 강한 신호만 알립니다. 과거 기록에는 알리지 않습니다.</p></span><input className="switch" type="checkbox" checked={settings.notifications} onChange={e=>void toggleNotifications(e.target.checked)}/></label><div className="settings-row"><span><strong>설정 저장</strong><p>선택한 화면 설정은 이 브라우저에 저장됩니다.</p></span><button className="button small" onClick={()=>setSettings(defaults)}>초기화</button></div><div className="toolbar" style={{marginTop:20,justifyContent:"space-between"}}><button className="button" onClick={()=>setModal("guide")}><Icon name="help" size={16}/>지표 가이드</button><button className="button ghost" onClick={logout} disabled={loggingOut}><Icon name="logout" size={16}/>로그아웃</button></div>

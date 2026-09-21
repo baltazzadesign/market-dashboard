@@ -1,0 +1,309 @@
+diff --git a/lib/market-pulse.ts b/lib/market-pulse.ts
+new file mode 100644
+index 0000000..e0a3bdc
+--- /dev/null
++++ b/lib/market-pulse.ts
+@@ -0,0 +1,101 @@
++import { type MarketRow, numeric, record, timeToMinute, formatNumber as fmt, signalLabel } from './balta-model';
++import { rankSectorStrength, type Sector } from './market-research';
++
++export type PulseRegime = '강세' | '상승 지속' | '혼조' | '위험' | '투매' | '반전 시도' | '판정 대기';
++export type PulseFactor = { name: string; weight: number; value: number | null; detail: string };
++export type PulseSectorSnapshot = { date: string; time: string; sectors: unknown[] };
++export type MarketPulse = { score: number | null; regime: PulseRegime; coverage: number; date: string; time: string; factors: PulseFactor[]; reasons: string[] };
++const clamp = (n: number) => Math.max(-1, Math.min(1, n));
++const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
++function breadth(r: MarketRow): number | null {
++  const counts = [r.up, r.down, r.flat];
++  const total = r.up + r.down + r.flat;
++  return r.breadthSource === 'LIVE' && counts.every(n => finite(n) && n >= 0) && total > 0 ? (r.up - r.down) / total : null;
++}
++const flowValid = (r: MarketRow) => r.flowSource === 'LIVE' && finite(r.foreignFlow) && finite(r.instFlow);
++const UP = new Set(['PIVOT_UP_CONFIRMED','BREADTH_REVERSAL_UP','FLOW_REVERSAL_BUY','INDEX_FLOW_DIVERGENCE_BULL','INTRADAY_LOW_TURN']);
++const DOWN = new Set(['PIVOT_DOWN_CONFIRMED','BREADTH_REVERSAL_DOWN','FLOW_REVERSAL_SELL','INDEX_FLOW_DIVERGENCE_BEAR','INTRADAY_HIGH_TURN']);
++
++// Snapshot times are supplied separately for each market by the existing sectors API.
++// Never use a later snapshot or one more than 15 minutes old for an earlier row.
++function sectorFactor(snapshot: PulseSectorSnapshot | null, row: MarketRow): PulseFactor {
++  const missing: PulseFactor = { name: '섹터 강도', weight: 15, value: null, detail: '동시간대 양 시장 섹터 자료 없음' };
++  if (!snapshot || snapshot.date !== row.date) return missing;
++  const sectors: Sector[] = [];
++  const seen = new Set<string>();
++  for (const market of ['kospi', 'kosdaq'] as const) {
++    const part = snapshot.time.split('/').find(p => p.trim().toLowerCase().startsWith(market + ' '));
++    const minute = timeToMinute(part ?? '');
++    if (minute < 540 || minute > 930 || minute > row.minute || row.minute - minute > 15) return missing;
++    const group: Sector[] = [];
++    for (const raw of snapshot.sectors) {
++      const s = record(raw), change = numeric(s.change), price = numeric(s.price);
++      const code = String(s.code ?? ''), name = String(s.name ?? '');
++      if (s.market !== market || !code || !name || change === null || price === null || price <= 0 || seen.has(market + ':' + code)) continue;
++      seen.add(market + ':' + code);
++      group.push({ market, code, name, change, price, turnoverRaw: numeric(s.turnoverRaw) });
++    }
++    if (group.length < 3) return missing;
++    sectors.push(...group);
++  }
++  const ranked = rankSectorStrength(sectors);
++  // Balance the two markets so that the market with more sector codes cannot dominate.
++  const means = (['kospi','kosdaq'] as const).map(m => {
++    const group = ranked.filter(s => s.market === m);
++    return group.reduce((sum,s) => sum + s.strength / 100, 0) / group.length;
++  });
++  return { ...missing, value: (means[0] + means[1]) / 2, detail: '강도 양수 ' + ranked.filter(s => s.strength > 0).length + '/' + ranked.length + '개 · ' + snapshot.time };
++}
++
++/** Deterministic display-only rules. Does not overwrite marketScore or saved signals. */
++export function calculateMarketPulse(input: MarketRow[], snapshot: PulseSectorSnapshot | null = null): MarketPulse {
++  const date = input.map(r => r.date).sort().at(-1) ?? '';
++  const unique = new Map<number, MarketRow>();
++  for (const r of input) if (r.date === date && r.session === 'REGULAR' && r.minute >= 540 && r.minute <= 930) {
++    const old = unique.get(r.minute);
++    if (!old || r.id >= old.id) unique.set(r.minute, r);
++  }
++  const rows = [...unique.values()].sort((a,b) => a.minute - b.minute), row = rows.at(-1);
++  if (!row) return { score: null, regime: '판정 대기', coverage: 0, date, time: '', factors: [], reasons: ['정규장 기록이 필요합니다.'] };
++  const b = breadth(row);
++  const before = rows.filter(r => row.minute - r.minute >= 10 && row.minute - r.minute <= 15).at(-1);
++  const oldB = before ? breadth(before) : null;
++  const foreign = flowValid(row) ? row.foreignFlow! : null, inst = flowValid(row) ? row.instFlow! : null;
++  const f = foreign !== null && inst !== null ? (clamp(foreign / 3000) + clamp(inst / 3000)) / 2 : null;
++  const moves = (['kospi','kosdaq'] as const).map(key => {
++    const current = row[key], old = before?.[key];
++    return finite(current) && finite(old) && current > 0 && old > 0 ? (current / old - 1) * 100 : null;
++  });
++  const index = moves.every(finite) ? (clamp(moves[0]! / .5) + clamp(moves[1]! / .5)) / 2 : null;
++  const recent = rows.filter(r => row.minute - r.minute <= 5);
++  const types = new Set(recent.flatMap(r => r.signals.map(s => String(s.type ?? '')).filter(t =>
++    (UP.has(t) || DOWN.has(t)) && breadth(r) !== null && flowValid(r))));
++  const up = [...types].some(t => UP.has(t)), down = [...types].some(t => DOWN.has(t));
++  const acceleration = b !== null && oldB !== null ? clamp((b - oldB) / .15) : null;
++  const previous = rows.at(-2);
++  const shortAccel = previous && row.minute - previous.minute <= 3 && breadth(previous) !== null && b !== null && finite(row.accel)
++    ? clamp(row.accel / 150) : null;
++  const momentum = acceleration === null ? null : clamp(acceleration * (shortAccel === null ? .7 : .5) + (shortAccel ?? 0) * .2 + (Number(up) - Number(down)) * .3);
++  const factors: PulseFactor[] = [
++    { name: '시장폭', weight: 30, value: b === null ? null : clamp(b / .6), detail: b === null ? '정상 시장폭 자료 없음' : '상승 ' + fmt(row.up) + ' · 하락 ' + fmt(row.down) },
++    { name: '외국인·기관 수급', weight: 25, value: f, detail: f === null ? '정상 수급 자료 없음' : '외국인 ' + fmt(foreign,0,true) + '억 · 기관 ' + fmt(inst,0,true) + '억' },
++    { name: 'KOSPI·KOSDAQ 방향', weight: 20, value: index, detail: index === null ? '10~15분 전 양 지수 기록 필요' : before!.time + ' 대비 ' + fmt(moves[0],2,true) + '% / ' + fmt(moves[1],2,true) + '%' },
++    sectorFactor(snapshot,row),
++    { name: '장중 가속·변곡', weight: 10, value: momentum, detail: momentum === null ? '10~15분 전 정상 시장폭 기록 필요' : '시장폭 비율 변화 ' + fmt((b! - oldB!) * 100,1,true) + '%p' + (shortAccel === null ? '' : ' · 직전 가속 ' + fmt(row.accel,0,true) + '개') + (types.size ? ' · ' + [...types].map(signalLabel).join(', ') : ' · 최근 변곡 신호 없음') },
++  ];
++  const coverage = factors.reduce((sum,f) => sum + (f.value === null ? 0 : f.weight),0);
++  const score = coverage ? Math.round(50 + factors.reduce((sum,f) => sum + (f.value ?? 0) * f.weight,0) / coverage * 50) : null;
++  let regime: PulseRegime = '판정 대기';
++  const reasons: string[] = [];
++  if (coverage >= 65 && b !== null && f !== null && index !== null && score !== null) {
++    const falling = moves.every(v => v !== null && v <= -.15);
++    const rising = moves.every(v => v !== null && v >= .05);
++    if (b <= -.5 && f <= -.25 && falling && (momentum ?? 0) <= 0) { regime = '투매'; reasons.push('하락 종목 확산·동반 지수 하락·순매도가 겹칩니다.'); }
++    else if (oldB !== null && oldB < -.15 && b < .2 && momentum !== null && momentum >= .35 && up && !down && index > 0 && f >= -.2) { regime = '반전 시도'; reasons.push('약했던 시장폭이 개선되고 상방 변곡과 지수 회복이 확인됩니다.'); }
++    else if (score <= 35 || (b < -.2 && index < 0) || (down && momentum !== null && momentum < -.3 && index < 0)) { regime = '위험'; reasons.push('시장폭·지수 흐름 또는 하방 변곡이 약세를 가리킵니다.'); }
++    else if (score >= 72 && b >= .3 && f > 0 && rising && !down) { regime = '강세'; reasons.push('상승 종목 확산과 순매수, 양 지수 상승이 일치합니다.'); }
++    else if (score >= 58 && b > .1 && oldB !== null && oldB > .1 && f >= 0 && rising && momentum !== null && momentum >= -.1 && !down) { regime = '상승 지속'; reasons.push('10~15분 전부터 상승 종목 우위가 이어지고 양 지수가 상승합니다.'); }
++    else { regime = '혼조'; reasons.push('지표 간 방향이 엇갈리거나 뚜렷한 국면 조건을 충족하지 않습니다.'); }
++  } else reasons.push('시장폭·정상 수급·양 지수 비교 기록이 갖춰져야 국면을 판정합니다.');
++  return { score, regime, coverage, date, time: row.time, factors, reasons };
++}
+diff --git a/components/dashboard/MarketPulse.tsx b/components/dashboard/MarketPulse.tsx
+new file mode 100644
+index 0000000..78dd40a
+--- /dev/null
++++ b/components/dashboard/MarketPulse.tsx
+@@ -0,0 +1,55 @@
++"use client";
++import { useEffect, useMemo, useState } from 'react';
++import { type MarketRow, record, formatNumber as fmt } from '@/lib/balta-model';
++import { calculateMarketPulse, type MarketPulse, type PulseSectorSnapshot } from '@/lib/market-pulse';
++
++export function useMarketPulse(rows: MarketRow[], date: string, refreshedAt: string) {
++  const [snapshot, setSnapshot] = useState<PulseSectorSnapshot | null>(null);
++  const [status, setStatus] = useState({ date: '', text: '섹터 조회 대기' });
++  useEffect(() => {
++    if (!date || !refreshedAt) return;
++    const controller = new AbortController();
++    let active = true;
++    async function load() {
++      try {
++        const response = await fetch('/api/market/sectors?date=' + encodeURIComponent(date), {
++          cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]),
++        });
++        if (response.status === 401) { window.location.assign('/login'); return; }
++        const body = record(await response.json());
++        if (!response.ok || body.ok !== true || body.date !== date) throw new Error('섹터 조회 실패');
++        const saved = record(body.snapshot), data = record(saved.market_data);
++        if (active) {
++          setSnapshot({ date, time: String(saved.time ?? ''), sectors: Array.isArray(data.sectors) ? data.sectors : [] });
++          setStatus({ date, text: '' });
++        }
++      } catch {
++        if (active) { setSnapshot(null); setStatus({ date, text: '섹터 조회 실패 · 나머지 지표로 계산' }); }
++      }
++    }
++    void load();
++    return () => { active = false; controller.abort(); };
++  }, [date, refreshedAt]);
++  const pulse = useMemo(() => calculateMarketPulse(rows.filter(r => r.date === date), snapshot?.date === date ? snapshot : null), [rows, date, snapshot]);
++  return { pulse, sectorStatus: status.date === date ? status.text : '섹터 조회 대기' };
++}
++
++export default function MarketPulsePanel({ pulse, sectorStatus, warning = '' }: { pulse: MarketPulse; sectorStatus: string; warning?: string }) {
++  const color = pulse.regime === '판정 대기' ? 'var(--muted)' : ['강세','상승 지속','반전 시도'].includes(pulse.regime) ? 'var(--up)' : ['위험','투매'].includes(pulse.regime) ? 'var(--down)' : 'var(--text)';
++  return <section className="panel briefing-panel" aria-label="Market Pulse 2.0">
++    <div className="market-summary">
++      <div className="summary-eyebrow"><span>Market Pulse 2.0</span><span>{pulse.time ? '정규장 ' + pulse.time + ' 기준' : '정규장 기록 대기'}</span></div>
++      <h2 className="summary-tone" style={{ color }}>{pulse.regime}</h2>
++      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '12px 0' }}><strong className="num" style={{ fontSize: 42 }}>{fmt(pulse.score)}</strong><span className="muted">/ 100{pulse.regime === '판정 대기' && pulse.score !== null ? ' · 참고 점수' : ''}</span></div>
++      {pulse.score !== null && <div role="meter" aria-label="Market Pulse 종합 점수" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pulse.score} style={{ height: 6, background: '#30343a', borderRadius: 4 }}><div style={{ width: pulse.score + '%', height: '100%', background: color, borderRadius: 4 }}/></div>}
++      <p className="summary-copy" style={{ marginTop: 14 }}>{pulse.reasons.join(' ')}</p>
++      <p className="panel-subtitle">데이터 충족도 {pulse.coverage}% · 사용 가능한 항목의 가중치 합계</p>
++      {warning && <p className="panel-subtitle" role="status">{warning} · 마지막 수집 기록 기준</p>}
++      {sectorStatus && <p className="panel-subtitle">{sectorStatus}</p>}
++      <details style={{ marginTop: 14 }}><summary style={{ cursor: 'pointer' }}>5가지 판정 근거</summary>
++        <ul style={{ paddingLeft: 18, marginTop: 12, display: 'grid', gap: 12 }}>{pulse.factors.map(f => <li key={f.name}><strong>{f.name}</strong><span className="muted"> · 비중 {f.weight}% · {f.value === null ? '제외' : fmt(50 + f.value * 50) + '점'}</span><div className="panel-subtitle" style={{ marginTop: 3 }}>{f.detail}</div></li>)}</ul>
++        <p className="panel-subtitle">국면은 규칙 기반 요약입니다. 지수 방향은 10~15분 전 대비이며, 충족도는 예측 확률이 아닙니다. 장후에는 마지막 정규장 판정을 표시합니다.</p>
++      </details>
++    </div>
++  </section>;
++}
+diff --git a/components/dashboard/Workspace.tsx b/components/dashboard/Workspace.tsx
+index ce988f2..c9bcc64 100644
+--- a/components/dashboard/Workspace.tsx
++++ b/components/dashboard/Workspace.tsx
+@@ -11,10 +11,11 @@ import Diagnostics from "./Diagnostics";
+ import { Brand, Icon } from "./Icon";
+ import { useMarketFeed } from "./useMarketFeed";
+ import { Modal } from "./Modal";
+-import { Metrics, MarketSummary, FlowPanel, SignalPanel, SessionSummary } from "./Insights";
++import { Metrics, FlowPanel, SignalPanel, SessionSummary } from "./Insights";
+ import RecordsPanel, { downloadCsv, type RecordView } from "./RecordsPanel";
+ import { chartNames as chartLabels, type ChartKind, type Domain } from "./chart-model";
+ import SectorHeatmap from "./SectorHeatmap";
++import MarketPulsePanel, { useMarketPulse } from "./MarketPulse";
+ 
+ const MarketChart = dynamic(() => import("./MarketCharts"), { ssr: false, loading: () => <div className="chart-loading"><Icon name="refresh" className="spin"/>차트 준비 중</div> });
+ const chartKeys = Object.keys(chartLabels) as ChartKind[];
+@@ -70,6 +71,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
+   useEffect(()=>{if(!toast)return;const id=setTimeout(()=>setToast(""),5500);return()=>clearTimeout(id);},[toast]);
+   const feed=useMarketFeed(date,mode==="overview"&&date===today,settings.autoRefresh);
+   const rows=feed.rows,last=rows.at(-1);
++  const { pulse, sectorStatus } = useMarketPulse(rows, date, feed.fetchedAt);
+   // 자동 신호/정규장 리포트는 기존 정규장 데이터로만 계산합니다.
+   // 상단 지표와 우측 브리핑/수급은 현재 세션의 최신 기록(last)을 사용합니다.
+   const signalRows=useMemo(()=>rows.filter(row=>row.session==="REGULAR"),[rows]);
+@@ -140,7 +142,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
+           {id:"diagnostics",title:"시장 모니터",content:<Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>},
+           {id:"records",title:"기록 탐색",content:<RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>}
+         ]}/>
+-      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketSummary row={last}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
++      </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
+       <footer className="workspace-footer"><span><Icon name="clock" size={13}/>{feed.fetchedAt?"마지막 조회 "+feed.fetchedAt:"조회 대기"} · {last?"데이터 "+last.time+" 기준":"저장 기록 없음"} · KST</span><span>{date&&date===today?(settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"):"과거 기록 조회"}<button className="button ghost small" onClick={()=>setModal("guide")}>지표 읽는 법<Icon name="help" size={13}/></button></span></footer>
+     </main>
+     <nav className="mobile-nav" aria-label="모바일 메뉴"><Link href="/" className={mode==="overview"?"active":""} aria-current={mode==="overview"?"page":undefined}><Icon name="grid"/><span>대시보드</span></Link><Link href="/daily" className={mode==="daily"?"active":""} aria-current={mode==="daily"?"page":undefined}><Icon name="chart"/><span>일별 분석</span></Link><Link href="/history"><Icon name="calendar"/><span>캘린더</span></Link><button onClick={()=>setModal("settings")}><Icon name="settings"/><span>설정</span></button></nav>
+@@ -171,7 +173,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
+             {(["flow","breadth","kospi","kosdaq"] as ChartKind[]).map(key=><section className="panel command-chart" key={key}><div className="panel-header"><h3 className="panel-title">{chartLabels[key]}</h3><button className="button icon small" aria-label={chartLabels[key]+" 크게 보기"} onClick={()=>openChart(key)}><Icon name="expand" size={14}/></button></div>{feed.loading?<div className="chart-loading">시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state compact">기록 없음</div>:<MarketChart {...chartProps} kind={key} compact syncGroup="balta-command" onExpand={()=>openChart(key)}/>}</section>)}
+           </div>
+           <div className="command-center-heatmap"><SectorHeatmap dateOverride={date} compact/></div>
+-          <aside className="command-center-insights" aria-label="Command Center 시장 요약"><MarketSummary row={last}/><FlowPanel row={last}/><SignalPanel events={events} onSelect={minute=>{setModal(null);focusMinute(minute);}} onAll={()=>{setModal(null);showRecords();}}/></aside>
++          <aside className="command-center-insights" aria-label="Command Center 시장 요약"><MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/><FlowPanel row={last}/><SignalPanel events={events} onSelect={minute=>{setModal(null);focusMinute(minute);}} onAll={()=>{setModal(null);showRecords();}}/></aside>
+         </div>
+       </div>
+     </Modal>
+diff --git a/tests/market-pulse.test.ts b/tests/market-pulse.test.ts
+new file mode 100644
+index 0000000..94fec9a
+--- /dev/null
++++ b/tests/market-pulse.test.ts
+@@ -0,0 +1,72 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { normalizeRow, type MarketRow } from '../lib/balta-model';
++import { calculateMarketPulse, type PulseSectorSnapshot } from '../lib/market-pulse';
++const date = '2026-09-15';
++function row(minute: number, balance = .4, flow = 3000, price = 100): MarketRow {
++  return normalizeRow({ id: minute, time: Math.floor(minute/60) + ':' + String(minute%60).padStart(2,'0'), up: 1000*(1+balance), down: 1000*(1-balance), flat: 0, breadthSource: 'LIVE', flowSource: 'LIVE', foreignFlow: flow, instFlow: flow, kospi: price, kosdaq: price, session: 'REGULAR' },date);
++}
++const sectors: PulseSectorSnapshot = { date, time: 'KOSPI 10:00 / KOSDAQ 10:00', sectors: ['kospi','kosdaq'].flatMap(market => [1,2,3].map(n => ({ market, code: String(n), name: '업종'+n, change: 1, price: 100, turnoverRaw: 1000 }))) };
++test('강세: five inputs combine without changing existing marketScore', () => {
++  const rows=[row(590),row(600,.5,3000,100.5)], original=JSON.stringify(rows);
++  const result=calculateMarketPulse(rows,sectors);
++  assert.equal(result.regime,'강세'); assert.equal(result.coverage,100); assert.ok(result.score!>=72); assert.equal(JSON.stringify(rows),original);
++});
++test('상승 지속: positive breadth persists with moderate buying', () => {
++  assert.equal(calculateMarketPulse([row(590,.2,1000),row(600,.2,1000,100.1)],sectors).regime,'상승 지속');
++});
++test('혼조: opposing index directions and opposing flows', () => {
++  const latest=row(600,0,0,100.2); latest.kosdaq=99.8;
++  assert.equal(calculateMarketPulse([row(590,0,0),latest]).regime,'혼조');
++});
++test('위험: broad weakness with falling indices', () => {
++  assert.equal(calculateMarketPulse([row(590,-.1,-1000),row(600,-.3,-1000,99.8)]).regime,'위험');
++});
++test('투매: extreme breadth, selling and both indices falling', () => {
++  assert.equal(calculateMarketPulse([row(590,-.4,-3000),row(600,-.7,-3000,99.5)]).regime,'투매');
++});
++test('반전 시도 requires prior weakness and a recent confirmed direction', () => {
++  const latest=row(600,-.1,0,100.3); latest.signals=[{type:'PIVOT_UP_CONFIRMED'}];
++  assert.equal(calculateMarketPulse([row(590,-.4,0),latest]).regime,'반전 시도');
++  latest.signals.push({type:'PIVOT_DOWN_CONFIRMED'});
++  assert.notEqual(calculateMarketPulse([row(590,-.4,0),latest]).regime,'반전 시도');
++});
++test('missing and fallback inputs are excluded, not treated as zero', () => {
++  const latest=row(600); latest.breadthSource='FALLBACK';latest.flowSource='FALLBACK';latest.kosdaq=null;
++  const result=calculateMarketPulse([row(590),latest]);
++  assert.equal(result.regime,'판정 대기');assert.equal(result.score,null);assert.equal(result.coverage,0);
++  assert.equal(calculateMarketPulse([]).score,null);
++});
++test('opening and large recording gaps cannot invent index momentum', () => {
++  assert.equal(calculateMarketPulse([row(540)]).regime,'판정 대기');
++  assert.equal(calculateMarketPulse([row(550),row(600)]).factors[2].value,null);
++});
++test('after-hours records cannot change the last regular verdict', () => {
++  const rows=[row(590),row(600,.5,3000,100.5)];const after=row(970,-.9,-10000,80);after.session='KRX_AFTER_MARKET';
++  assert.deepEqual(calculateMarketPulse([...rows,after],sectors),calculateMarketPulse(rows,sectors));
++});
++test('future, stale, cross-date and one-market sector snapshots are excluded', () => {
++  const rows=[row(590),row(600)];
++  for (const bad of [{...sectors,time:'KOSPI 10:01 / KOSDAQ 10:01'},{...sectors,time:'KOSPI 09:44 / KOSDAQ 10:00'},{...sectors,date:'2026-09-14'},{...sectors,time:'KOSPI 10:00'}]) assert.equal(calculateMarketPulse(rows,bad).factors[3].value,null);
++});
++test('stale turning signals and fallback source signals cannot trigger reversal', () => {
++  const old=row(590,-.4,0);old.signals=[{type:'PIVOT_UP_CONFIRMED'}];
++  assert.notEqual(calculateMarketPulse([old,row(600,-.1,0,100.3)]).regime,'반전 시도');
++  const bad=row(598,-.2,0);bad.flowSource='FALLBACK';bad.signals=old.signals;
++  assert.notEqual(calculateMarketPulse([row(590,-.4,0),bad,row(600,-.1,0,100.3)]).regime,'반전 시도');
++});
++test('sorting and duplicate minutes are deterministic; newest date never borrows prior day', () => {
++  const rows=[row(590),row(600)];assert.deepEqual(calculateMarketPulse([...rows].reverse()),calculateMarketPulse(rows));
++  const bad={...row(600,-.9),id:1};assert.deepEqual(calculateMarketPulse([...rows,bad]),calculateMarketPulse(rows));
++  const tomorrow={...row(540),date:'2026-09-16'};assert.equal(calculateMarketPulse([...rows,tomorrow]).regime,'판정 대기');
++});
++test('non-finite values cannot produce a non-finite score', () => {
++  const latest=row(600);latest.foreignFlow=NaN;latest.kospi=Infinity;latest.up=NaN;
++  const result=calculateMarketPulse([row(590),latest]);assert.equal(result.score,null);assert.equal(result.regime,'판정 대기');
++});
++
++test('stored acceleration is used only with a recent valid breadth predecessor', () => {
++ const old=row(590,.2), prev=row(599,.2), latest=row(600,.2);latest.accel=150;
++ assert.equal(calculateMarketPulse([old,prev,latest]).factors[4].value,.2);
++ prev.breadthSource='FALLBACK';assert.equal(calculateMarketPulse([old,prev,latest]).factors[4].value,0);
++});
+diff --git a/scripts/test.mjs b/scripts/test.mjs
+index 4be6cce..b3e75da 100644
+--- a/scripts/test.mjs
++++ b/scripts/test.mjs
+@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
+ // Use the project's TypeScript compiler; no extra test runtime dependency.
+ const root=mkdtempSync(join(tmpdir(),'market-tests-'));
+ try{
+- for(const file of ['lib/balta-access.ts','lib/research-data.ts','app/api/market/research/route.ts','app/api/market/notes/search/route.ts','app/api/market/sectors/route.ts','tests/research-api.test.ts','lib/market-research.ts','tests/research.test.ts','lib/market-comparison.ts','tests/comparison.test.ts','lib/market-diagnostics.ts','tests/diagnostics.test.ts','lib/balta-model.ts','lib/market-calendar.ts','lib/market-history-model.ts','lib/kis-history.ts','lib/balta-data.ts','lib/market-history-data.ts','lib/market.ts','app/api/market/live/route.ts','tests/history.test.ts']){
++ for(const file of ['lib/market-pulse.ts','tests/market-pulse.test.ts','lib/balta-access.ts','lib/research-data.ts','app/api/market/research/route.ts','app/api/market/notes/search/route.ts','app/api/market/sectors/route.ts','tests/research-api.test.ts','lib/market-research.ts','tests/research.test.ts','lib/market-comparison.ts','tests/comparison.test.ts','lib/market-diagnostics.ts','tests/diagnostics.test.ts','lib/balta-model.ts','lib/market-calendar.ts','lib/market-history-model.ts','lib/kis-history.ts','lib/balta-data.ts','lib/market-history-data.ts','lib/market.ts','app/api/market/live/route.ts','tests/history.test.ts']){
+   const target=join(root,file.replace(/\.ts$/,'.js'));mkdirSync(dirname(target),{recursive:true});
+   let source=readFileSync(file,'utf8');
+   if(file.startsWith('app/')) source=source.replaceAll('@/lib/','../'.repeat(file.split('/').length-1)+'lib/');
+@@ -14,5 +14,5 @@ try{
+   if(file==='app/api/market/live/route.ts') output+='\nmodule.exports.__test={parseFlowFromJson};';
+   writeFileSync(target,output);
+  }
+- const result=spawnSync(process.execPath,['--test',join(root,'tests/history.test.js'),join(root,'tests/diagnostics.test.js'),join(root,'tests/comparison.test.js'),join(root,'tests/research.test.js'),join(root,'tests/research-api.test.js')],{stdio:'inherit'});process.exitCode=result.status??1;
++ const result=spawnSync(process.execPath,['--test',join(root,'tests/market-pulse.test.js'),join(root,'tests/history.test.js'),join(root,'tests/diagnostics.test.js'),join(root,'tests/comparison.test.js'),join(root,'tests/research.test.js'),join(root,'tests/research-api.test.js')],{stdio:'inherit'});process.exitCode=result.status??1;
+ }finally{rmSync(root,{recursive:true,force:true});}

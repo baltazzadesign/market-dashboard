@@ -8,10 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node scripts/test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:terminal": "node --test tests/terminal.test.cjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
+    "fflate": "^0.8.3",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",

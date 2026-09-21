@@ -36,6 +36,11 @@ function ScaleIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+
+function FootMark() {
+  return <svg width="30" height="30" viewBox="0 0 40 40" fill="none" aria-hidden="true"><ellipse cx="20" cy="23.5" rx="7.1" ry="8.5" fill="currentColor"/><circle cx="12.2" cy="14" r="2.25" fill="currentColor"/><circle cx="17.1" cy="10.4" r="2.45" fill="currentColor"/><circle cx="22.7" cy="9.8" r="2.55" fill="currentColor"/><circle cx="28" cy="12.4" r="2.35" fill="currentColor"/><circle cx="31.7" cy="17" r="2.05" fill="currentColor"/></svg>;
+}
+
 function SearchIcon() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
@@ -85,9 +90,8 @@ export default function BaltaJungyongReader({ chapters }: Props) {
     <div className={styles.readerShell} style={{ "--reading-size": `${20 + fontStep * 2}px`, "--reading-size-mobile": `${18 + fontStep * 2}px` } as CSSProperties}>
       <header className={styles.siteHeader}>
         <Link className={styles.brand} href="/">
-          <span className={styles.brandMark}>B′</span>
-          <span>baltatool</span>
-          <span className={styles.version}>2.0</span>
+          <span className={styles.brandMark}><FootMark /></span>
+          <span>발타툴</span>
         </Link>
 
         <div className={styles.headerCenter}>

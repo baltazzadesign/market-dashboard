@@ -1,2 +1,2 @@
-import Workspace from "@/components/dashboard/Workspace";
-export default function HomePage() { return <Workspace mode="overview"/>; }
+import TerminalDashboard from "@/components/dashboard/TerminalDashboard";
+export default function HomePage() { return <TerminalDashboard/>; }

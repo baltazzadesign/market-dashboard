@@ -1,0 +1,14 @@
+node_modules/
+.expo/
+dist/
+android/
+ios/
+.env*
+!.env.example
+.integration/
+*.tsbuildinfo
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision

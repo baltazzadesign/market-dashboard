@@ -16,3 +16,8 @@
 @media(max-width:380px){.layout{width:calc(100% - 16px)}.manuscript{padding-left:24px;padding-right:24px}.version{display:none}.fontControls{gap:5px}.fontControls button{width:36px}.pageIndicator{display:none}.pageNavigation{grid-template-columns:1fr 1fr}}
 @media(prefers-reduced-motion:reduce){.progressBar{transition:none}}
 @media print{.siteHeader,.progressTrack,.contentsPanel,.readingTools,.pageNavigation,.readerNote{display:none!important}.readerShell{background:white;color:black}.layout{display:block;width:100%;padding:0}.manuscript{background:white;box-shadow:none;outline:0;border:0;padding:24px}.bodyText{font-size:12pt}.bodyText p,.finalVerse{break-inside:avoid}}
+
+/* Balta gold identity alignment */
+.readerShell{background:#080705;color:#eee5d7}
+.siteHeader{border-bottom-color:#5b4323;background:#0b0907f5}
+.brand{color:#e9c36f;font-weight:800}.brandMark{display:inline-flex;color:#e0b35a}.brandMark svg{display:block}.headerTitle{color:#d5b56f}.headerBadge{color:#dfbd73}.progressBar{background:#d6aa55}

@@ -25,11 +25,13 @@ const paths = {
   warning: "M12 3L2 21h20z M12 9v5 M12 17v.5",
   pause: "M7 4h3v16H7z M14 4h3v16h-3z", play: "M7 3l14 9-14 9z",
   check: "M4 12l5 5L20 6", table: "M3 4h18v16H3z M3 9h18 M9 9v11", minus: "M5 12h14",
+  book: "M3 5.5c3-1 6-.7 9 1.2v13c-3-1.9-6-2.2-9-1.2z M21 5.5c-3-1-6-.7-9 1.2v13c3-1.9 6-2.2 9-1.2z M12 6.7v13",
+  balance: "M12 3v18 M5 6h14 M5 6l-3 6h6z M19 6l-3 6h6z M8 21h8",
 };
 export type IconName = keyof typeof paths;
 export function Icon({ name, size = 18, className, style }: { name: IconName; size?: number; className?: string; style?: CSSProperties }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className} style={style}><path d={paths[name]} /></svg>;
 }
 export function Brand() {
-  return <span className="brand"><svg className="brand-mark" viewBox="0 0 32 34" fill="none" aria-hidden="true"><path d="M5 5v24h11a7 7 0 0 0 0-14H5M5 5h10a5 5 0 0 1 0 10" stroke="currentColor" strokeWidth="4" strokeLinecap="square"/><path d="M24 3v9" stroke="currentColor" strokeWidth="4"/></svg><span className="brand-word">baltatool</span><span className="brand-version">2.0</span></span>;
+  return <span className="brand brand-art"><img className="brand-horizontal" src="/assets/balta-logo-v2.webp" alt="발타툴 BALTATOOL" /></span>;
 }

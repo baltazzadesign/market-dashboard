@@ -5,37 +5,15 @@ import Link from "next/link";
 
 export function BaltaJungyongHeaderLink() {
   return (
-    <Link
-      href="/balta-jungyong"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 7,
-        color: "#d7b66f",
-        fontSize: 13,
-        fontWeight: 700,
-        textDecoration: "none",
-        whiteSpace: "nowrap",
-      }}
-    >
-      <svg
-        width="17"
-        height="17"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.65"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
+    <Link href="/balta-jungyong" className="reading-link" title="발타 중용 읽기" aria-label="발타 중용 읽기">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M12 3v18" />
         <path d="M5 6h14" />
         <path d="m5 6-3 6h6L5 6Z" />
         <path d="m19 6-3 6h6l-3-6Z" />
         <path d="M8 21h8" />
       </svg>
-      발타 중용
+      <span>발타 중용</span>
     </Link>
   );
 }
