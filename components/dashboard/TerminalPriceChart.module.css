@@ -1,0 +1,6 @@
+@media (max-width: 640px) {
+  .panel.panel { height: auto; min-height: 300px; }
+  .tools.tools { flex-wrap: wrap; }
+  .tools .periods.periods { order: 2; flex: 1 0 100%; justify-content: flex-start; gap: 5px; }
+  .tools .periods button:nth-child(n) { display: inline-block; flex: 1; min-height: 32px; font-size: 11px; }
+}
