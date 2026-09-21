@@ -32,3 +32,41 @@ body{background:var(--background);color:var(--foreground)}
 :root{--font-ui:BaltaUI,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body,input,button,select,textarea{font-family:var(--font-ui)}
 
 .terminal-directory .terminal-table-header,.terminal-directory .terminal-stock-row{grid-template-columns:64px minmax(0,1fr) 70px 94px}.terminal-directory .terminal-stock-row>span:first-child{font-variant-numeric:tabular-nums;font-size:11px}.terminal-directory .terminal-stock-row>span:last-child{color:var(--gold)}@media(max-width:620px){.terminal-directory .terminal-table-header,.terminal-directory .terminal-stock-row{grid-template-columns:48px minmax(0,1fr) 54px 64px;gap:6px}.terminal-directory .terminal-stock-row{font-size:10px}.terminal-directory .terminal-stock-row>strong{white-space:normal}}
+
+/* Daily analysis: keep the chart column usable below desktop widths. */
+@media (max-width: 1150px) {
+  .workspace-daily .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+  .workspace-daily .main-column,
+  .workspace-daily .insight-column,
+  .workspace-daily .main-column > div,
+  .workspace-daily .insight-column > div { min-width: 0; width: 100%; }
+  .workspace-daily .mockup-hero { display: flex; flex-direction: column; align-items: stretch; height: auto; padding: 24px; gap: 20px; }
+  .workspace-daily .mockup-hero .dashboard-heading-copy { align-self: stretch; max-width: 100%; }
+  .workspace-daily .mockup-hero .hero-toolbar { position: relative; inset: auto; width: 100%; max-width: none; justify-content: flex-start; flex-wrap: wrap; overflow: visible; }
+}
+@media (max-width: 640px) {
+  .workspace-daily .mockup-hero { padding: 20px 14px; }
+  .workspace-daily .mockup-hero .hero-toolbar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; gap: 8px; }
+  .workspace-daily .hero-toolbar > .button { min-width: 0; min-height: 40px; width: 100%; white-space: normal; }
+  .workspace-daily .hero-toolbar > .button:nth-child(n+4) { grid-column: 1 / -1; }
+  .workspace-daily .mockup-hero .hero-toolbar .command-center-launch,
+  .workspace-daily .mockup-hero .hero-toolbar .button.primary { display: inline-flex; }
+  .workspace-daily .date-control { min-width: 0; width: 100%; padding: 6px 8px; }
+  .workspace-daily .date-control svg { flex-shrink: 0; }
+  .workspace-daily .date-control input { min-width: 0; width: 100%; max-width: 100%; flex: 1 1 0; }
+  .workspace-daily .panel-header,
+  .workspace-daily .layout-row { flex-wrap: wrap; }
+  .workspace-daily .table-scroll { width: 100%; min-width: 0; overflow-x: auto; }
+  .workspace-daily #records { scroll-margin-top: 120px !important; }
+}
+@media (max-width: 1150px) {
+  .workspace-daily .diagnostic-body { grid-template-columns: minmax(0, 1fr); }
+  .workspace-daily .diagnostic-body > *,
+  .workspace-daily .diagnostic-grid > * { min-width: 0; }
+  .workspace-daily .diagnostic-body .toolbar { flex-wrap: wrap; }
+}
+@media (max-width: 640px) {
+  .workspace-daily .investment-disclaimer { display: flex; flex-direction: column; align-items: stretch; gap: 16px; padding: 20px; }
+  .workspace-daily .investment-disclaimer-copy { min-width: 0; width: 100%; }
+  .workspace-daily .mockup-hero h1 { font-family: var(--font-ui), sans-serif; }
+}
