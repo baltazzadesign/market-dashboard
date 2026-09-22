@@ -27,7 +27,7 @@ export async function stockDirectory() {
 export async function commodityCode(product: 'CL' | 'GC') {
   const master = await readKisMaster('ffcode');
   const contracts = master.split(/\r?\n/).map(text => text + '\n').map(line => ({
-    code: line.slice(0, 32).trim(), name: line.slice(82, 107).trim(),
+    code: line.slice(0, 32).trim(), name: line.slice(82, 107).trim(), exchange: line.slice(-92, -82).trim(),
     product: line.slice(-82, -72).trim(), active: line.slice(-7, -6) === '1', near: line.slice(-6, -5) === '1', spread: line.slice(-5, -4),
   })).filter(r => r.product === product && r.code && r.spread !== 'Y' && (r.active || r.near));
   return contracts.sort((a, b) => Number(b.active) - Number(a.active))[0] ?? null;

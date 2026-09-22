@@ -3,8 +3,8 @@ export type Candle = { time: string; open: number; high: number; low: number; cl
 export type TerminalSnapshot = { ok: boolean; asOf: string; quotes: Quote[]; indicators: Quote[]; warnings: string[] };
 export type Ranking = { ok: boolean; asOf: string; rows: Quote[]; error?: string };
 export type StockDirectory = { ok: boolean; rows: { code: string; name: string; market: string }[] };
-export type NewsItem = { title: string; url: string; publishedAt: string; source: string };
-export type NewsFeed = { ok: boolean; asOf: string; items: NewsItem[]; error?: string };
+export type NewsItem = { title: string; url: string; publishedAt: string; source: string; linkKind?: 'article' | 'search' };
+export type NewsFeed = { ok: boolean; asOf: string; items: NewsItem[]; error?: string; stale?: boolean };
 
 export function finite(value: unknown): number | null {
   if (value == null || typeof value === 'boolean' || String(value).trim() === '') return null;

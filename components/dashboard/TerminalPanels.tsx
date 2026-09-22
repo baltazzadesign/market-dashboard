@@ -36,8 +36,33 @@ export function StockRanking({ expanded = false, initialQuery = '' }: { expanded
 }
 export function NewsPanel({ expanded = false }: { expanded?: boolean }) {
   const feed = useTerminalData<NewsFeed>('/api/market/news', 300_000);
-  return <section className="terminal-panel terminal-news"><div className="terminal-panel-heading"><h2>주요 뉴스</h2><a href="https://www.hankyung.com/finance" target="_blank" rel="noopener noreferrer">전체보기 <Icon name="right" size={12}/></a></div>
-    {feed.loading ? <div className="terminal-empty">뉴스 조회 중…</div> : feed.error ? <div className="terminal-empty" role="status"><span>{feed.error}</span><button onClick={feed.refresh}>다시 조회</button></div> : <ul>{feed.data?.items.slice(0, expanded ? 20 : 6).map(item => <li key={item.url}><a href={item.url} target="_blank" rel="noopener noreferrer"><time dateTime={item.publishedAt}>{item.publishedAt ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(item.publishedAt)) : '—'}</time><span title={item.title}>{item.title}</span></a></li>)}</ul>}<p className="terminal-source">한국경제 · 제목을 누르면 원문으로 이동</p>
+  const receivedAt = Date.parse(feed.data?.asOf || '');
+  const usable = !!feed.data?.items.length && (!feed.error || (Number.isFinite(receivedAt) && Date.now() - receivedAt < 6 * 60 * 60 * 1000));
+  const items = usable ? feed.data!.items : [];
+  const searchLinks = items.some(item => item.linkKind === 'search');
+  const sources = Array.from(new Set(items.map(item => item.source))).join(' · ');
+  const stale = usable && (feed.data?.stale || !!feed.error);
+  const allNewsUrl = searchLinks ? 'https://search.naver.com/search.naver?where=news&query=' + encodeURIComponent('증시')
+    : items[0]?.source === '매일경제' ? 'https://www.mk.co.kr/news/stock/' : 'https://www.hankyung.com/finance';
+  const timestamp = (value: string, withDate = false) => {
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul',
+      ...(withDate ? { month: 'numeric', day: 'numeric' } as const : {}), hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms)) : '—';
+  };
+  return <section className="terminal-panel terminal-news">
+    <div className="terminal-panel-heading"><h2>주요 뉴스</h2><a href={allNewsUrl} target="_blank" rel="noopener noreferrer">전체보기 <Icon name="right" size={12}/></a></div>
+    {feed.loading && !usable ? <div className="terminal-empty">뉴스 조회 중…</div>
+      : !usable ? <div className="terminal-empty" role="status"><span>{feed.error || '조회된 뉴스가 없습니다.'}</span><button onClick={feed.refresh}>다시 조회</button></div>
+      : <ul>{items.slice(0, expanded ? 20 : 6).map(item => <li key={item.url}>
+        <a href={item.url} target="_blank" rel="noopener noreferrer">
+          <time dateTime={item.publishedAt} title={timestamp(item.publishedAt, true)}>{timestamp(item.publishedAt)}</time>
+          <span title={item.title + ' · ' + item.source + (item.linkKind === 'search' ? ' · 관련 기사 검색' : ' · 원문 보기')}>{item.title}{item.linkKind === 'search' && <small> · 관련 기사 검색</small>}</span>
+        </a>
+      </li>)}</ul>}
+    {usable && <p className="terminal-source" role={stale ? 'status' : undefined}>
+      {stale && <>연결 지연 · {timestamp(feed.data?.asOf || '', true)} 수신 뉴스<br/></>}
+      {searchLinks ? 'KIS 시황·공시 · 제목을 누르면 관련 기사 검색' : sources + ' · 제목을 누르면 원문으로 이동'}
+    </p>}
   </section>;
 }
 export function IndicatorTable({ rows }: { rows: Quote[] }) {

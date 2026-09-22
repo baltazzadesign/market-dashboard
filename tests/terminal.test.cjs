@@ -93,3 +93,53 @@ test('mobile Pulse passes the same normalized sector times and markets to the we
   assert.equal((await load('app/api/market/pulse/route.ts').GET(new Request('https://test.invalid'))).status, 200);
   assert.deepEqual(seen, { date: '2026-09-15', time: snapshot.time, sectors: snapshot.market_data.sectors });
 });
+
+test('bond request uses I; spaced bond names and commodity fallback stay numeric', async () => {
+ const load=loader({'lib/balta-access.ts':access,'lib/kis-directory.ts':{commodityCode:async product=>({code:product+'TEST',exchange:'NYM'})},'lib/kis-terminal.ts':{outputRows,kisTerminal:async(url,tr,p)=>{
+  if(url.endsWith('comp-interest')){assert.equal(p.FID_COND_MRKT_DIV_CODE,'I');return {output1:[{hts_kor_isnm:'국고채 (3 년)',bond_mnrt_prpr:'2.987',bond_mnrt_prdy_vrss:'.018',prdy_vrss_sign:'5'}],output2:[{hts_kor_isnm:'국고채권 10년',bond_mnrt_prpr:'3.162'}]};}
+  if(url.endsWith('/inquire-price'))throw Error('source unavailable');
+  if(url.endsWith('/daily-ccnl')){assert.equal(tr,'HHDFC55020100');assert.equal(p.SRS_CD,'CLTEST');assert.equal(p.EXCH_CD,'NYM');return {output2:[{data_date:p.CLOSE_DATE_TIME,last_price:'68.42'},{data_date:loader()('lib/balta-model.ts').moveDate(p.CLOSE_DATE_TIME.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'), -1).replaceAll('-',''),last_price:'69.26'}]};}
+  if(url.endsWith('inquire-daily-chartprice')){assert.notEqual(p.FID_INPUT_ISCD,'WTIF');return {output1:{ovrs_nmix_prpr:p.FID_INPUT_ISCD==='NYGOLD'?'3628.1':'1337.2',ovrs_nmix_prdy_vrss:'1.2',prdy_ctrt:'.5',prdy_vrss_sign:'5'},output2:[{stck_bsop_date:'20260921'}]};}
+  return {output:[]};
+ }}});
+ const b=await(await load('app/api/market/terminal/route.ts').GET(new Request('https://test.invalid'))).json();
+ assert.equal(b.indicators.length,5);assert.equal(new Set(b.indicators.map(q=>q.code)).size,5);
+ assert.equal(b.indicators.find(q=>q.code==='kr3').change,-.018);assert.equal(b.indicators.find(q=>q.code==='kr10').price,3.162);
+ assert.equal(b.indicators.find(q=>q.code==='wti').price,68.42);assert(b.indicators.find(q=>q.code==='wti').change<0);assert.equal(b.indicators.find(q=>q.code==='gold').price,3628.1);
+});
+test('RSS decoding preserves headlines and rejects duplicate or unrelated URLs',()=>{
+ const {parseNewsRss}=loader({'lib/kis-terminal.ts':{outputRows}})('lib/terminal-news.ts');
+ const item=url=>`<item><title><![CDATA[시장 &#xAC15;세 &amp; 금리]]></title><link>${url}</link><pubDate>Mon, 21 Sep 2026 06:00:00 GMT</pubDate></item>`;
+ const r=parseNewsRss('<rss>'+item('https://www.mk.co.kr/news/stock/123')+item('https://www.mk.co.kr/news/stock/123')+item('https://mk.co.kr.evil.invalid/a')+item('javascript:alert(1)')+'</rss>','매일경제','mk.co.kr');
+ assert.equal(r.length,1);assert.equal(r[0].title,'시장 강세 & 금리');assert.equal(r[0].linkKind,'article');assert.equal(r[0].publishedAt,'2026-09-21T06:00:00.000Z');
+});
+test('KIS headlines use source fields, KST time, and explicitly labelled search URLs',async()=>{
+ const {readKisNews}=loader({'lib/kis-terminal.ts':{outputRows,kisTerminal:async(url,tr,p)=>{assert.equal(tr,'FHKST01011800');assert(Object.values(p).every(v=>v===''));return {output:[{hts_pbnt_titl_cntt:'시장 A',data_dt:'20260921',data_tm:'153000',dorg:'테스트 출처'},{hts_pbnt_titl_cntt:'시장 A'},{hts_pbnt_titl_cntt:''}]}}}})('lib/terminal-news.ts');
+ const r=await readKisNews();assert.equal(r.length,1);assert.equal(r[0].publishedAt,'2026-09-21T06:30:00.000Z');assert.equal(r[0].linkKind,'search');assert.equal(new URL(r[0].url).searchParams.get('query'),'시장 A');
+});
+test('blocked RSS uses KIS; cache is labelled during outages and stops after six hours',async()=>{
+ let fail=false,calls=0,now=Date.now();const original=Date.now;Date.now=()=>now;
+ try{
+  const {GET}=loader({'lib/balta-access.ts':access,'lib/terminal-news.ts':{readRssNews:async()=>{throw Error('403')},readKisNews:async()=>{calls++;if(fail)throw Error('outage');return [{title:'fixture',url:'https://example.com',source:'test',publishedAt:''}]}}})('app/api/market/news/route.ts');
+  const req=new Request('https://test.invalid');const a=await(await GET(req)).json();assert.equal(a.stale,false);await GET(req);assert.equal(calls,1);
+  now+=300001;fail=true;const b=await(await GET(req)).json();assert.equal(b.stale,true);assert.equal(b.asOf,a.asOf);
+  now+=6*60*60*1000;assert.equal((await GET(req)).status,503);
+ }finally{Date.now=original;}
+});
+test('news auth rejection makes no external request',async()=>{
+ let calls=0;const source=async()=>{calls++;throw Error('unexpected')};const {GET}=loader({'lib/balta-access.ts':{hasDashboardAccess:()=>false},'lib/terminal-news.ts':{readKisNews:source,readRssNews:source}})('app/api/market/news/route.ts');
+ assert.equal((await GET(new Request('https://test.invalid'))).status,401);assert.equal(calls,0);
+});
+
+test('unavailable commodity sources stay missing rather than inventing prices', async () => {
+  const load = loader({ 'lib/balta-access.ts': access, 'lib/kis-directory.ts': { commodityCode: async product => ({ code: product + 'TEST', exchange: 'NYM' }) }, 'lib/kis-terminal.ts': { outputRows, kisTerminal: async (url, tr, p) => {
+    if (url.endsWith('/inquire-price')) return { output1: { last_price: '' } };
+    if (url.endsWith('/daily-ccnl')) return { output2: [{ data_date: '20000101', last_price: '25' }] };
+    if (url.endsWith('inquire-daily-chartprice') && p.FID_INPUT_ISCD === 'FX@KRW') return { output1: { ovrs_nmix_prpr: '1337.2' } };
+    return {};
+  } } });
+  const body = await (await load('app/api/market/terminal/route.ts').GET(new Request('https://test.invalid'))).json();
+  assert.equal(body.indicators.find(q => q.code === 'fx').price, 1337.2);
+  assert(!body.indicators.some(q => q.code === 'wti' || q.code === 'gold'));
+  assert(body.warnings.includes('WTI 조회 대기')); assert(body.warnings.includes('금 조회 대기'));
+});
