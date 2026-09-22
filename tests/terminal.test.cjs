@@ -42,26 +42,6 @@ test('new endpoints reject unauthenticated requests before contacting KIS', asyn
   for (const name of ['terminal', 'ranking', 'index-candles', 'stocks']) assert.equal((await load('app/api/market/' + name + '/route.ts').GET(new Request('https://test.invalid/api/market/' + name))).status, 401);
   assert.equal(calls, 0);
 });
-test('macro sources use their documented response containers; partial errors stay explicit', async () => {
-  const calls = [];
-  const load = loader({ 'lib/balta-access.ts': access, 'lib/kis-directory.ts': { commodityCode: async product => ({ code: product + 'TEST' }) }, 'lib/kis-terminal.ts': { outputRows, kisTerminal: async (url, tr, params) => {
-    calls.push({ url, tr, params });
-    if (url.endsWith('inquire-index-price')) { if (params.FID_INPUT_ISCD === '1001') throw Error('simulated source failure'); return { output: { bstp_nmix_prpr: '3100', bstp_nmix_prdy_vrss: '10', bstp_nmix_prdy_ctrt: '.32', prdy_vrss_sign: '5' } }; }
-    if (url.endsWith('display-board-futures')) return { output: [{ futs_shrn_iscd: 'NEAR', hts_kor_isnm: '테스트 선물', hts_rmnn_dynu: '8', futs_prpr: '421.8' }, { futs_shrn_iscd: 'EXPIRED', hts_rmnn_dynu: '-1', futs_prpr: '422' }] };
-    if (url.endsWith('comp-interest')) return { output1: [{ hts_kor_isnm: '국고채 3년', bond_mnrt_prpr: '2.987', bond_mnrt_prdy_vrss: '.018', prdy_vrss_sign: '5' }] };
-    if (url.endsWith('inquire-daily-chartprice')) return { output1: { ovrs_nmix_prpr: '1337.2', ovrs_nmix_prdy_vrss: '2.4', prdy_ctrt: '.18', prdy_vrss_sign: '2' } };
-    if (url.endsWith('inquire-price')) return { output1: { last_price: params.SRS_CD.startsWith('CL') ? '68.42' : '3628.10', prev_price: params.SRS_CD.startsWith('CL') ? '69.26' : '3615.70', proc_date: '20260916', proc_time: '150000' } };
-    throw Error('Unexpected endpoint');
-  } } });
-  const body = await (await load('app/api/market/terminal/route.ts').GET(new Request('https://test.invalid/api/market/terminal'))).json();
-  assert.equal(body.quotes.find(q => q.code === '0001').change, -10);
-  assert(!body.quotes.some(q => q.code === '1001')); assert(body.warnings.includes('KOSDAQ 조회 대기'));
-  assert(body.quotes.some(q => q.code === 'NEAR')); assert(!body.quotes.some(q => q.code === 'EXPIRED'));
-  assert.equal(body.indicators.find(q => q.code === 'fx').price, 1337.2);
-  assert.equal(body.indicators.find(q => q.code === 'wti').price, 68.42); assert(body.indicators.find(q => q.code === 'wti').change < 0);
-  assert(body.indicators.find(q => q.code === 'gold').change > 0);
-  assert(calls.every(c => !/order|tokenP/.test(c.url)));
-});
 test('ranking invalid filters send no request; volume and turnover use distinct KIS classifications', async () => {
   const calls = [];
   const load = loader({ 'lib/balta-access.ts': access, 'lib/kis-terminal.ts': { outputRows, kisTerminal: async (...args) => { calls.push(args); return { output: [{ mksc_shrn_iscd: '005930', hts_kor_isnm: '삼성전자', stck_prpr: '', prdy_ctrt: '1.2', prdy_vrss_sign: '5' }] }; } } });
@@ -94,19 +74,6 @@ test('mobile Pulse passes the same normalized sector times and markets to the we
   assert.deepEqual(seen, { date: '2026-09-15', time: snapshot.time, sectors: snapshot.market_data.sectors });
 });
 
-test('bond request uses I; spaced bond names and commodity fallback stay numeric', async () => {
- const load=loader({'lib/balta-access.ts':access,'lib/kis-directory.ts':{commodityCode:async product=>({code:product+'TEST',exchange:'NYM'})},'lib/kis-terminal.ts':{outputRows,kisTerminal:async(url,tr,p)=>{
-  if(url.endsWith('comp-interest')){assert.equal(p.FID_COND_MRKT_DIV_CODE,'I');return {output1:[{hts_kor_isnm:'국고채 (3 년)',bond_mnrt_prpr:'2.987',bond_mnrt_prdy_vrss:'.018',prdy_vrss_sign:'5'}],output2:[{hts_kor_isnm:'국고채권 10년',bond_mnrt_prpr:'3.162'}]};}
-  if(url.endsWith('/inquire-price'))throw Error('source unavailable');
-  if(url.endsWith('/daily-ccnl')){assert.equal(tr,'HHDFC55020100');assert.equal(p.SRS_CD,'CLTEST');assert.equal(p.EXCH_CD,'NYM');return {output2:[{data_date:p.CLOSE_DATE_TIME,last_price:'68.42'},{data_date:loader()('lib/balta-model.ts').moveDate(p.CLOSE_DATE_TIME.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'), -1).replaceAll('-',''),last_price:'69.26'}]};}
-  if(url.endsWith('inquire-daily-chartprice')){assert.notEqual(p.FID_INPUT_ISCD,'WTIF');return {output1:{ovrs_nmix_prpr:p.FID_INPUT_ISCD==='NYGOLD'?'3628.1':'1337.2',ovrs_nmix_prdy_vrss:'1.2',prdy_ctrt:'.5',prdy_vrss_sign:'5'},output2:[{stck_bsop_date:'20260921'}]};}
-  return {output:[]};
- }}});
- const b=await(await load('app/api/market/terminal/route.ts').GET(new Request('https://test.invalid'))).json();
- assert.equal(b.indicators.length,5);assert.equal(new Set(b.indicators.map(q=>q.code)).size,5);
- assert.equal(b.indicators.find(q=>q.code==='kr3').change,-.018);assert.equal(b.indicators.find(q=>q.code==='kr10').price,3.162);
- assert.equal(b.indicators.find(q=>q.code==='wti').price,68.42);assert(b.indicators.find(q=>q.code==='wti').change<0);assert.equal(b.indicators.find(q=>q.code==='gold').price,3628.1);
-});
 test('RSS decoding preserves headlines and rejects duplicate or unrelated URLs',()=>{
  const {parseNewsRss}=loader({'lib/kis-terminal.ts':{outputRows}})('lib/terminal-news.ts');
  const item=url=>`<item><title><![CDATA[시장 &#xAC15;세 &amp; 금리]]></title><link>${url}</link><pubDate>Mon, 21 Sep 2026 06:00:00 GMT</pubDate></item>`;
@@ -131,15 +98,63 @@ test('news auth rejection makes no external request',async()=>{
  assert.equal((await GET(new Request('https://test.invalid'))).status,401);assert.equal(calls,0);
 });
 
-test('unavailable commodity sources stay missing rather than inventing prices', async () => {
-  const load = loader({ 'lib/balta-access.ts': access, 'lib/kis-directory.ts': { commodityCode: async product => ({ code: product + 'TEST', exchange: 'NYM' }) }, 'lib/kis-terminal.ts': { outputRows, kisTerminal: async (url, tr, p) => {
-    if (url.endsWith('/inquire-price')) return { output1: { last_price: '' } };
-    if (url.endsWith('/daily-ccnl')) return { output2: [{ data_date: '20000101', last_price: '25' }] };
-    if (url.endsWith('inquire-daily-chartprice') && p.FID_INPUT_ISCD === 'FX@KRW') return { output1: { ovrs_nmix_prpr: '1337.2' } };
-    return {};
-  } } });
-  const body = await (await load('app/api/market/terminal/route.ts').GET(new Request('https://test.invalid'))).json();
-  assert.equal(body.indicators.find(q => q.code === 'fx').price, 1337.2);
-  assert(!body.indicators.some(q => q.code === 'wti' || q.code === 'gold'));
-  assert(body.warnings.includes('WTI 조회 대기')); assert(body.warnings.includes('금 조회 대기'));
+
+const fx = loader()('lib/terminal-fx.ts');
+const fxBody = (latest, previous, latestDate='20260922', previousDate='20260921') => ({
+ output1:{ovrs_nmix_prpr:String(latest),ovrs_nmix_prdy_clpr:String(previous)},
+ output2:[{stck_bsop_date:latestDate,ovrs_nmix_prpr:String(latest)},{stck_bsop_date:previousDate,ovrs_nmix_prpr:String(previous)}]
+});
+const fxFeeds = () => ({'FX@KRW':fxBody(1500,1400),'FX@JPY':fxBody(150,140),'FX@CNY':fxBody(7.5,7),'FX@EUR':fxBody(1.1,1),'FX@GBP':fxBody(1.3,1.25)});
+const convert = feeds => fx.currencyIndicators(feeds,'20260908','20260922','2026-09-22T01:00:00Z');
+const closeTo = (actual, expected) => assert(Math.abs(actual-expected)<0.000001, `${actual} != ${expected}`);
+test('five KRW currencies use correct quote direction, 100 yen scaling and stable order',()=>{
+ const {indicators:q,warnings}=convert(fxFeeds());
+ assert.deepEqual(q.map(r=>r.name),['원/달러','원/엔 (100엔)','원/위안','원/유로','원/파운드']);
+ [1500,1000,200,1650,1950].forEach((v,i)=>closeTo(q[i].price,v));
+ [100,0,0,250,200].forEach((v,i)=>closeTo(q[i].change,v));
+ closeTo(q[3].rate,250/1400*100);assert.equal(warnings.length,0);
+});
+test('cross rates match both observation dates rather than mixing holiday sessions',()=>{
+ const feeds=fxFeeds();
+ feeds['FX@JPY']=fxBody(140,130,'20260921','20260918');
+ feeds['FX@KRW'].output2.push({stck_bsop_date:'20260918',ovrs_nmix_prpr:'1300'});
+ const yen=convert(feeds).indicators[1];assert.equal(yen.asOf,'20260921');
+ closeTo(yen.price,1000);closeTo(yen.change,0);
+});
+test('missing previous observation leaves cross-rate changes unknown',()=>{
+ const feeds=fxFeeds();feeds['FX@JPY'].output2=feeds['FX@JPY'].output2.slice(0,1);
+ const yen=convert(feeds).indicators[1];closeTo(yen.price,1000);assert.equal(yen.change,null);assert.equal(yen.rate,null);
+});
+test('zero, empty, missing and non-overlapping FX data never produce invented rates',()=>{
+ const feeds=fxFeeds();feeds['FX@JPY']=fxBody(0,'');delete feeds['FX@CNY'];
+ feeds['FX@EUR']=fxBody(1.1,1,'20200101','20200102');
+ const {indicators:q,warnings}=convert(feeds);
+ assert.equal(q[0].price,1500);assert.equal(q[1].price,null);assert.equal(q[2].price,null);assert.equal(q[3].price,null);
+ closeTo(q[4].price,1950);assert.equal(warnings.length,3);
+ delete feeds['FX@KRW'];assert(convert(feeds).indicators.every(q=>q.price===null));
+});
+test('direct USD quote survives missing history, but undated cross rates remain missing',()=>{
+ const feeds=fxFeeds();feeds['FX@KRW'].output2=[];
+ const q=convert(feeds).indicators;assert.equal(q[0].price,1500);assert.equal(q[0].change,100);
+ assert(q.slice(1).every(q=>q.price===null));
+});
+test('terminal calls only X currency sources and isolates a failed currency',async()=>{
+ const calls=[],feeds=fxFeeds();
+ const load=loader({'lib/balta-access.ts':access,'lib/kis-terminal.ts':{outputRows,kisTerminal:async(url,tr,p)=>{
+   calls.push({url,tr,p});
+   if(url.endsWith('inquire-daily-chartprice')){
+     assert.equal(tr,'FHKST03030100');assert.equal(p.FID_COND_MRKT_DIV_CODE,'X');
+     if(p.FID_INPUT_ISCD==='FX@JPY')throw Error('simulated currency failure');
+     const f=feeds[p.FID_INPUT_ISCD];assert(f,'Unexpected currency');
+     return {...f,output2:f.output2.map((r,i)=>({...r,stck_bsop_date:i===0?p.FID_INPUT_DATE_2:loader()('lib/balta-model.ts').moveDate(p.FID_INPUT_DATE_2.replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3'),-1).replaceAll('-','')}))};
+   }
+   if(url.endsWith('inquire-index-price'))return {output:{bstp_nmix_prpr:'3100'}};
+   if(url.endsWith('display-board-futures'))return {output:[{futs_shrn_iscd:'NEAR',hts_kor_isnm:'선물',hts_rmnn_dynu:'8',futs_prpr:'421.8'}]};
+   throw Error('Unexpected endpoint '+url);
+ }}});
+ const b=await(await load('app/api/market/terminal/route.ts').GET(new Request('https://test.invalid'))).json();
+ assert.equal(calls.length,8);assert.equal(b.indicators.length,5);assert.equal(b.quotes.length,3);
+ assert.equal(b.indicators[1].price,null);assert.equal(b.indicators[0].price,1500);closeTo(b.indicators[4].price,1950);
+ assert.deepEqual(b.warnings,['원/엔 (100엔) 조회 대기']);
+ assert(calls.every(c=>!/(comp-interest|overseas-futureoption)/.test(c.url)));
 });

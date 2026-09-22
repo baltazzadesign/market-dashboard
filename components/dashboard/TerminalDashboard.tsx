@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { kstParts, formatNumber as n, dataStatus, type MarketRow } from '@/lib/balta-model';
 import { buildMarketEvents } from '@/lib/balta-signals';
 import type { Quote, TerminalSnapshot } from '@/lib/terminal-model';
+import { emptyFxIndicators } from '@/lib/terminal-fx';
 import type { ChartKind, Domain } from './chart-model';
 import { Brand, Icon, type IconName } from './Icon';
 import { useMarketFeed } from './useMarketFeed';
@@ -26,7 +27,6 @@ function IndexCard({ quote, label, fallback, rows, onClick }: { quote?: Quote; l
   const positive = (quote?.rate ?? 0) >= 0;
   return <button className="terminal-panel terminal-index" onClick={onClick}><span className="terminal-index-label" title={quote?.name}>{quote?.name || label}</span><strong>{n(quote?.price ?? fallback, 2)}</strong><span className={'terminal-index-change ' + (quote?.rate == null ? '' : positive ? 'positive' : 'negative')}>{quote?.rate == null ? '시세 수신 대기' : <>{positive ? '▲' : '▼'} {n(Math.abs(quote.change ?? 0), 2)} <b>{n(quote.rate, 2, true)}%</b></>}</span>{rows && <Spark values={rows.slice(-90)} color={positive ? '#ff514e' : '#44a6ff'}/>}</button>;
 }
-const empty = (code: string, name: string): Quote => ({ code, name, price: null, change: null, rate: null, volume: null, turnover: null, asOf: '' });
 export default function TerminalDashboard() {
   const [date, setDate] = useState(''), [now, setNow] = useState<Date | null>(null), [modal, setModal] = useState<'chart' | 'board' | 'future' | null>(null), [kind, setKind] = useState<ChartKind>('kospi');
   const [domain, setDomain] = useState<Domain>([540, 930]);
@@ -38,7 +38,7 @@ export default function TerminalDashboard() {
   const quotes = snapshot.data?.quotes ?? [];
   const status = dataStatus(last, date, feed.error, now ?? new Date(0));
   const chartDomain: Domain = last && last.minute > 930 ? [540, 1200] : [540, 930];
-  const indicators = [empty('fx', '원/달러'), empty('kr3', '국고채 3년'), empty('kr10', '국고채 10년'), empty('wti', 'WTI 선물'), empty('gold', '금 선물 (USD)')].map(q => snapshot.data?.indicators.find(r => r.name === q.name || r.code === q.code) ?? q);
+  const indicators = emptyFxIndicators().map(q => snapshot.data?.indicators.find(r => r.code === q.code) ?? q);
   function expand(next: ChartKind) { setKind(next); setDomain(chartDomain); setModal('chart'); }
   const shortcuts: { title: string; description: string; icon: IconName; href?: string; click?: () => void; art: string }[] = [
     { title: '시장 캘린더', description: '과거를 보면\n오늘이 보입니다.', icon: 'calendar', href: '/history', art: 'calendar' },
