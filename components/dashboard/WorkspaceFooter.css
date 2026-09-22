@@ -1,0 +1,141 @@
+/* Daily page footer: scoped to avoid replacing the dashboard's own layout. */
+.workspace-daily .balta-library-heading .balta-library-mantra > span {
+  display: grid;
+  place-items: center;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  margin: 0;
+  font-family: BaltaSerif, "Noto Serif KR", serif;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-align: center;
+  white-space: nowrap;
+  color: #dcad62;
+}
+
+.workspace-daily .investment-disclaimer {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 184px;
+  align-items: center;
+  gap: 24px;
+  padding: 22px;
+}
+.workspace-daily .investment-disclaimer-copy { min-width: 0; }
+.workspace-daily .investment-disclaimer-copy p {
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: none;
+  overflow: visible;
+}
+.workspace-daily .disclaimer-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+.workspace-daily .disclaimer-actions label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 32px;
+  margin: 0;
+  color: #c3b59c;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.workspace-daily .disclaimer-actions input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #dab46b;
+}
+.workspace-daily .disclaimer-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid #d8b575;
+  border-radius: 6px;
+  background: linear-gradient(120deg, #edce8d, #b58a49);
+  color: #20170b;
+  font: inherit;
+  font-weight: 750;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.workspace-daily .disclaimer-actions button:hover { filter: brightness(1.08); }
+.workspace-daily .disclaimer-actions > a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  color: #bb9f6d;
+  font-size: 11px;
+  line-height: 1.5;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workspace-daily .disclaimer-actions :is(input, button, a):focus-visible {
+  outline: 2px solid #f0cc82;
+  outline-offset: 3px;
+}
+.workspace-daily .disclaimer-collapsed {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  width: 100%;
+  min-height: 44px;
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border: 1px solid #634821;
+  border-radius: 8px;
+  background: #0e0c08;
+  color: #b8a88d;
+  font-size: 12px;
+}
+.workspace-daily .disclaimer-collapsed a { margin-left: auto; color: #dfba78; }
+
+@media (max-width: 900px) {
+  .workspace-daily .investment-disclaimer {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 16px;
+    padding: 18px;
+  }
+  .workspace-daily .disclaimer-actions {
+    grid-column: 2;
+    grid-template-columns: minmax(0, 1fr) minmax(140px, 1fr);
+    align-items: center;
+  }
+  .workspace-daily .disclaimer-actions label { justify-content: flex-start; }
+  .workspace-daily .disclaimer-actions > a { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (max-width: 620px) {
+  .workspace-daily .investment-disclaimer {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding: 16px;
+  }
+  .workspace-daily .investment-disclaimer-icon { display: none; }
+  .workspace-daily .disclaimer-actions {
+    grid-column: 1;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid #3d301e;
+  }
+  .workspace-daily .disclaimer-actions label,
+  .workspace-daily .disclaimer-actions > a { justify-content: center; min-height: 44px; }
+  .workspace-daily .disclaimer-actions button { min-height: 46px; }
+}
