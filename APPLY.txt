@@ -1,0 +1,31 @@
+﻿일별 분석 하단 두 부분 크기/정렬 수정
+
+적용
+압축을 풀고 components 폴더를 D:\market-dashboard 에 복사해 덮어쓰세요.
+기존 폴더를 삭제하지 말고 같은 경로의 파일만 교체하세요.
+InvestmentDisclaimer.tsx와 WorkspaceFooter.css 두 파일이 모두 필요합니다.
+
+수정 내용
+1. 발타의 서재 우측 原則 도장: 제목 스타일 충돌을 해소하고 48×48px 안에 18px 글씨를 중앙 정렬했습니다.
+2. 책임면책 고지: 체크박스, 확인 버튼, 전체 고지 링크를 분리했습니다.
+   PC는 오른쪽 184px 영역에 세로로 배치합니다.
+   모바일은 본문 아래에 전체 너비로 배치하며 버튼 높이는 46px입니다.
+3. 모바일의 고지 본문 줄 수 제한을 해제해 전체 문장을 표시합니다.
+4. 확인 후 접힌 안내 영역도 간격과 정렬을 맞췄습니다.
+
+일별 분석 페이지에만 적용되는 CSS입니다.
+기존 API, 데이터, 차트, 환율 및 로그인 화면은 수정하지 않습니다.
+
+Git 반영 (VS Code PowerShell)
+cd D:\market-dashboard
+npm run build
+git add components/dashboard/InvestmentDisclaimer.tsx components/dashboard/WorkspaceFooter.css
+git commit -m "Fix daily archive seal and disclaimer layout"
+git push
+
+Vercel 자동 배포가 연결되어 있다면 새 배포가 Ready가 된 뒤 브라우저를 새로고침하세요.
+
+검증
+- Next.js 운영 빌드 통과.
+- Chromium 화면 폭 1900/1024/820/390/360px에서 도장 크기와 정렬, 버튼/링크 겹침 없음, 고지 본문 잘림 없음을 확인했습니다.
+- 확인 버튼으로 접기, 체크 없이 확인 후 새로고침 시 다시 표시, 오늘 하루 보지 않기 체크 후 새로고침 시 숨김 유지 동작을 확인했습니다.

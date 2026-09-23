@@ -1,6 +1,31 @@
+.panel.panel { height: auto; min-height: 324px; min-width: 0; align-self: start; }
+.markets.markets { display: grid; grid-template-columns: .7fr .7fr 1.3fr 1.3fr; width: 100%; margin-bottom: 9px; }
+.markets.markets button { padding: 6px 5px; font-size: 11px; min-height: 32px; }
+.tools.tools { flex-wrap: wrap; }
+.futures { min-width: 0; }
+.contract { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin: 12px 0 8px; }
+.contract strong { color: #ebce90; font-size: 12px; }
+.contract span,.observed { color: #969789; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.sessionStatus { display:flex; flex-wrap: wrap; justify-content: space-between; align-items:center; gap: 5px; font-size: 10px; color: #aaa99a; }
+.sessionStatus .live { color: #dfbe73; }
+.sessionStatus label { display:flex; gap: 6px; align-items:center; }
+.sessionStatus select { color:#d9c79d; background:#12150f; border:1px solid #4a3e28; border-radius:4px; padding:4px; font-size:10px; max-width:140px; }
+.metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px 8px; border-top:1px solid #493b24; padding:12px 0 6px; margin:8px 0 0; }
+.metrics div {min-width:0;}
+.metrics dt {font-size:9px; color:#999f90; margin-bottom:3px;}
+.metrics dd {margin:0; font-size:11px; color:#dbd8c9; font-variant-numeric:tabular-nums; overflow-wrap:anywhere;}
+.warning {border:1px solid #74582c; border-radius:4px; padding:8px; color:#d9bd84; font-size:11px; line-height:1.6;}
+.warning button {margin-left:6px; text-decoration:underline; color:#ecd498; background:none; border:0; cursor:pointer;}
+.notes {margin:6px 0; font-size:10px; color:#a6a28f; line-height:1.6;}
+.notes summary {cursor:pointer; color:#b7aa8d;}
+.notes p {margin:5px 0;}
 @media (max-width: 640px) {
-  .panel.panel { height: auto; min-height: 300px; }
-  .tools.tools { flex-wrap: wrap; }
+  .panel.panel { min-height: 300px; }
+  .markets.markets button {font-size:10px; padding-inline:3px; white-space:normal;}
   .tools .periods.periods { order: 2; flex: 1 0 100%; justify-content: flex-start; gap: 5px; }
   .tools .periods button:nth-child(n) { display: inline-block; flex: 1; min-height: 32px; font-size: 11px; }
+  .tools.tools select {display:block; min-width:0;}
+  .tools.tools > button {margin-left:auto;}
+  .metrics {grid-template-columns:repeat(2,minmax(0,1fr));}
+  .contract {align-items:flex-start;}
 }
