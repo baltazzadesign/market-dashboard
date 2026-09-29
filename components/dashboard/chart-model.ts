@@ -28,7 +28,7 @@ export function fitDomain(start: number, end: number): Domain {
 export function zoomDomain(domain: Domain, factor: number, anchor = (domain[0] + domain[1]) / 2): Domain {
   const width = Math.max(MIN_WINDOW, Math.min(CLOSE_MINUTE - OPEN_MINUTE, Math.round((domain[1] - domain[0]) * factor)));
   const point = Math.max(domain[0], Math.min(domain[1], anchor));
-  const fraction = (point - domain[0]) / (domain[1] - domain[0]);
+  const fraction = domain[1] > domain[0] ? (point - domain[0]) / (domain[1] - domain[0]) : .5;
   return fitDomain(point - width * fraction, point + width * (1 - fraction));
 }
 export function panDomain(domain: Domain, minutes: number): Domain {
@@ -37,6 +37,45 @@ export function panDomain(domain: Domain, minutes: number): Domain {
 export function seriesValue(row: MarketRow | undefined, series: Series): number | null {
   const value = numeric(row?.[series.key]);
   return value !== null && (series.key === "upRatio" || series.key === "downRatio") ? value * 100 : value;
+}
+
+const BREADTH_SERIES = new Set(["up", "down", "flat", "diff", "accel", "upRatio", "downRatio", "marketScore"]);
+const FLOW_SERIES = new Set(["foreignFlow", "instFlow", "indivFlow", "flowPower", "flowTrend", "flowMomentum"]);
+export function chartSeriesValue(row: MarketRow | undefined, series: Series): number | null {
+  if (!row) return null;
+  if (BREADTH_SERIES.has(series.key) && !["LIVE", "FALLBACK"].includes(row.breadthSource)) return null;
+  if (FLOW_SERIES.has(series.key) && !["LIVE", "FALLBACK"].includes(row.flowSource)) return null;
+  return seriesValue(row, series);
+}
+
+// Follow the observed range with only a small amount of space for the last dot.
+// Missing minutes inside the range remain missing; this only changes the viewport.
+export function observedDomain(rows: MarketRow[]): Domain {
+  if (!rows.length) return [OPEN_MINUTE, OPEN_MINUTE + 60];
+  const first = rows[0].minute, last = rows[rows.length - 1].minute;
+  const padding = Math.max(1, Math.min(5, Math.ceil((last - first) * .02)));
+  return fitDomain(first, last + padding);
+}
+
+export function comparisonBaseline(rows: MarketRow[]): MarketRow | undefined {
+  return rows.find(row => row.kospi !== null && row.kospi > 0 && row.kosdaq !== null && row.kosdaq > 0);
+}
+export function relativeIndexValue(row: MarketRow | undefined, series: Series, baseline: MarketRow | undefined): number | null {
+  if (!row || !baseline || row.minute < baseline.minute) return null;
+  const value = chartSeriesValue(row, series), base = chartSeriesValue(baseline, series);
+  return value !== null && base !== null && base > 0 ? (value / base - 1) * 100 : null;
+}
+
+export function chartTicks(domain: Domain, plotWidth: number): number[] {
+  const span = domain[1] - domain[0], count = Math.max(2, Math.floor(plotWidth / 76));
+  const step = [1, 2, 5, 10, 15, 30, 60, 120, 180].find(value => span / value <= count) ?? 180;
+  const ticks = [domain[0]];
+  for (let minute = Math.ceil(domain[0] / step) * step; minute < domain[1]; minute += step) {
+    if (minute - ticks[ticks.length - 1] >= step * .65) ticks.push(minute);
+  }
+  if (domain[1] - ticks[ticks.length - 1] < step * .65 && ticks.length > 1) ticks.pop();
+  ticks.push(domain[1]);
+  return ticks;
 }
 export function chartPoints(rows: MarketRow[]) {
   const byMinute = new Map(rows.map(row => [row.minute, row]));
