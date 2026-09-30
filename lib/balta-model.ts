@@ -1,3 +1,5 @@
+import { calculateBreadthScore } from "./breadth-score";
+
 export const OPEN_MINUTE = 9 * 60;
 export const REGULAR_CLOSE_MINUTE = 15 * 60 + 30;
 export const CLOSE_MINUTE = 20 * 60;
@@ -63,6 +65,8 @@ export function timeToMinute(value: unknown) {
 export function minuteLabel(value: number) {
   return String(Math.floor(value / 60)).padStart(2, "0") + ":" + String(Math.floor(value % 60)).padStart(2, "0");
 }
+// Legacy score: preserve stored values, historical signals and their thresholds.
+// The UI's normalized breadth score is derived separately from the counts.
 export function calcScore(diff: number, upRatio: number, downRatio: number) {
   return Math.round(Math.max(-60, Math.min(60, diff / 20)) + Math.max(-40, Math.min(40, (upRatio - downRatio) * 100)));
 }
@@ -217,8 +221,11 @@ export function csvCell(value: unknown) {
   return '"' + text.replace(/"/g, '""') + '"';
 }
 export function rowsCsv(rows: MarketRow[]) {
-  const headers = ["날짜","시간","세션","상승 종목","하락 종목","보합 종목","시장 폭","가속도","상승 비율(%)","하락 비율(%)","시장점수","KOSPI","KOSDAQ","외국인(억원)","기관(억원)","개인(억원)","합산수급(억원)","수급상태","종목수상태"];
-  const values = rows.map(r => [r.date,r.time,r.session,r.up,r.down,r.flat,r.diff,r.accel,Number((r.upRatio*100).toFixed(2)),Number((r.downRatio*100).toFixed(2)),r.marketScore,r.kospi,r.kosdaq,r.foreignFlow,r.instFlow,r.indivFlow,r.flowPower,r.flowSource,r.breadthSource]);
+  const headers = ["날짜","시간","세션","상승 종목","하락 종목","보합 종목","시장 폭","가속도","상승 비율(%)","하락 비율(%)","기존 신호점수","KOSPI","KOSDAQ","외국인(억원)","기관(억원)","개인(억원)","합산수급(억원)","수급상태","종목수상태","시장폭 점수(종목수 기준)"];
+  const values = rows.map(r => {
+    const breadthScore = calculateBreadthScore(r);
+    return [r.date,r.time,r.session,r.up,r.down,r.flat,r.diff,r.accel,Number((r.upRatio*100).toFixed(2)),Number((r.downRatio*100).toFixed(2)),r.marketScore,r.kospi,r.kosdaq,r.foreignFlow,r.instFlow,r.indivFlow,r.flowPower,r.flowSource,r.breadthSource,breadthScore === null ? null : Number(breadthScore.toFixed(1))];
+  });
   return "\uFEFF" + [headers,...values].map(row => row.map(csvCell).join(",")).join("\r\n");
 }
 export function eventsCsv(events: MarketEvent[]) {

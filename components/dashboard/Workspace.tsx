@@ -283,7 +283,8 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
       <label className="settings-row"><span><strong>새 강한 신호 알림</strong><p>화면 갱신 중 새로 감지한 강한 신호만 알립니다. 과거 기록에는 알리지 않습니다.</p></span><input className="switch" type="checkbox" checked={settings.notifications} onChange={e=>void toggleNotifications(e.target.checked)}/></label><div className="settings-row"><span><strong>설정 저장</strong><p>선택한 화면 설정은 이 브라우저에 저장됩니다.</p></span><button className="button small" onClick={()=>setSettings(defaults)}>초기화</button></div><div className="toolbar" style={{marginTop:20,justifyContent:"space-between"}}><button className="button" onClick={()=>setModal("guide")}><Icon name="help" size={16}/>지표 가이드</button><button className="button ghost" onClick={logout} disabled={loggingOut}><Icon name="logout" size={16}/>로그아웃</button></div>
     </div></Modal>
     <Modal open={modal==="guide"} onClose={()=>setModal(null)} title="지표 읽는 법"><div className="modal-content">{[
-      ["시장 폭과 시장점수","시장 폭은 상승 종목 수에서 하락 종목 수를 뺀 값입니다. 시장점수는 기존 계산식을 사용해 −100부터 +100까지 표시합니다."],
+      ["시장 폭과 시장폭 점수","시장 폭은 상승 종목 수 − 하락 종목 수입니다. 새 시장폭 점수는 이 값을 전체 종목 수(상승 + 하락 + 보합)로 나누고 100을 곱합니다. −100~+100 범위이며, 0은 상승·하락 균형입니다. 별도 임계값으로 잘라내지 않아 강한 하락장에서도 변화가 드러납니다. 과거 기록에도 같은 계산식을 적용합니다."],
+      ["Market Pulse와 기존 신호점수","Market Pulse는 시장폭·수급·지수·섹터·가속을 합산한 0~100 종합 점수로, 시장폭 점수와 다릅니다. 기존 신호점수(marketScore)는 저장값과 신호 판정을 그대로 보존했습니다. 신호 내용의 ‘시장점수’는 기존 신호점수이며, 새 점수의 매수·매도 기준이 아닙니다. 기록표와 CSV에서 두 점수를 구분합니다."],
       ["지수 등락 기준","상단 KOSPI·KOSDAQ 등락률은 직전 기록과의 비교입니다. 전일 종가 대비 수치가 아닙니다. 지수 비교의 변화율은 두 지수의 첫 공통 기록을 0%로 맞춥니다. 전일 종가 대비 등락률이 아닙니다. 지수 모드에서는 왼쪽 축 KOSPI, 오른쪽 축 KOSDAQ을 사용합니다."],
       ["투자자 수급","외국인·기관·개인 순매수는 모두 억원 단위입니다. 양수는 순매수, 음수는 순매도입니다. 수급을 받지 못한 값은 대시(—)로 표시합니다."],
       ["직전값과 누락 구간","직전 수급 유지로 표시된 값은 새로 받은 수급이 아닙니다. 없는 시간대는 차트를 끊어 표시하며, 기록을 보간해 만들지 않습니다."],

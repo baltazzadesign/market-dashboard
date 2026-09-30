@@ -9,7 +9,7 @@ import { useTerminalData } from './useTerminalData';
 
 export function PulseDial({ pulse }: { pulse: MarketPulse }) {
   const score = pulse.score == null ? null : Math.max(0, Math.min(100, pulse.score));
-  return <Link href="/pulse" className="terminal-panel terminal-pulse" aria-label="Market Pulse 상세 분석"><div><h2>Market Pulse</h2><svg viewBox="0 0 160 104" className="terminal-pulse-svg" role="img" aria-label={score == null ? '점수 산출 대기' : '시장점수 ' + score}>
+  return <Link href="/pulse" className="terminal-panel terminal-pulse" aria-label="Market Pulse 상세 분석"><div><h2>Market Pulse</h2><svg viewBox="0 0 160 104" className="terminal-pulse-svg" role="img" aria-label={score == null ? '점수 산출 대기' : 'Market Pulse 종합 점수 ' + score}>
     <defs><linearGradient id="terminal-gold-arc" x1="0" y1="1" x2="1" y2="0"><stop stopColor="#d7a339"/><stop offset=".55" stopColor="#edc567"/><stop offset="1" stopColor="#fff0c3"/></linearGradient></defs>
     <path d="M20 85 A62 62 0 1 1 140 85" fill="none" stroke="#222523" strokeWidth="13" strokeLinecap="round" pathLength="100"/>
     {score != null && <path d="M20 85 A62 62 0 1 1 140 85" fill="none" stroke="url(#terminal-gold-arc)" strokeWidth="13" strokeLinecap="round" pathLength="100" strokeDasharray={`${Math.max(.1, score)} 100`}/>}

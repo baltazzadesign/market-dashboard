@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "
 import { Area, AreaChart, Brush, ComposedChart, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine, ReferenceDot, ReferenceArea } from "recharts";
 import { type MarketRow, type MarketEvent, OPEN_MINUTE, REGULAR_CLOSE_MINUTE, CLOSE_MINUTE, minuteLabel, formatNumber, record, numeric, sourceLabel, breadthLabel } from "@/lib/balta-model";
 import { Icon } from "./Icon";
+import { breadthScoreDetails } from "@/lib/breadth-score";
 import { chartColors as colors, chartNames, MIN_WINDOW, seriesMap, chartSeriesValue, fitDomain, zoomDomain, panDomain, observedDomain, comparisonBaseline, relativeIndexValue, chartTicks, type ChartKind, type Domain, type Series } from "./chart-model";
 export type { ChartKind, Domain } from "./chart-model";
 export { chartNames, fitDomain } from "./chart-model";
@@ -21,13 +22,15 @@ function ChartTooltip({ active, payload, label, series, row, percent, baseline }
   row?: MarketRow; percent: boolean; baseline?: MarketRow;
 }) {
   if (!active || !payload?.length) return null;
+  const breadth = series.some(item => item.key === "breadthScore") ? breadthScoreDetails(row) : null;
   return <div className="chart-tooltip"><strong className="num">{minuteLabel(Number(label))}</strong>
     {series.map(item => <div className="tooltip-row" key={item.key}>
       <span style={{ color: item.color }}>{item.name}</span>
       <strong className="num">{displayValue(row, item)}{percent && relativeIndexValue(row, item, baseline) !== null && <small> · {formatNumber(relativeIndexValue(row, item, baseline), 2, true)}%</small>}</strong>
     </div>)}
     {series.some(item => ["foreignFlow", "instFlow", "indivFlow"].includes(item.key)) && row && row.flowSource !== "LIVE" && <div className={styles.sourceNote}>{sourceLabel(row.flowSource)}</div>}
-    {series.some(item => ["diff", "accel", "marketScore", "upRatio", "downRatio"].includes(item.key)) && row && row.breadthSource !== "LIVE" && <div className={styles.sourceNote}>{breadthLabel(row.breadthSource)}</div>}
+    {breadth && <div className={styles.scoreExplanation}>상승 {formatNumber(breadth.upPercent, 1)}% − 하락 {formatNumber(breadth.downPercent, 1)}%<br/>전체 {formatNumber(breadth.total)}종목 · 보합 포함</div>}
+    {series.some(item => ["diff", "accel", "marketScore", "breadthScore", "upRatio", "downRatio"].includes(item.key)) && row && row.breadthSource !== "LIVE" && <div className={styles.sourceNote}>{breadthLabel(row.breadthSource)}</div>}
   </div>;
 }
 type ChartProps = {
@@ -110,6 +113,8 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
     const selected: { event: MarketEvent; y: number; series: Series }[] = [];
     for (const event of [...events].sort((a, b) => (a.level === "강" ? 0 : 1) - (b.level === "강" ? 0 : 1) || a.minute - b.minute)) {
       if (event.minute < domain[0] || event.minute > domain[1]) continue;
+      // Legacy score thresholds do not describe the new breadth-balance series.
+      if (kind === "score" && event.type.startsWith("SCORE_")) continue;
       if (event.level !== "강" && !turningType.test(event.type)) continue;
       if (selected.some(point => Math.abs(point.event.minute - event.minute) < gap)) continue;
       const row = rowByMinute.get(event.minute);
@@ -134,6 +139,7 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
           <strong className="num" style={{ color: s.color }}>{displayValue(readoutRow, s)}</strong>{percent && <small className={styles.changeValue}>{formatNumber(relativeIndexValue(readoutRow, s, baseline), 2, true)}{relativeIndexValue(readoutRow, s, baseline) === null ? "" : "%"}</small>}
         </button>)}
       </div>
+      {kind === "score" && <div className={styles.scoreExplanation} title="(상승 종목 수 − 하락 종목 수) ÷ (상승 + 하락 + 보합 종목 수) × 100. Market Pulse 종합 점수와 다른 지표입니다.">상승 비율 − 하락 비율 · 0은 균형</div>}
       {kind === "flow" && readoutRow && readoutRow.flowSource !== "LIVE" && <div className="chart-source-note"><Icon name="warning" size={13}/>{sourceLabel(readoutRow.flowSource)}</div>}
       {["breadth", "ratio", "score", "accel"].includes(kind) && readoutRow && readoutRow.breadthSource !== "LIVE" && <div className="chart-source-note"><Icon name="warning" size={13}/>{breadthLabel(readoutRow.breadthSource)}</div>}
     </div>
@@ -147,6 +153,7 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
     </div>
     <div className="chart-inspection" id={id + "-help"}><span className="num">{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</span><span>{compact ? "시간축·커서 연동" : "드래그 확대 · Ctrl/⌘ + 휠 · 더블클릭 초기화"}</span></div>
     <div ref={plot} className={"chart-frame chart-plot" + (compact ? " compact" : "") + (dragMode === "pan" ? " pan-mode" : "")} role="group" tabIndex={0} aria-label={chartNames[kind] + " 차트. 플러스·마이너스 키로 확대·축소, 좌우 방향키로 시간 이동, Home 키로 초기화."} aria-describedby={id + "-help"}
+      onMouseLeave={() => { setDrag(null); setHover(null); }}
       onDoubleClick={reset} onKeyDown={event => { if (event.target !== event.currentTarget || !onDomainChange) return; if (["+", "=", "-", "ArrowLeft", "ArrowRight", "Home", "Escape"].includes(event.key)) event.preventDefault(); if (["+", "="].includes(event.key)) zoom(.5); else if (event.key === "-") zoom(2); else if (event.key === "ArrowLeft") pan(-1); else if (event.key === "ArrowRight") pan(1); else if (event.key === "Home") reset(); else if (event.key === "Escape") { setDrag(null); setHover(null); } }}>
       <span className={styles.axisUnit} aria-hidden="true">{unit}</span>
       {!hasData && <div className={styles.emptyPlot}>{visible.length ? "이 구간에 표시할 기록이 없습니다" : "지표 이름을 눌러 그래프를 표시하세요"}</div>}
@@ -162,10 +169,9 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
           <XAxis dataKey="minute" type="number" domain={domain} ticks={ticks} tickFormatter={minuteLabel} tick={{ fill: "#999fa9", fontSize: 12 }} tickLine={false} axisLine={{ stroke: "#33373e" }} minTickGap={18} height={32} allowDataOverflow />
           <YAxis yAxisId="left" domain={fixedDomain} tick={{ fill: "#999fa9", fontSize: 12 }} tickFormatter={axisTick} ticks={kind === "score" ? [-100, -50, 0, 50, 100] : kind === "ratio" ? [0, 25, 50, 75, 100] : undefined} allowDecimals={percent || ["index", "kospi", "kosdaq"].includes(kind)} tickLine={false} axisLine={false} width={62} tickCount={5}/>
           {dualAxis && <YAxis yAxisId="right" orientation="right" domain={["auto", "auto"]} tick={{ fill: colors.violet, fontSize: 12 }} tickLine={false} axisLine={false} width={52}/>}
-          <Tooltip content={props => hideMeta ? null : <ChartTooltip active={props.active} payload={props.payload} label={props.label} series={visible} row={rowByMinute.get(Number(props.label))} percent={percent} baseline={baseline}/>} cursor={false} isAnimationActive={false} wrapperStyle={{ pointerEvents: "none", zIndex: 10 }}/>
+          <Tooltip active={isInspecting} position={plotWidth < 500 ? { x: 8, y: 18 } : undefined} content={props => hideMeta ? null : <ChartTooltip active={props.active} payload={props.payload} label={props.label} series={visible} row={rowByMinute.get(Number(props.label))} percent={percent} baseline={baseline}/>} cursor={false} isAnimationActive={false} wrapperStyle={{ pointerEvents: "none", zIndex: 10 }}/>
           {domain[0] < REGULAR_CLOSE_MINUTE && domain[1] > REGULAR_CLOSE_MINUTE && <ReferenceLine yAxisId="left" x={REGULAR_CLOSE_MINUTE} stroke="#6f7782" strokeOpacity={.45} strokeDasharray="4 5" label={{ value: "정규장 마감", fill: "#8f98a6", fontSize: 10, position: "insideTopRight" }}/>}
           {(percent || !["index", "kospi", "kosdaq"].includes(kind)) && <ReferenceLine yAxisId="left" y={kind === "ratio" ? 50 : 0} stroke="#717780" strokeOpacity={.6} strokeDasharray="4 5"/>}
-          {kind === "score" && <><ReferenceLine yAxisId="left" y={70} stroke="#60353a" strokeDasharray="3 6"/><ReferenceLine yAxisId="left" y={-70} stroke="#304361" strokeDasharray="3 6"/></>}
           {visible.map(s => <Area key={s.key} yAxisId={axisFor(s)} dataKey={s.key} name={s.name} type="linear" stroke={s.color} strokeWidth={compact ? 1.8 : 2} fill={"url(#" + id + s.key + ")"} baseValue={!percent && ["index", "kospi", "kosdaq"].includes(kind) ? "dataMin" : 0} dot={false} activeDot={isInspecting ? { r: 4, stroke: "#0d0f12", strokeWidth: 2 } : false} connectNulls={false} isAnimationActive={false}/>)}
           {markerPoints.map(({ event, y, series }) => <ReferenceDot key={event.id} yAxisId={axisFor(series)} x={event.minute} y={y} r={3.5} fill={event.direction === "up" ? colors.red : event.direction === "down" ? colors.blue : colors.yellow} stroke="#0d0f12" strokeWidth={1.5}
             shape={props => <g><title>{event.time + " · " + event.label + " · " + event.message}</title><circle cx={props.cx} cy={props.cy} r={3.5} fill={props.fill} stroke="#0d0f12" strokeWidth={1.5}/></g>}/>)}

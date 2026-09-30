@@ -3,6 +3,7 @@ import { useId, type CSSProperties } from "react";
 import { type MarketRow, type MarketEvent, formatNumber as fmt, valueClass, marketTone, marketNarrative, sourceLabel } from "@/lib/balta-model";
 import { Icon, type IconName } from "./Icon";
 import { chartColors } from "./chart-model";
+import { breadthScoreDetails } from "@/lib/breadth-score";
 function Sparkline({ values, color }: { values: (number | null)[]; color: string }) {
   const id = useId().replace(/:/g, "");
   const data = values.filter((v): v is number => v !== null);
@@ -28,11 +29,11 @@ function sessionLabel(session?: string) {
   return "";
 }
 
-function ScoreGauge({ value }: { value?: number }) {
+function ScoreGauge({ value }: { value?: number | null }) {
   const id = useId().replace(/:/g, "");
   const score = value != null && Number.isFinite(value) ? Math.max(-100, Math.min(100, value)) : null;
   const angle = Math.PI * (1 - ((score ?? 0) + 100) / 200);
-  return <div className="score-gauge" role={score === null ? undefined : "meter"} aria-label="시장점수" aria-valuemin={score === null ? undefined : -100} aria-valuemax={score === null ? undefined : 100} aria-valuenow={score ?? undefined} aria-valuetext={score === null ? undefined : `${fmt(score, 0, true)}점`}>
+  return <div className="score-gauge" role={score === null ? undefined : "meter"} aria-label="시장폭 점수" aria-valuemin={score === null ? undefined : -100} aria-valuemax={score === null ? undefined : 100} aria-valuenow={score ?? undefined} aria-valuetext={score === null ? undefined : `${fmt(score, 1, true)}점`} title="전체 종목 중 상승 비율 − 하락 비율. 보합 포함, 0은 균형.">
     <svg viewBox="0 0 220 125" fill="none" aria-hidden="true">
       <defs><linearGradient id={id} x1="20" y1="0" x2="200" y2="0" gradientUnits="userSpaceOnUse"><stop stopColor="var(--down)"/><stop offset=".5" stopColor="#50545b"/><stop offset="1" stopColor="var(--up)"/></linearGradient></defs>
       <path d="M20 110 A90 90 0 0 1 200 110" stroke="#30343a" strokeWidth="9" strokeLinecap="round"/>
@@ -40,8 +41,8 @@ function ScoreGauge({ value }: { value?: number }) {
       <path d="M34 110 A76 76 0 0 1 186 110" stroke="#737880" strokeOpacity=".4" strokeDasharray="1 9"/>
       {score !== null && <circle cx={110 + 90 * Math.cos(angle)} cy={110 - 90 * Math.sin(angle)} r="6" fill="white" stroke="#111316" strokeWidth="3"/>}
     </svg>
-    <div className="gauge-value"><span>시장점수</span><strong className={"num " + valueClass(score)}>{fmt(score, 0, true)}</strong></div>
-    <div className="gauge-labels"><span>−100 약세</span><span>강세 +100</span></div>
+    <div className="gauge-value"><span>시장폭 점수</span><strong className={"num " + valueClass(score)}>{fmt(score, 1, true)}</strong></div>
+    <div className="gauge-labels"><span>−100 하락 우위</span><span>상승 우위 +100</span></div>
   </div>;
 }
 export function Metrics({ rows, loading }: { rows: MarketRow[]; loading: boolean }) {
@@ -61,7 +62,8 @@ export function Metrics({ rows, loading }: { rows: MarketRow[]; loading: boolean
 }
 export function MarketSummary({ row }: { row?: MarketRow }) {
   const total = row ? row.up + row.down + row.flat : 0;
-  return <section className="panel briefing-panel"><div className="market-summary"><div className="summary-eyebrow"><span><Icon name="activity" size={15}/>시장 브리핑</span><span className="num">{row ? (sessionLabel(row.session) ? sessionLabel(row.session)+" · " : "") + row.time + " 기준" : "—"}</span></div><h2 className={"summary-tone " + valueClass(row?.diff)}>{marketTone(row)}</h2><p className="summary-copy">{marketNarrative(row)}</p><ScoreGauge value={row?.marketScore}/></div><div className="breadth-strip"><div className="breadth-counts"><span className="positive">상승<strong className="num">{row ? fmt(row.upRatio*100, 1) + "%" : "—"}</strong></span><span className="muted" style={{ textAlign: "center" }}>보합<strong className="num">{row && total ? fmt(row.flat/total*100, 1) + "%" : "—"}</strong></span><span className="negative" style={{ textAlign: "right" }}>하락<strong className="num">{row ? fmt(row.downRatio*100, 1) + "%" : "—"}</strong></span></div><div className="breadth-bar" aria-hidden="true">{row && total > 0 && <><span style={{ width: row.up/total*100+"%", background:"var(--up)" }}/><span style={{ width:row.flat/total*100+"%", background:"#667184" }}/><span style={{ width:row.down/total*100+"%", background:"var(--down)" }}/></>}</div></div></section>;
+  const breadth = breadthScoreDetails(row);
+  return <section className="panel briefing-panel"><div className="market-summary"><div className="summary-eyebrow"><span><Icon name="activity" size={15}/>시장 브리핑</span><span className="num">{row ? (sessionLabel(row.session) ? sessionLabel(row.session)+" · " : "") + row.time + " 기준" : "—"}</span></div><h2 className={"summary-tone " + valueClass(row?.diff)}>{marketTone(row)}</h2><p className="summary-copy">{marketNarrative(row)}</p><ScoreGauge value={breadth?.score}/>{breadth?.held && <p className="panel-subtitle">직전 시장폭 유지 · 새 수신값 아님</p>}</div><div className="breadth-strip"><div className="breadth-counts"><span className="positive">상승<strong className="num">{breadth ? fmt(breadth.upPercent, 1) + "%" : "—"}</strong></span><span className="muted" style={{ textAlign: "center" }}>보합<strong className="num">{row && breadth ? fmt(row.flat/breadth.total*100, 1) + "%" : "—"}</strong></span><span className="negative" style={{ textAlign: "right" }}>하락<strong className="num">{breadth ? fmt(breadth.downPercent, 1) + "%" : "—"}</strong></span></div><div className="breadth-bar" aria-hidden="true">{row && breadth && total > 0 && <><span style={{ width: row.up/total*100+"%", background:"var(--up)" }}/><span style={{ width:row.flat/total*100+"%", background:"#667184" }}/><span style={{ width:row.down/total*100+"%", background:"var(--down)" }}/></>}</div></div></section>;
 }
 export function FlowPanel({ row }: { row?: MarketRow }) {
   const entries = [{ name:"외국인", value:row?.foreignFlow, color:chartColors.blue },{ name:"기관", value:row?.instFlow, color:chartColors.red },{ name:"개인", value:row?.indivFlow, color:chartColors.yellow }];

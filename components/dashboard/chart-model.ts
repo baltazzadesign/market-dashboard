@@ -1,12 +1,13 @@
 import { CLOSE_MINUTE, OPEN_MINUTE, numeric, type MarketRow } from "@/lib/balta-model";
+import { calculateBreadthScore } from "@/lib/breadth-score";
 
 export type ChartKind = "breadth" | "score" | "flow" | "index" | "kospi" | "kosdaq" | "ratio" | "accel";
 export type Domain = [number, number];
-export type Series = { key: keyof MarketRow; name: string; color: string; unit?: string; axis?: string; digits?: number; signed?: boolean };
+export type Series = { key: keyof MarketRow | "breadthScore"; name: string; color: string; unit?: string; axis?: string; digits?: number; signed?: boolean };
 export const MIN_WINDOW = 5;
 export const chartColors = { blue: "#5294ff", red: "#ff545f", yellow: "#f2ce53", green: "#40c990", violet: "#aa92ed", mint: "#74c9b8" };
 export const chartNames: Record<ChartKind, string> = {
-  breadth: "시장 폭", ratio: "상승·하락 비율", flow: "투자자 수급", kospi: "KOSPI", kosdaq: "KOSDAQ", score: "시장점수", index: "시장 지수 비교", accel: "가속도",
+  breadth: "시장 폭", ratio: "상승·하락 비율", flow: "투자자 수급", kospi: "KOSPI", kosdaq: "KOSDAQ", score: "시장폭 점수", index: "시장 지수 비교", accel: "가속도",
 };
 export const seriesMap: Record<ChartKind, Series[]> = {
   breadth: [{ key: "diff", name: "상승 − 하락", color: chartColors.yellow, unit: "개", signed: true }],
@@ -15,7 +16,7 @@ export const seriesMap: Record<ChartKind, Series[]> = {
   kospi: [{ key: "kospi", name: "KOSPI", color: chartColors.green, digits: 2 }],
   kosdaq: [{ key: "kosdaq", name: "KOSDAQ", color: chartColors.violet, digits: 2 }],
   index: [{ key: "kospi", name: "KOSPI", color: chartColors.green, digits: 2, axis: "left" }, { key: "kosdaq", name: "KOSDAQ", color: chartColors.violet, digits: 2, axis: "right" }],
-  score: [{ key: "marketScore", name: "시장점수", color: chartColors.mint, unit: "점", signed: true }],
+  score: [{ key: "breadthScore", name: "시장폭 점수", color: chartColors.mint, unit: "점", digits: 1, signed: true }],
   accel: [{ key: "accel", name: "가속도", color: chartColors.yellow, signed: true }],
 };
 
@@ -35,11 +36,12 @@ export function panDomain(domain: Domain, minutes: number): Domain {
   return fitDomain(domain[0] + minutes, domain[1] + minutes);
 }
 export function seriesValue(row: MarketRow | undefined, series: Series): number | null {
+  if (series.key === "breadthScore") return calculateBreadthScore(row);
   const value = numeric(row?.[series.key]);
   return value !== null && (series.key === "upRatio" || series.key === "downRatio") ? value * 100 : value;
 }
 
-const BREADTH_SERIES = new Set(["up", "down", "flat", "diff", "accel", "upRatio", "downRatio", "marketScore"]);
+const BREADTH_SERIES = new Set(["up", "down", "flat", "diff", "accel", "upRatio", "downRatio", "marketScore", "breadthScore"]);
 const FLOW_SERIES = new Set(["foreignFlow", "instFlow", "indivFlow", "flowPower", "flowTrend", "flowMomentum"]);
 export function chartSeriesValue(row: MarketRow | undefined, series: Series): number | null {
   if (!row) return null;
