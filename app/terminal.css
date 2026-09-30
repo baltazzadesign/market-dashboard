@@ -70,3 +70,19 @@ body{background:var(--background);color:var(--foreground)}
   .workspace-daily .investment-disclaimer-copy { min-width: 0; width: 100%; }
   .workspace-daily .mockup-hero h1 { font-family: var(--font-ui), sans-serif; }
 }
+
+/* Keep all nine navigation entries accessible alongside search and presence. */
+@media (min-width: 1051px) and (max-width: 1360px) {
+  .terminal-header { height: 106px; }
+  .terminal-header-inner { display: grid; grid-template-columns: 156px 1fr auto; grid-template-rows: 58px 47px; column-gap: 15px; row-gap: 0; }
+  .terminal-brand-link { grid-column: 1; grid-row: 1; }
+  .terminal-header-inner > .terminal-search { grid-column: 2; grid-row: 1; width: 210px; }
+  .terminal-header-actions { grid-column: 3; grid-row: 1; }
+  .terminal-navigation { grid-column: 1 / -1; grid-row: 2; width: 100%; overflow-x: auto; gap: 25px; scrollbar-width: none; }
+  .terminal-navigation > a { font-size: 12px; min-height: 44px; }
+  .terminal-navigation > a.active:after { bottom: 5px; }
+}
+@media (min-width: 1361px) {
+  .terminal-header-inner { gap: 22px; }
+  .terminal-navigation { gap: 20px; }
+}
