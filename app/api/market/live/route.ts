@@ -1,5 +1,6 @@
 import { parseSectors } from "@/lib/market-research";
 import { indexSnapshot } from "@/lib/kis-history";
+import { buildInvestorFlows, parseInvestorBreakdown, type InvestorBreakdown } from "@/lib/investor-flow";
 import { kstParts } from "@/lib/balta-model";
 import { getKrxMarketStatus, isRegularObservation, parseAdditionalHolidays } from "@/lib/market-calendar";
 export const dynamic = "force-dynamic";
@@ -48,6 +49,7 @@ const CUSTTYPE = process.env.KIS_CUSTTYPE ?? "P";
 
 type FlowData = {
   complete?: boolean;
+  breakdown?: InvestorBreakdown;
   markets?: { kospi: FlowData; kosdaq: FlowData };
   foreign: number;
   inst: number;
@@ -1042,6 +1044,7 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
     foreign: number;
     inst: number;
     indiv: number;
+    breakdown: InvestorBreakdown;
   }> = [];
 
   for (const row of rows) {
@@ -1058,6 +1061,7 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
         foreign: normalizeFlowUnit(foreign),
         inst: normalizeFlowUnit(inst),
         indiv: normalizeFlowUnit(indiv),
+        breakdown: parseInvestorBreakdown(row),
       });
     }
   }
@@ -1074,6 +1078,7 @@ function parseFlowFromJson(data: any): Omit<FlowData, "source" | "raw"> {
       foreign: latest.foreign,
       inst: latest.inst,
       indiv: latest.indiv,
+      breakdown: latest.breakdown,
       complete: true,
     };
   }
@@ -2050,6 +2055,7 @@ export async function GET(req: Request) {
       breadthSource,
       breadthAvailable,
       breadthReason: breadthFallbackReason || null,
+      investorFlows: buildInvestorFlows(rawFlowData.markets, now.toISOString()),
       kospi: indexSnapshot(kospiData.raw,rawFlowData.markets?.kospi,breadthAvailable),
       kosdaq: indexSnapshot(kosdaqData.raw,rawFlowData.markets?.kosdaq,breadthAvailable),
     };

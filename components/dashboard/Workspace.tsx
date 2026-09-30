@@ -1,4 +1,5 @@
 "use client";
+import InvestorFlowPanel from "./InvestorFlowPanel";
 import { BaltaJungyongHeaderLink } from './BaltaJungyongHeaderLink';
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -54,6 +55,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   const [hoverMinute,setHoverMinute] = useState<number | null>(null),[expandedKind,setExpandedKind] = useState<ChartKind>("flow");
   const [tableView,setTableView] = useState<RecordView>(mode==="daily"?"records":"signals");
   const [returnToModal,setReturnToModal] = useState<"board" | "command" | null>(null);
+  const [boardInvestors,setBoardInvestors] = useState(false);
   const [boardColumns,setBoardColumns] = useState<2|3>(3);
   const [boardMarkers,setBoardMarkers] = useState(false);
   const [toast,setToast] = useState(""),[loggingOut,setLoggingOut] = useState(false);
@@ -229,6 +231,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
         <div className="dashboard-grid"><div className="main-column">
           <PanelLayout scope={mode} items={[
             {id:"main-chart",title:"장중 흐름",content:mainChartPanel()},
+            {id:"investor-flow",title:"투자자 세부 수급",content:<InvestorFlowPanel rows={rows} date={date} domain={domain} loading={feed.loading}/>},
             ...[...overviewKinds,...comparisonKinds].map(key=>({id:"chart-"+key,title:chartLabels[key]+" 차트",content:settings.compare&&rows.length>0&&key!==kind?comparisonChart(key):<p className="panel-subtitle">비교 차트 설정이 꺼져 있거나 현재 주 차트와 같은 지표입니다.</p>})),
             {id:"summary",title:"일별 요약",content:<SessionSummary rows={signalRows} events={events}/>},
             {id:"report",title:"동시간대 비교 · 리포트",content:<ComparisonReport rows={signalRows} events={events} date={date}/>},
@@ -311,12 +314,13 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
       </div>
     </Modal>
     <Modal open={modal==="board"} onClose={()=>setModal(null)} title={"차트 전체보기 · "+date} full>
+      <div className="segmented" aria-label="차트 보드 종류"><button aria-pressed={!boardInvestors} className={!boardInvestors?"active":""} onClick={()=>{setBoardInvestors(false);setHoverMinute(null);}}>기본 차트</button><button aria-pressed={boardInvestors} className={boardInvestors?"active":""} onClick={()=>{setBoardInvestors(true);setHoverMinute(null);}}>세부 수급</button></div>
       <div className={chartStyles.boardToolbar}>
         <div className={chartStyles.boardActions}>{ranges()}<button className="button small" onClick={resetCharts}>초기화</button></div>
-        <div className={chartStyles.boardActions}><button className="button small" aria-pressed={boardMarkers} onClick={()=>setBoardMarkers(value=>!value)}>신호 {boardMarkers?"켜짐":"꺼짐"}</button><div className={"segmented "+chartStyles.columnPicker} aria-label="전체보기 열 수">{([2,3] as const).map(n=><button key={n} aria-pressed={boardColumns===n} className={boardColumns===n?"active":""} onClick={()=>setBoardColumns(n)}>{n}열</button>)}</div></div>
+        <div className={chartStyles.boardActions} style={boardInvestors?{display:"none"}:undefined}><button className="button small" aria-pressed={boardMarkers} onClick={()=>setBoardMarkers(value=>!value)}>신호 {boardMarkers?"켜짐":"꺼짐"}</button><div className={"segmented "+chartStyles.columnPicker} aria-label="전체보기 열 수">{([2,3] as const).map(n=><button key={n} aria-pressed={boardColumns===n} className={boardColumns===n?"active":""} onClick={()=>setBoardColumns(n)}>{n}열</button>)}</div></div>
       </div>
       <div className={chartStyles.boardStatus}><span><strong>{hoverMinute!==null?"커서 "+minuteLabel(hoverMinute):"최신 "+(last?.time??"—")}</strong> · {minuteLabel(domain[0])}–{minuteLabel(domain[1])} · {rows.length}개 기록</span><span className={feed.error||feed.warning?chartStyles.warning:""}>{feed.error||feed.warning|| (feed.refreshing?"갱신 중…":date===today?(settings.autoRefresh?"60초 자동 갱신":"자동 갱신 꺼짐"):"저장된 기록")} <span className={chartStyles.boardHint}>· 시간축·커서 연동</span></span></div>
-      {feed.loading?<div className="chart-loading">시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state"><strong>{feed.error||"선택한 날짜의 기록이 없습니다."}</strong><button className="button" onClick={()=>void feed.refresh(true)}>다시 조회</button></div>:<div className={"chart-board-grid columns-"+boardColumns+" "+chartStyles.boardGrid}>{(["flow","breadth","ratio","kospi","kosdaq","score","index","accel"] as ChartKind[]).map(key=><section className={"panel"+(key==="index"?" "+chartStyles.comparisonCard:"")} key={key}><div className="panel-header"><h3 className="panel-title">{chartLabels[key]}</h3><button className="button icon small" aria-label={chartLabels[key]+" 크게 보기"} onClick={()=>openChart(key)}><Icon name="expand" size={14}/></button></div><MarketChart {...chartProps} kind={key} compact hideMeta showMarkers={boardMarkers} syncGroup="balta-board" onExpand={()=>openChart(key)}/></section>)}</div>}
+      {feed.loading?<div className="chart-loading">시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state"><strong>{feed.error||"선택한 날짜의 기록이 없습니다."}</strong><button className="button" onClick={()=>void feed.refresh(true)}>다시 조회</button></div>:boardInvestors?<InvestorFlowPanel rows={rows} date={date} domain={domain}/>:<div className={"chart-board-grid columns-"+boardColumns+" "+chartStyles.boardGrid}>{(["flow","breadth","ratio","kospi","kosdaq","score","index","accel"] as ChartKind[]).map(key=><section className={"panel"+(key==="index"?" "+chartStyles.comparisonCard:"")} key={key}><div className="panel-header"><h3 className="panel-title">{chartLabels[key]}</h3><button className="button icon small" aria-label={chartLabels[key]+" 크게 보기"} onClick={()=>openChart(key)}><Icon name="expand" size={14}/></button></div><MarketChart {...chartProps} kind={key} compact hideMeta showMarkers={boardMarkers} syncGroup="balta-board" onExpand={()=>openChart(key)}/></section>)}</div>}
 
     </Modal>
     <Modal open={modal==="chart"} onClose={()=>{setModal(returnToModal);setReturnToModal(null);}} title={chartLabels[expandedKind]+" · "+date} wide><div className="panel-header"><div className="chart-legend"><span className="panel-subtitle">연결된 시간 범위</span><strong className="num" style={{fontSize:14}}>{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</strong></div>{ranges()}</div><MarketChart {...chartProps} kind={expandedKind} showMarkers={returnToModal==="board"?boardMarkers:settings.markers} syncGroup="balta-fullscreen"/><div className="chart-footer"><span>Ctrl/⌘ + 휠 확대 · Esc로 닫기</span><button className="button small" onClick={()=>{setRange("data");setSelectedMinute(null);}}>수집 구간</button></div></Modal>

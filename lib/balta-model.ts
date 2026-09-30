@@ -1,4 +1,5 @@
 import { calculateBreadthScore } from "./breadth-score";
+import { allInvestorCategories, investorCategories, investorMarketLabels, normalizeInvestorFlows, type InvestorFlowSnapshot, type InvestorMarket } from "./investor-flow";
 
 export const OPEN_MINUTE = 9 * 60;
 export const REGULAR_CLOSE_MINUTE = 15 * 60 + 30;
@@ -14,6 +15,7 @@ export type MarketRow = {
   flowPower: number | null; flowTrend: number | null; flowMomentum: number | null;
   flowSource: string; breadthSource: string; marketState: string; marketTone: string;
   marketScore: number; signals: RawRecord[]; alert: string; createdAt: string;
+  investorFlows?: InvestorFlowSnapshot;
 };
 export type MarketEvent = {
   id: string; date: string; time: string; minute: number; type: string;
@@ -75,6 +77,7 @@ export function normalizeRow(value: unknown, date: string): MarketRow {
   const time = formatTime(r.time);
   const minute = timeToMinute(time);
   const marketData = record(r.market_data ?? r.marketData);
+  const investorFlows = normalizeInvestorFlows(r.investorFlows ?? marketData.investorFlows);
   const state = String(r.marketState ?? r.marketstate ?? "");
   const stateSession = state.match(/SESSION_(REGULAR|AFTER_HOURS_CLOSE|OLD_AFTER_HOURS_SINGLE_PRICE|KRX_AFTER_MARKET|CLOSED)/i)?.[1]?.toUpperCase();
   const rawSession = String(r.marketSession ?? r.session ?? marketData.session ?? stateSession ?? "").toUpperCase();
@@ -105,6 +108,7 @@ export function normalizeRow(value: unknown, date: string): MarketRow {
     marketScore: Math.max(-100, Math.min(100, numeric(r.marketScore ?? r.marketscore) ?? calcScore(diff, upRatio, downRatio))),
     signals: Array.isArray(r.signals) ? r.signals.map(record) : [], alert: String(r.alert ?? ""),
     createdAt: String(r.createdAt ?? r.created_at ?? r.createdat ?? ""),
+    ...(investorFlows ? { investorFlows } : {}),
   };
 }
 export function normalizeRows(values: unknown[], date: string) {
@@ -226,7 +230,17 @@ export function rowsCsv(rows: MarketRow[]) {
     const breadthScore = calculateBreadthScore(r);
     return [r.date,r.time,r.session,r.up,r.down,r.flat,r.diff,r.accel,Number((r.upRatio*100).toFixed(2)),Number((r.downRatio*100).toFixed(2)),r.marketScore,r.kospi,r.kosdaq,r.foreignFlow,r.instFlow,r.indivFlow,r.flowPower,r.flowSource,r.breadthSource,breadthScore === null ? null : Number(breadthScore.toFixed(1))];
   });
+  headers.push(...investorCategories.map(c => c.label + " 합산(억원)"), "세부수급 합산상태", "세부수급 수집시각");
+  values.forEach((value, i) => value.push(...investorCategories.map(c => rows[i].investorFlows?.combined.values[c.key] ?? null), rows[i].investorFlows?.combined.source ?? "EMPTY", rows[i].investorFlows?.capturedAt ?? ""));
   return "\uFEFF" + [headers,...values].map(row => row.map(csvCell).join(",")).join("\r\n");
+}
+export function investorRowsCsv(rows: MarketRow[]) {
+  const headers = ["날짜", "시간", "세션", "시장", "세부수급상태", "수집시각", ...allInvestorCategories.map(c => c.label + "(억원)"), ...allInvestorCategories.map(c => c.field + "(원본)")];
+  const values = rows.flatMap(row => (["combined", "kospi", "kosdaq"] as InvestorMarket[]).map(market => {
+    const flow = row.investorFlows?.[market];
+    return [row.date, row.time, row.session, investorMarketLabels[market], flow?.source ?? "EMPTY", row.investorFlows?.capturedAt ?? "", ...allInvestorCategories.map(c => flow?.values[c.key] ?? null), ...allInvestorCategories.map(c => flow?.raw[c.key] ?? null)];
+  }));
+  return "\uFEFF" + [headers, ...values].map(row => row.map(csvCell).join(",")).join("\r\n");
 }
 export function eventsCsv(events: MarketEvent[]) {
   return "\uFEFF" + [["날짜","시간","신호","강도","내용","출처","조건충족률(%)"],...events.map(e=>[e.date,e.time,e.label,e.level,e.message,e.source,e.conditionRate ?? ""])].map(row=>row.map(csvCell).join(",")).join("\r\n");
