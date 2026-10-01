@@ -5,6 +5,7 @@ import { formatNumber, investorRowsCsv, minuteLabel, type MarketRow } from "@/li
 import { investorCategories, investorMarketLabels, investorSourceLabel, type InvestorKey, type InvestorMarket } from "@/lib/investor-flow";
 import { observedDomain, type Domain } from "./chart-model";
 import { downloadCsv } from "./RecordsPanel";
+import { Icon } from "./Icon";
 import styles from "./InvestorFlowPanel.module.css";
 
 export default function InvestorFlowPanel({ rows, date, domain, loading = false }: {
@@ -32,7 +33,7 @@ export default function InvestorFlowPanel({ rows, date, domain, loading = false 
       <div><h2>투자자 세부 수급 <small>누적 순매수 · 억원</small></h2><p>{date} · {minuteLabel(bounds[0])}–{minuteLabel(bounds[1])}</p></div>
       <div className={styles.actions}>
         <div className={styles.segments} aria-label="세부 수급 시장">{(["combined", "kospi", "kosdaq"] as const).map(key => <button key={key} type="button" aria-pressed={market === key} onClick={() => setMarket(key)}>{investorMarketLabels[key]}</button>)}</div>
-        <button type="button" className={styles.csv} disabled={!rows.length} onClick={() => downloadCsv("baltatool-" + date + "-investors.csv", investorRowsCsv(rows))} title="전체 시간·합산·KOSPI·KOSDAQ 및 원본 금액">세부 CSV</button>
+        <button type="button" className={styles.csv} disabled={!rows.length} onClick={() => downloadCsv("baltatool-" + date + "-investors.csv", investorRowsCsv(rows))} title="전체 시간·합산·KOSPI·KOSDAQ 및 원본 금액"><Icon name="download" size={14}/>세부 CSV</button>
       </div>
     </div>
     <div className={styles.status}>
@@ -49,11 +50,11 @@ export default function InvestorFlowPanel({ rows, date, domain, loading = false 
             const minute = Number(state.activeLabel);
             setHover(state.activeLabel != null && Number.isFinite(minute) ? minute : null);
           }} onMouseLeave={() => setHover(null)}>
-            <CartesianGrid stroke="#2b333e" strokeDasharray="3 5" vertical={false}/>
-            <XAxis dataKey="minute" type="number" domain={bounds} allowDataOverflow tickFormatter={minuteLabel} minTickGap={38} tick={{ fill: "#a5b0bf", fontSize: 11 }} axisLine={false} tickLine={false}/>
-            <YAxis width={66} domain={["auto", "auto"]} tickFormatter={value => formatNumber(value)} tick={{ fill: "#a5b0bf", fontSize: 11 }} axisLine={false} tickLine={false}/>
-            <ReferenceLine y={0} stroke="#a3b4c7" strokeWidth={1.5} ifOverflow="extendDomain"/>
-            <Tooltip content={() => null} cursor={{ stroke: "#98a9bc", strokeDasharray: "4 4" }}/>
+            <CartesianGrid stroke="#333a33" strokeOpacity={.5} strokeDasharray="2 6" vertical={false}/>
+            <XAxis dataKey="minute" type="number" domain={bounds} allowDataOverflow tickFormatter={minuteLabel} minTickGap={38} tick={{ fill: "#969c8f", fontSize: 11 }} axisLine={false} tickLine={false}/>
+            <YAxis width={66} domain={["auto", "auto"]} tickFormatter={value => formatNumber(value)} tick={{ fill: "#969c8f", fontSize: 11 }} axisLine={false} tickLine={false}/>
+            <ReferenceLine y={0} stroke="#b8a779" strokeWidth={1.5} strokeOpacity={.8} ifOverflow="extendDomain"/>
+            <Tooltip content={() => null} cursor={{ stroke: "#d6ba77", strokeDasharray: "4 4" }}/>
             {investorCategories.filter(c => selected.includes(c.key)).map(c => <Line key={c.key} type="linear" dataKey={c.key} name={c.label} stroke={c.color} strokeWidth={2} dot={{ r: 1.3, fill: c.color, strokeWidth: 0 }} activeDot={{ r: 4, fill: c.color }} connectNulls={false} isAnimationActive={false}/>)}
           </LineChart>
         </ResponsiveContainer>
