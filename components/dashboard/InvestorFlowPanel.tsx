@@ -8,11 +8,11 @@ import { downloadCsv } from "./RecordsPanel";
 import { Icon } from "./Icon";
 import styles from "./InvestorFlowPanel.module.css";
 
-export default function InvestorFlowPanel({ rows, date, domain, loading = false }: {
-  rows: MarketRow[]; date: string; domain?: Domain; loading?: boolean;
+export default function InvestorFlowPanel({ rows, date, domain, loading = false, initialSelected }: {
+  rows: MarketRow[]; date: string; domain?: Domain; loading?: boolean; initialSelected?: InvestorKey[];
 }) {
   const [market, setMarket] = useState<InvestorMarket>("combined");
-  const [selected, setSelected] = useState<InvestorKey[]>(["financialInvestment", "investmentTrust", "privateEquity", "pension"]);
+  const [selected, setSelected] = useState<InvestorKey[]>(initialSelected ?? ["financialInvestment", "investmentTrust", "privateEquity", "pension"]);
   const [hover, setHover] = useState<number | null>(null);
   const bounds = domain ?? observedDomain(rows);
   const visibleRows = useMemo(() => rows.filter(r => r.minute >= bounds[0] && r.minute <= bounds[1]), [rows, bounds[0], bounds[1]]);
@@ -44,7 +44,7 @@ export default function InvestorFlowPanel({ rows, date, domain, loading = false 
       <span><i style={{ background: c.color }}/>{c.label}</span><strong style={{ color: c.color }}>{formatNumber(flow?.values[c.key], 0, true)}</strong>
     </button>)}</div>
     {loading ? <div className={styles.empty}>세부 수급 기록을 불러오는 중입니다.</div> : !hasAny ? <div className={styles.empty}><strong>표시할 세부 수급 기록이 없습니다.</strong><p>업데이트 후 수집된 기록부터 표시됩니다. 미수집·오류 값은 ‘—’로 표시합니다.</p></div> : !selected.length ? <div className={styles.empty}>위 항목 이름을 눌러 차트를 표시하세요.</div> : !hasSelected ? <div className={styles.empty}>선택한 항목은 이 구간에 수집된 값이 없습니다.</div> :
-      <div className={styles.plot} onMouseLeave={() => setHover(null)}>
+      <div className={styles.plot} data-investor-plot onMouseLeave={() => setHover(null)}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           <LineChart data={data} margin={{ top: 16, right: 14, bottom: 8, left: 0 }} onMouseMove={state => {
             const minute = Number(state.activeLabel);

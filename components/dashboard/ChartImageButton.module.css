@@ -1,0 +1,16 @@
+.control { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 100%; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 7px 11px; border: 1px solid #826739; border-radius: 5px; background: linear-gradient(145deg,#2e2818,#12170e); color: #e6cc90; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.button:hover:not(:disabled) { border-color: #d5b569; background: #332c19; }
+.button:disabled { opacity: .5; cursor: default; }
+.button:focus-visible { outline: 2px solid #dfc57e; outline-offset: 3px; }
+.message { max-width: 320px; font-size: 11px; line-height: 1.6; color: #cabc96; overflow-wrap: anywhere; }
+.stage { position: fixed; top: 0; left: -20000px; width: 1376px; pointer-events: none; background: #0d120e; color: #ecece3; z-index: -1; }
+.grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+.grid > section { min-width: 0; }
+.grid :global(.chart-frame.chart-plot) { height: 250px !important; min-height: 250px !important; padding: 0 !important; }
+.grid :global(.chart-controls), .grid :global(.chart-inspection) { display: none; }
+.investors { grid-column: 1 / -1; }
+.investors [data-investor-plot] { height: 310px !important; }
+.stock { width: 1336px; }
+.stock svg[data-stock-flow-chart] { width: 100%; }
+@media(max-width:600px) { .button { font-size: 11px; min-height: 38px; } }

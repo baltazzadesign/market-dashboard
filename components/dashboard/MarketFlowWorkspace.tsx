@@ -1,5 +1,6 @@
 "use client";
 import InvestorFlowPanel from "./InvestorFlowPanel";
+import MarketChartImageButton from "./MarketChartImageButton";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -76,6 +77,7 @@ export default function MarketFlowWorkspace(){
     <main className="flow-page-main">
       <section className="flow-hero"><div><span>MARKET FLOW INTELLIGENCE</span><h1>시장 수급</h1><p>외국인, 기관, 개인의 흐름을 실시간으로 추적합니다.</p><small>수급이 움직이는 곳에, 기회가 있습니다.</small></div><div className="flow-hero-quote"><b>流</b><strong>흐름을 읽는 자가<br/>시장을 이끈다.</strong></div><div className="flow-date-tools"><button onClick={()=>setDate(d=>moveDate(d,-1))}><Icon name="left"/></button><label><Icon name="calendar"/><input type="date" value={date} max={today||undefined} onChange={e=>setDate(e.target.value)}/></label><button disabled={!date||date>=today} onClick={()=>setDate(d=>moveDate(d,1))}><Icon name="right"/></button><button onClick={()=>void feed.refresh(true)}><Icon name="refresh" className={feed.refreshing?"spin":""}/></button></div></section>
       {feed.error&&<div className="flow-notice"><Icon name="warning"/>{feed.error}</div>}
+      <div className="toolbar" style={{margin:"12px 0"}}><MarketChartImageButton rows={rows} date={date} domain={domain} events={events} loading={feed.loading} warning={feed.error||feed.warning}/></div>
       <section className="flow-stat-grid">{cards.map(card=><article key={card.name} className="flow-stat" style={{"--flow-color":card.color} as CSSProperties}><span>{card.name}</span><strong style={{color:card.color}}>{fmt(card.value,0,true)}<small>억원</small></strong><p>최근 5분 <b className={sign(card.delta)}>{fmt(card.delta,0,true)}</b></p><div className="flow-stat-spark"/></article>)}</section>
       <section className="flow-primary-grid">
         <article className="flow-panel flow-cumulative"><div className="flow-panel-head"><div><h2>투자주체별 누적 수급 <small>(억원)</small></h2><div className="flow-legend"><span><i style={{background:chartColors.blue}}/>외국인 <b>{fmt(last?.foreignFlow,0,true)}</b></span><span><i style={{background:chartColors.red}}/>기관 <b>{fmt(last?.instFlow,0,true)}</b></span><span><i style={{background:chartColors.yellow}}/>개인 <b>{fmt(last?.indivFlow,0,true)}</b></span></div></div><span className="flow-panel-time">{last?.time??"—"} 기준</span></div>{rows.length?<MarketChart {...chartProps}/>:<div className="flow-empty">수급 기록을 불러오는 중입니다.</div>}</article>
