@@ -1,6 +1,6 @@
 // Amounts are KRW. Missing values stay null; annual CFS/OFS are never mixed.
 export type Basis = 'CFS' | 'OFS';
-export type DartAccount = { sj_div?: string; account_id?: string; account_nm?: string; thstrm_amount?: string; currency?: string; rcept_no?: string; bsns_year?: string; reprt_code?: string };
+export type DartAccount = { sj_div?: string; account_id?: string; account_nm?: string; thstrm_amount?: string; thstrm_add_amount?: string; currency?: string; rcept_no?: string; bsns_year?: string; reprt_code?: string };
 export type Evidence = { label: string; account: string; id: string; value: number | null; method: 'id' | 'name' };
 export type FinancingItem = { kind: 'CB' | 'BW' | '유상증자' | '차입'; account: string; value: number };
 export type CashFlowYear = {
@@ -41,9 +41,9 @@ const specs = {
 export function emptyYear(year: number, basis: Basis, status: 'missing' | 'error' = 'missing'): CashFlowYear {
   return { year,basis,receipt:null,status,operating:null,investing:null,financing:null,netIncome:null,capex:null,fcf:null,conversion:null,fundingShare:null,regime:'판정 보류',evidence:[],fundingItems:[],warnings:[status === 'missing' ? '해당 연도 사업보고서 데이터가 없습니다.' : '해당 연도 조회에 실패했습니다.'] };
 }
-export function parseYear(input: DartAccount[], year: number, basis: Basis): CashFlowYear {
+export function parseYear(input: DartAccount[], year: number, basis: Basis, reportCode = '11011'): CashFlowYear {
   const result = emptyYear(year, basis); result.status = 'ok'; result.warnings = [];
-  const rows = input.filter(r => (!r.bsns_year || r.bsns_year === String(year)) && (!r.reprt_code || r.reprt_code === '11011'));
+  const rows = input.filter(r => (!r.bsns_year || r.bsns_year === String(year)) && (!r.reprt_code || r.reprt_code === reportCode));
   result.receipt = rows.map(r => r.rcept_no ?? '').find(r => /^\d{14}$/.test(r)) ?? null;
   function pick(key: keyof typeof specs): number | null {
     const spec = specs[key], sections = key === 'netIncome' ? ['IS','CIS'] : ['CF'];

@@ -116,3 +116,50 @@ export function cachedCashFlow(code: string, endYear: number):Promise<CashFlowRe
   return promise;
 }
 
+
+// Quarterly requests share the authenticated adapter and corporation directory.
+import { REPORT_CODES, completedQuarters, parseCumulativeQuarter, emptyCumulativeQuarter, quarterize, analyzeQuarters, quarterId, quarterLabel, type CumulativeQuarter, type QuarterCashFlowResponse } from './cash-flow-quarter';
+const quarterCache=new Map<string,{until:number;promise:Promise<QuarterCashFlowResponse>}>();
+export async function loadQuarterCashFlow(code:string,now=new Date(),fetcher:Fetcher=fetch):Promise<QuarterCashFlowResponse> {
+  dartKey();
+  const deadline=Date.now()+48000,corp=await corporation(code,deadline,fetcher),warnings:string[]=[];
+  const company=await json('company.json',{corp_code:corp.code},deadline,fetcher);
+  const fiscalMonth=company.acc_mt?.trim().padStart(2,'0')??'',industry=company.induty_code??'';
+  if(fiscalMonth!=='12')throw new CashFlowError(fiscalMonth?'현재 분기 분석은 12월 결산 기업을 지원합니다. 이 기업은 연간 화면에서 확인해 주세요.':'결산월을 확인하지 못했습니다. 잠시 후 다시 조회하거나 연간 화면을 이용해 주세요.','QUARTER_FISCAL_UNSUPPORTED');
+  const financial=/^\d{2,6}$/.test(industry)?/^(64|65|66)/.test(industry):null;
+  const periods=completedQuarters(now),target=periods.at(-1)!;
+  const batch=(basis:Basis)=>concurrent(periods,async({year,quarter}):Promise<CumulativeQuarter>=>{
+    try{
+      const body=await json('fnlttSinglAcntAll.json',{corp_code:corp.code,bsns_year:String(year),reprt_code:REPORT_CODES[quarter],fs_div:basis},deadline,fetcher);
+      return body.status==='013'?emptyCumulativeQuarter(year,quarter,basis):Array.isArray(body.list)&&body.list.length?parseCumulativeQuarter(body.list,year,quarter,basis):emptyCumulativeQuarter(year,quarter,basis,'error');
+    }catch(e){
+      if(e instanceof CashFlowError&&['010','011','012','020','901','DART_NOT_CONFIGURED'].includes(e.code))throw e;
+      return emptyCumulativeQuarter(year,quarter,basis,'error');
+    }
+  });
+  let basis:Basis='CFS',reports=await batch(basis);
+  if(reports.every(r=>r.values.status==='missing')){basis='OFS';reports=await batch(basis);warnings.push('조회 기간 전체에 연결재무제표가 없어 별도재무제표로 조회했습니다.');}
+  if(reports.every(r=>r.values.status==='error'))throw new CashFlowError('분기 공시 조회에 실패했습니다. 잠시 후 다시 조회해 주세요.');
+  const all=reports.map((r,i)=>quarterize(r,i>0?reports[i-1]:undefined));
+  const lastReported=all.findLastIndex(r=>r.reported);
+  const quarters=(lastReported>=0?all.slice(0,lastReported+1):all).slice(-8);
+  const latestPeriod=lastReported>=0?all[lastReported].period:null,expectedPeriod=quarterId(target.year,target.quarter);
+  if(latestPeriod!==expectedPeriod){
+    const missing=reports.at(-1)?.values.status==='error'?'조회에 실패했습니다':'공시가 아직 조회되지 않습니다';
+    warnings.push(`${quarterLabel(target.year,target.quarter)} ${missing}. ${lastReported>=0?all[lastReported].label+' 공시까지 표시합니다.':'조회 가능한 공시가 없습니다.'}`);
+  }
+  if(reports.some(r=>r.values.status==='error'))warnings.push('일부 공시 조회에 실패했습니다. 해당 분기 및 차감에 필요한 다음 분기 값은 보류합니다.');
+  warnings.push('각 분기의 3개월 금액입니다. 2·3·4분기는 같은 사업연도의 누적 공시를 차감하며 정정·재분류 차이가 반영될 수 있습니다.');
+  if(financial===true)warnings.push('금융업은 영업·재무활동의 현금흐름 성격이 일반기업과 다릅니다.');
+  return {ok:true,period:'quarter',code,name:company.corp_name||corp.name,corpCode:corp.code,basis,endYear:target.year,fetchedAt:new Date().toISOString(),industry,financial,fiscalMonth,quarters,analysis:analyzeQuarters(quarters,financial),expectedPeriod,latestPeriod,warnings};
+}
+export function cachedQuarterCashFlow(code:string,now=new Date()):Promise<QuarterCashFlowResponse> {
+  const target=completedQuarters(now).at(-1)!;
+  const key=code+':'+quarterId(target.year,target.quarter),hit=quarterCache.get(key);
+  if(hit&&hit.until>Date.now())return hit.promise;
+  for(const [k,v] of quarterCache)if(v.until<Date.now())quarterCache.delete(k);
+  if(quarterCache.size>=100)quarterCache.delete(quarterCache.keys().next().value!);
+  const promise=loadQuarterCashFlow(code,now);quarterCache.set(key,{until:Date.now()+300000,promise});
+  promise.then(data=>{const entry=quarterCache.get(key);if(entry?.promise===promise)entry.until=Date.now()+(data.quarters.some(r=>r.status==='error')||data.warnings.some(w=>w.includes('조회에 실패'))?30000:data.latestPeriod!==data.expectedPeriod?900000:21600000);},()=>{if(quarterCache.get(key)?.promise===promise)quarterCache.delete(key);});
+  return promise;
+}
