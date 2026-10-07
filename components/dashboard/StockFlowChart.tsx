@@ -3,20 +3,24 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { stockInvestors, type StockFlowRow, type StockFlowValues, type StockFlowUnit, type StockFlowMode, type StockInvestor } from '@/lib/stock-flow-model';
 import s from './StockFlowWorkspace.module.css';
 import type {CashTimelineDay} from '@/lib/cash-flow-timeline';
+import {clusterStockDisclosures,type StockDisclosureDay,type StockDisclosureMarker} from '@/lib/stock-disclosures';
+import disclosureStyles from './StockDisclosures.module.css';
 
 export const flowNumber = (v: number | null | undefined, unit: StockFlowUnit, signed = true) => v == null ? '—' : (signed && v > 0 ? '+' : '') + new Intl.NumberFormat('ko-KR',{maximumFractionDigits:unit === 'money' ? 2 : 0}).format(v);
 const priceNumber = (v: number) => new Intl.NumberFormat('ko-KR',{maximumFractionDigits:0}).format(v);
 function compact(v: number) { return Math.abs(v) >= 10000 ? (v/10000).toLocaleString('ko-KR',{maximumFractionDigits:1})+'만' : v.toLocaleString('ko-KR',{maximumFractionDigits:1}); }
-export default function StockFlowChart({rows,values,selected,unit,mode,split,showPrice,onSelect,activeIndex,cashDays,onFilingSelect,height:requestedHeight}: {
+export default function StockFlowChart({rows,values,selected,unit,mode,split,showPrice,onSelect,activeIndex,cashDays,onFilingSelect,height:requestedHeight,disclosureDays,onDisclosureSelect}: {
   rows:StockFlowRow[]; values:StockFlowValues[]; selected:StockInvestor[]; unit:StockFlowUnit; mode:StockFlowMode;
-  split:boolean; showPrice:boolean; onSelect:(index:number)=>void; activeIndex?:number|null; cashDays?:CashTimelineDay[]; onFilingSelect?:(index:number)=>void; height?:number;
+  split:boolean; showPrice:boolean; onSelect:(index:number)=>void; activeIndex?:number|null; cashDays?:CashTimelineDay[]; onFilingSelect?:(index:number)=>void; height?:number; disclosureDays?:StockDisclosureDay[];onDisclosureSelect?:(marker:StockDisclosureMarker)=>void;
 }) {
   const container = useRef<HTMLDivElement>(null), [width,setWidth] = useState(1000), [hover,setHover] = useState<number|null>(null);
   const clip = useId().replaceAll(':','');
+  const [disclosureHover,setDisclosureHover]=useState<StockDisclosureMarker|null>(null);
+  useEffect(()=>setDisclosureHover(null),[disclosureDays]);
   useEffect(()=>{const el=container.current;if(!el)return;const observer=new ResizeObserver(([e])=>setWidth(Math.max(260,e.contentRect.width)));observer.observe(el);return ()=>observer.disconnect();},[]);
   const small=width<520, height=requestedHeight??(split?640:450), left=small?48:68, right=small?52:72, top=34, bottom=34;
   const plotW=width-left-right, volumeTop=height-bottom-51, volumeH=42;
-  const flowBottom=volumeTop-23,priceBottom=split?top+(flowBottom-top)*.394:flowBottom,flowTop=split?priceBottom+48:top;
+  const flowBottom=volumeTop-23-(disclosureDays?30:0),priceBottom=split?top+(flowBottom-top)*.394:flowBottom,flowTop=split?priceBottom+48:top;
   const lows=rows.map(r=>r.low),highs=rows.map(r=>r.high),min=Math.min(...lows),max=Math.max(...highs);
   const spread=max-min||Math.max(1,max*.02), upper=max+spread*.12, lower=min-spread*.12;
   const bound=Math.max(1,...values.flatMap(v=>selected.flatMap(k=>v[k]===null?[]:[Math.abs(v[k]!)])))*1.12;
@@ -26,6 +30,7 @@ export default function StockFlowChart({rows,values,selected,unit,mode,split,sho
   const bar=Math.max(.8,Math.min(12,plotW/Math.max(1,rows.length)*.62));
   const maxVolume=Math.max(1,...rows.map(r=>r.volume??0));
   const tickCount=Math.min(rows.length,small?3:6),ticks=Array.from({length:tickCount},(_,i)=>Math.round(i*(rows.length-1)/Math.max(1,tickCount-1)));
+  const markers=clusterStockDisclosures(disclosureDays??[],plotW);
   const cursor=hover??activeIndex??null;
   const active=hover===null?null:rows[Math.min(hover,rows.length-1)];
   function select(i:number) { const index=Math.max(0,Math.min(rows.length-1,i));setHover(index);onSelect(index); }
@@ -36,7 +41,7 @@ export default function StockFlowChart({rows,values,selected,unit,mode,split,sho
   }
   return <div className={s.plotWrap} ref={container}>
     {!rows.length ? <div className={s.empty}>이 기간에 표시할 주가 기록이 없습니다.</div> : <>
-    <svg data-stock-flow-chart data-chart-height={height} data-layout={split?'split':'overlay'} className={s.plot} viewBox={`0 0 ${width} ${height}`} style={{height}} role="img" tabIndex={0} aria-label="주가 캔들과 투자자별 순매수 차트. 좌우 방향키로 날짜 선택" onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();select((hover??rows.length-1)+(e.key==='ArrowLeft'?-1:1));}if(e.key==='Home'){e.preventDefault();select(0);}if(e.key==='End'){e.preventDefault();select(rows.length-1);}}} onPointerMove={e=>{const rect=e.currentTarget.getBoundingClientRect();const mx=(e.clientX-rect.left)/rect.width*width;select(Math.floor((mx-left)/plotW*rows.length));}} onPointerLeave={()=>setHover(null)}>
+    <svg data-stock-flow-chart data-chart-height={height} data-layout={split?'split':'overlay'} className={s.plot} viewBox={`0 0 ${width} ${height}`} style={{height}} role="img" tabIndex={0} aria-label="주가 캔들과 투자자별 순매수 차트. 좌우 방향키로 날짜 선택" onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();select((hover??rows.length-1)+(e.key==='ArrowLeft'?-1:1));}if(e.key==='Home'){e.preventDefault();select(0);}if(e.key==='End'){e.preventDefault();select(rows.length-1);}}} onPointerMove={e=>{const rect=e.currentTarget.getBoundingClientRect();const mx=(e.clientX-rect.left)/rect.width*width;select(Math.floor((mx-left)/plotW*rows.length));}} onPointerLeave={()=>{setHover(null);setDisclosureHover(null);}}>
       <title>주가와 투자자 수급 · KRX 일별</title>
       <defs><clipPath id={clip}><rect x={left} y={top-1} width={plotW} height={height-top-bottom+2}/></clipPath></defs>
       <text x={left} y={14} fill="#aeb5a7" fontSize="11">{showPrice?'주가 (원)':'주가 숨김'}</text>
@@ -51,10 +56,14 @@ export default function StockFlowChart({rows,values,selected,unit,mode,split,sho
         {cursor!==null&&rows[cursor]&&<line data-image-exclude x1={x(cursor)} x2={x(cursor)} y1={top} y2={height-bottom} stroke="#e4c17b" strokeDasharray="3 4"/>}
       </g>
       {cashDays?.map((day,i)=>day.filings.length&&rows[i]?<g key={'filing'+day.date} data-cash-filing role="button" tabIndex={0} aria-label={`${day.filings.map(f=>f.label+(f.correction?' 정정':'')+' 공시 '+f.date).join(', ')}. 상세 보기`} onClick={()=>{select(i);onFilingSelect?.(i);}} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();select(i);onFilingSelect?.(i);}}} style={{cursor:'pointer'}}><title>{day.filings.map(f=>f.name+' · '+f.date).join(' / ')}</title><line x1={x(i)} x2={x(i)} y1={top+15} y2={height-bottom} stroke="#bca477" opacity=".3" strokeDasharray="3 4"/><rect data-filing-hit x={x(i)-15} y={top-11} width="30" height="30" fill="transparent"/><circle cx={x(i)} cy={top+4} r="9" fill="#302819" stroke={day.filings.some(f=>f.correction)?'#b29ac8':'#d9b871'}/><text x={x(i)} y={top+7} textAnchor="middle" fontSize="9" fill="#edcf91">{day.filings.some(f=>f.correction)?'정':'공'}</text></g>:null)}
+      {markers.map(marker=><g key={'disclosure'+marker.index} data-stock-disclosure data-disclosure-count={marker.items.length} className={disclosureStyles.marker} role="button" tabIndex={0} aria-label={`${marker.items[0].date}${marker.dates.length>1?' 외 여러 날짜':''} 공시 ${marker.items.length}건. 원문 목록 보기`} onPointerEnter={()=>setDisclosureHover(marker)} onPointerLeave={()=>setDisclosureHover(null)} onFocus={()=>setDisclosureHover(marker)} onBlur={()=>setDisclosureHover(null)} onClick={()=>{setDisclosureHover(null);select(marker.index);onDisclosureSelect?.(marker);}} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();setDisclosureHover(null);select(marker.index);onDisclosureSelect?.(marker);}}}>
+        <title>{marker.items.map(f=>f.date+' '+f.name).join(' / ')}</title><rect x={x(marker.index)-12} y={volumeTop-42} width="24" height="28" fill="transparent"/><circle cx={x(marker.index)} cy={volumeTop-28} r="10"/><text x={x(marker.index)} y={volumeTop-25} textAnchor="middle" fontSize="9">{marker.items.length===1?'공':marker.items.length>99?'99+':marker.items.length}</text>
+      </g>)}
       <line x1={left} x2={width-right} y1={volumeTop-6} y2={volumeTop-6} stroke="#2d362a"/>
       <text x={left} y={volumeTop-12} fill="#8c9788" fontSize="10">거래량 (주)</text>
     </svg>
-    {active&&hover!==null&&<div className={s.tooltip} style={{[x(hover)>width*.55?'left':'right']:'8%'}} role="status"><b>{active.date}</b><span>종가 <strong>{priceNumber(active.close)}원</strong></span><small>시 {priceNumber(active.open)} · 고 {priceNumber(active.high)} · 저 {priceNumber(active.low)}</small>{stockInvestors.filter(c=>selected.includes(c.key)).map(c=><span key={c.key} style={{color:c.color}}>{c.label}<strong>{flowNumber(values[hover]?.[c.key],unit)}{values[hover]?.[c.key]!=null?(unit==='money'?'억':'주'):''}</strong></span>)}<small>{mode==='cumulative'?'선택 기간 누적':'선택일 순매수'} · {unit==='money'?'금액':'수량'}</small></div>}
+    {disclosureHover&&<div className={disclosureStyles.popover} style={{[x(disclosureHover.index)>width*.55?'right':'left']:'8px'}} role="tooltip"><strong>공시 {disclosureHover.items.length}건 · 클릭하여 원문 보기</strong>{disclosureHover.items.slice(0,3).map(f=><p key={f.receipt}>{f.name}</p>)}<small>{disclosureHover.items[0].date}{disclosureHover.dates.length>1?' 외 여러 날짜':' 접수'}{disclosureHover.items.length>3?` · 외 ${disclosureHover.items.length-3}건`:''}</small></div>}
+    {active&&hover!==null&&!disclosureHover&&<div className={s.tooltip} style={{[x(hover)>width*.55?'left':'right']:'8%'}} role="status"><b>{active.date}</b><span>종가 <strong>{priceNumber(active.close)}원</strong></span><small>시 {priceNumber(active.open)} · 고 {priceNumber(active.high)} · 저 {priceNumber(active.low)}</small>{stockInvestors.filter(c=>selected.includes(c.key)).map(c=><span key={c.key} style={{color:c.color}}>{c.label}<strong>{flowNumber(values[hover]?.[c.key],unit)}{values[hover]?.[c.key]!=null?(unit==='money'?'억':'주'):''}</strong></span>)}<small>{mode==='cumulative'?'선택 기간 누적':'선택일 순매수'} · {unit==='money'?'금액':'수량'}</small></div>}
     </>}
   </div>;
 }

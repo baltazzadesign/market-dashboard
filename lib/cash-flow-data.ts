@@ -70,6 +70,8 @@ async function corporation(code: string, deadline: number, fetcher: Fetcher): Pr
   if (!found) throw new CashFlowError('이 종목코드에 해당하는 DART 공시 회사를 찾지 못했습니다. 보통주 종목코드로 조회해 주세요.', 'CORP_NOT_FOUND');
   return found;
 }
+export { corporation as resolveDartCorporation };
+
 async function concurrent<T,R>(values: T[], job:(value:T)=>Promise<R>):Promise<R[]> {
   const output: R[] = new Array(values.length); let next=0;
   await Promise.all(Array.from({length:Math.min(3,values.length)},async()=>{while(next<values.length){const i=next++;output[i]=await job(values[i]);}}));
