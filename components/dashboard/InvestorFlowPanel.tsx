@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatNumber, investorRowsCsv, minuteLabel, type MarketRow } from "@/lib/balta-model";
 import { investorCategories, investorMarketLabels, investorSourceLabel, type InvestorKey, type InvestorMarket } from "@/lib/investor-flow";
@@ -8,8 +8,8 @@ import { downloadCsv } from "./RecordsPanel";
 import { Icon } from "./Icon";
 import styles from "./InvestorFlowPanel.module.css";
 
-export default function InvestorFlowPanel({ rows, date, domain, loading = false, initialSelected }: {
-  rows: MarketRow[]; date: string; domain?: Domain; loading?: boolean; initialSelected?: InvestorKey[];
+export default function InvestorFlowPanel({ rows, date, domain, loading = false, initialSelected, plotHeight, resizeControl }: {
+  rows: MarketRow[]; date: string; domain?: Domain; loading?: boolean; initialSelected?: InvestorKey[]; plotHeight?: number; resizeControl?: ReactNode;
 }) {
   const [market, setMarket] = useState<InvestorMarket>("combined");
   const [selected, setSelected] = useState<InvestorKey[]>(initialSelected ?? ["financialInvestment", "investmentTrust", "privateEquity", "pension"]);
@@ -44,7 +44,7 @@ export default function InvestorFlowPanel({ rows, date, domain, loading = false,
       <span><i style={{ background: c.color }}/>{c.label}</span><strong style={{ color: c.color }}>{formatNumber(flow?.values[c.key], 0, true)}</strong>
     </button>)}</div>
     {loading ? <div className={styles.empty}>세부 수급 기록을 불러오는 중입니다.</div> : !hasAny ? <div className={styles.empty}><strong>표시할 세부 수급 기록이 없습니다.</strong><p>업데이트 후 수집된 기록부터 표시됩니다. 미수집·오류 값은 ‘—’로 표시합니다.</p></div> : !selected.length ? <div className={styles.empty}>위 항목 이름을 눌러 차트를 표시하세요.</div> : !hasSelected ? <div className={styles.empty}>선택한 항목은 이 구간에 수집된 값이 없습니다.</div> :
-      <div className={styles.plot} data-investor-plot onMouseLeave={() => setHover(null)}>
+      <div className={styles.plot} style={plotHeight===undefined?undefined:{height:plotHeight}} data-investor-plot onMouseLeave={() => setHover(null)}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           <LineChart data={data} margin={{ top: 16, right: 14, bottom: 8, left: 0 }} onMouseMove={state => {
             const minute = Number(state.activeLabel);
@@ -59,6 +59,7 @@ export default function InvestorFlowPanel({ rows, date, domain, loading = false,
           </LineChart>
         </ResponsiveContainer>
       </div>}
+    {!loading&&hasSelected&&resizeControl}
     <div className={styles.footer}><span>{market === "combined" ? "KOSPI + KOSDAQ · 두 시장의 값이 모두 있을 때만 항목별 합산" : investorMarketLabels[market] + " 시장 수집값"}</span><span>+ 순매수 / − 순매도 · 항목을 눌러 표시 전환</span></div>
     <details className={styles.note}><summary>분류·수집 기준</summary><p>괄호는 API 원문 명칭입니다. 연기금은 API의 ‘기금’ 값이며, 기타 단체를 임의로 합치지 않습니다. 기타법인은 별도 항목입니다. 기관 총액은 API의 기관계 값을 유지하므로 위 항목의 합계로 다시 계산하지 않습니다.</p><p>시간은 앱의 수집 시각이며 체결 시각이 아닙니다. 장후에도 API가 제공한 누적값을 기록하며, 장후 거래만의 수급으로 해석하지 않습니다. 미수집 구간은 선을 연결하지 않습니다. 기타 단체와 변환 전 원본 금액은 세부 CSV에 별도로 포함됩니다.</p></details>
   </section>;

@@ -37,9 +37,9 @@ type ChartProps = {
   rows: MarketRow[]; kind: ChartKind; domain: Domain; onDomainChange?: (domain: Domain) => void;
   selectedMinute?: number | null; events?: MarketEvent[]; showMarkers?: boolean; compact?: boolean; autoScale?: boolean; syncGroup?: string;
   hoverMinute?: number | null; onHoverMinute?: (minute: number | null) => void; onExpand?: () => void; onReset?: () => void; onLatest?: () => void;
-  dataCaption?: string; refreshing?: boolean; hideMeta?: boolean;
+  dataCaption?: string; refreshing?: boolean; hideMeta?: boolean; plotHeight?: number;
 };
-function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, events = [], showMarkers = true, compact = false, autoScale = true, syncGroup = "balta-main", hoverMinute = null, onHoverMinute, onExpand, onReset, onLatest, dataCaption = "", refreshing = false, hideMeta = false }: ChartProps) {
+function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, events = [], showMarkers = true, compact = false, autoScale = true, syncGroup = "balta-main", hoverMinute = null, onHoverMinute, onExpand, onReset, onLatest, dataCaption = "", refreshing = false, hideMeta = false, plotHeight }: ChartProps) {
   const id = useId().replace(/:/g, "");
   const plot = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState<string[]>([]);
@@ -152,7 +152,7 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
       <div className="chart-control-group">{!compact && <button className="button ghost small" aria-pressed={dragMode === "pan"} onClick={() => setDragMode(old => old === "zoom" ? "pan" : "zoom")} title="드래그 동작 전환">{dragMode === "zoom" ? "드래그: 확대" : "드래그: 이동"}</button>}<button className="button ghost small" onClick={reset} disabled={!onDomainChange}>초기화</button>{!compact && <button className="button ghost small" disabled={!latest || !onDomainChange} onClick={() => { if (onLatest) onLatest(); else if (latest) onDomainChange?.(fitDomain(latest.minute - 60, latest.minute)); }}>최근 1시간</button>}{onExpand && <button className="button ghost icon small" aria-label={chartNames[kind] + " 화면 확대"} onClick={onExpand}><Icon name="expand" size={15}/></button>}</div>
     </div>
     <div className="chart-inspection" id={id + "-help"}><span className="num">{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</span><span>{compact ? "시간축·커서 연동" : "드래그 확대 · Ctrl/⌘ + 휠 · 더블클릭 초기화"}</span></div>
-    <div ref={plot} className={"chart-frame chart-plot" + (compact ? " compact" : "") + (dragMode === "pan" ? " pan-mode" : "")} role="group" tabIndex={0} aria-label={chartNames[kind] + " 차트. 플러스·마이너스 키로 확대·축소, 좌우 방향키로 시간 이동, Home 키로 초기화."} aria-describedby={id + "-help"}
+    <div ref={plot} style={plotHeight===undefined?undefined:{height:plotHeight,minHeight:plotHeight}} className={"chart-frame chart-plot" + (compact ? " compact" : "") + (dragMode === "pan" ? " pan-mode" : "")} role="group" tabIndex={0} aria-label={chartNames[kind] + " 차트. 플러스·마이너스 키로 확대·축소, 좌우 방향키로 시간 이동, Home 키로 초기화."} aria-describedby={id + "-help"}
       onMouseLeave={() => { setDrag(null); setHover(null); }}
       onDoubleClick={reset} onKeyDown={event => { if (event.target !== event.currentTarget || !onDomainChange) return; if (["+", "=", "-", "ArrowLeft", "ArrowRight", "Home", "Escape"].includes(event.key)) event.preventDefault(); if (["+", "="].includes(event.key)) zoom(.5); else if (event.key === "-") zoom(2); else if (event.key === "ArrowLeft") pan(-1); else if (event.key === "ArrowRight") pan(1); else if (event.key === "Home") reset(); else if (event.key === "Escape") { setDrag(null); setHover(null); } }}>
       <span className={styles.axisUnit} aria-hidden="true">{unit}</span>

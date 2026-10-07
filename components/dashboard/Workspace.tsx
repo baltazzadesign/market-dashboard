@@ -4,7 +4,7 @@ import MarketChartImageButton from "./MarketChartImageButton";
 import { BaltaJungyongHeaderLink } from './BaltaJungyongHeaderLink';
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { OPEN_MINUTE, CLOSE_MINUTE, type MarketEvent, type MarketRow, kstParts, isValidDate, moveDate, minuteLabel, formatNumber, dataStatus, rowsCsv, sourceLabel, breadthLabel } from "@/lib/balta-model";
 import { buildMarketEvents } from "@/lib/balta-signals";
 import PanelLayout from "./PanelLayout";
@@ -21,6 +21,9 @@ import MarketPulsePanel, { useMarketPulse } from "./MarketPulse";
 import InvestmentDisclaimer from "./InvestmentDisclaimer";
 import MarketMovers from "./MarketMovers";
 import chartStyles from "./MarketCharts.module.css";
+import StockChartResizeHandle from "./StockChartResizeHandle";
+import useDailyChartSize, {dailyChartDefaults,dailyChartLimits,type DailyChartSizeKey} from "./useDailyChartSize";
+import resizeStyles from "./DailyChartResize.module.css";
 
 const MarketChart = dynamic(() => import("./MarketCharts"), { ssr: false, loading: () => <div className="chart-loading"><Icon name="refresh" className="spin"/>차트 준비 중</div> });
 const chartKeys = Object.keys(chartLabels) as ChartKind[];
@@ -60,6 +63,9 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   const [boardColumns,setBoardColumns] = useState<2|3>(3);
   const [boardMarkers,setBoardMarkers] = useState(false);
   const [toast,setToast] = useState(""),[loggingOut,setLoggingOut] = useState(false);
+  const dailyLayout = useRef<HTMLDivElement>(null);
+  const dailySize = useDailyChartSize(mode==="daily");
+  function heightControl(key:DailyChartSizeKey,label:string){return <StockChartResizeHandle value={dailySize.size[key]} min={dailyChartLimits[key][0]} max={dailyChartLimits[key][1]} onChange={value=>dailySize.set(key,value)} onReset={()=>dailySize.set(key,dailyChartDefaults[key])} label={label+" 높이 조절"}/>;}
   const dateInitialized = useRef(false);
   const seen = useRef<{date:string;ids:Set<string>;armed:boolean}>({date:"",ids:new Set(),armed:false});
   useEffect(()=>{
@@ -128,11 +134,12 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
     catch{setLoggingOut(false);setToast("로그아웃하지 못했어요. 다시 시도해 주세요.");}
   }
   const chartProps={rows,kind,domain,selectedMinute,events,showMarkers:settings.markers,autoScale:settings.autoScale,onDomainChange:changeDomain,hoverMinute,onHoverMinute:setHoverMinute,onReset:resetCharts,onLatest:latestCharts,refreshing:feed.refreshing,dataCaption:feed.warning?"수집 상태 확인":status.tone?status.label:settings.autoRefresh?"60초 자동 갱신":"자동 갱신 일시정지"};
-  function comparisonChart(key:ChartKind){return <section className="panel comparison-panel" key={key}><div className="panel-header"><h2 className="panel-title">{chartLabels[key]}</h2><span className="panel-subtitle">{date}</span></div><MarketChart {...chartProps} kind={key} compact onExpand={()=>openChart(key)}/></section>;}
+  function comparisonChart(key:ChartKind){return <section className="panel comparison-panel" key={key}><div className="panel-header"><h2 className="panel-title">{chartLabels[key]}</h2><span className="panel-subtitle">{date}</span></div><MarketChart {...chartProps} kind={key} compact plotHeight={mode==="daily"?dailySize.size[key]:undefined} onExpand={()=>openChart(key)}/>{mode==="daily"&&heightControl(key,chartLabels[key])}</section>;}
   function ranges(){return <div className="segmented" aria-label="차트 시간 범위">{[{value:"data",label:"수집 구간"},{value:"60",label:"1시간"},{value:"30",label:"30분"},{value:"all",label:"전체 장"}].map(item=><button key={item.value} className={range===item.value?"active":""} aria-pressed={range===item.value} onClick={()=>{setRange(item.value);setSelectedMinute(null);setHoverMinute(null);}}>{item.label}</button>)}</div>;}
   function mainChartPanel(){return <section className="panel overview-main-chart" id="market-charts" style={{scrollMarginTop:24}} aria-labelledby="chart-heading"><div className="panel-header"><div><h2 className="panel-title" id="chart-heading">장중 흐름</h2><p className="panel-subtitle">{date||"선택 날짜"} · {rows.length}개 기록{selectedMinute!==null?" · "+minuteLabel(selectedMinute)+" 선택":""}</p></div><div className="toolbar">{ranges()}<button className="button icon small" onClick={()=>openChart(kind)} aria-label="차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={16}/></button></div></div>
     <div className="chart-tabs" aria-label="차트 지표">{(mode==="overview"?(["kospi","kosdaq"] as ChartKind[]):chartKeys).map(key=><button key={key} className={"chart-tab"+(kind===key?" active":"")} aria-pressed={kind===key} onClick={()=>setKind(key)}>{chartLabels[key]}</button>)}</div>
-    {feed.loading?<div className="chart-loading"><Icon name="refresh" className="spin"/>시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state" style={{minHeight:320}}><Icon name={feed.error?"warning":"chart"} size={34}/><strong>{feed.error?"시장 기록을 불러오지 못했어요":"선택한 날짜의 기록이 없어요"}</strong><p>{feed.error?"데이터 연결을 확인한 뒤 다시 시도해 주세요.":"주말·휴장일이거나 아직 기록이 수집되지 않았을 수 있어요. 다른 날짜를 선택해 보세요."}</p><button className="button" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing}><Icon name="refresh" size={15}/>다시 조회</button></div>:<MarketChart {...chartProps}/>} 
+    {feed.loading?<div className="chart-loading"><Icon name="refresh" className="spin"/>시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state" style={{minHeight:320}}><Icon name={feed.error?"warning":"chart"} size={34}/><strong>{feed.error?"시장 기록을 불러오지 못했어요":"선택한 날짜의 기록이 없어요"}</strong><p>{feed.error?"데이터 연결을 확인한 뒤 다시 시도해 주세요.":"주말·휴장일이거나 아직 기록이 수집되지 않았을 수 있어요. 다른 날짜를 선택해 보세요."}</p><button className="button" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing}><Icon name="refresh" size={15}/>다시 조회</button></div>:<MarketChart {...chartProps} plotHeight={mode==="daily"?dailySize.size.main:undefined}/>}
+    {mode==="daily"&&!feed.loading&&rows.length>0&&heightControl("main","장중 흐름")} 
     <div className="chart-footer"><span className="num">{minuteLabel(domain[0])}–{minuteLabel(domain[1])}</span><span className="desktop-hint">5분까지 확대 · 모든 차트 시간축 연동</span><button className="button ghost small" onClick={()=>{setRange("data");setSelectedMinute(null);}}>확대 초기화</button></div>
   </section>;}
   const overviewStats = [
@@ -229,17 +236,18 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
           <div className="overview-summary-card overview-signal-card"><SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/></div>
         </section>
       </>:<>
-        <div className="dashboard-grid"><div className="main-column">
+        <div className={resizeStyles.controls} aria-label="일별 분석 크기 설정"><div><strong>화면 크기 조절</strong><span className={resizeStyles.widthHint}>가운데 경계로 가로 폭 · </span>하단 손잡이로 높이 조절 · 이 브라우저에 자동 저장</div><button className="button small" onClick={dailySize.reset}>크기 초기화</button></div>
+        <div className={"dashboard-grid "+resizeStyles.layout} ref={dailyLayout} style={{"--daily-chart-share":dailySize.size.share+"fr","--daily-side-share":(100-dailySize.size.share)+"fr"} as CSSProperties}><div className="main-column">
           <PanelLayout scope={mode} items={[
             {id:"main-chart",title:"장중 흐름",content:mainChartPanel()},
-            {id:"investor-flow",title:"투자자 세부 수급",content:<InvestorFlowPanel rows={rows} date={date} domain={domain} loading={feed.loading}/>},
+            {id:"investor-flow",title:"투자자 세부 수급",content:<InvestorFlowPanel rows={rows} date={date} domain={domain} loading={feed.loading} plotHeight={dailySize.size.investors} resizeControl={heightControl("investors","투자자 세부 수급")}/>},
             ...[...overviewKinds,...comparisonKinds].map(key=>({id:"chart-"+key,title:chartLabels[key]+" 차트",content:settings.compare&&rows.length>0&&key!==kind?comparisonChart(key):<p className="panel-subtitle">비교 차트 설정이 꺼져 있거나 현재 주 차트와 같은 지표입니다.</p>})),
             {id:"summary",title:"일별 요약",content:<SessionSummary rows={signalRows} events={events}/>},
             {id:"report",title:"동시간대 비교 · 리포트",content:<ComparisonReport rows={signalRows} events={events} date={date}/>},
             {id:"diagnostics",title:"시장 모니터",content:<Diagnostics rows={rows} events={events} date={date} now={now} error={feed.error||feed.warning} loading={feed.loading} onSelect={focusMinute}/>},
-            {id:"records",title:"기록 탐색",content:<RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView}/>} 
+            {id:"records",title:"기록 탐색",content:<RecordsPanel rows={rows} events={events} date={date} selectedMinute={selectedMinute} onSelect={focusMinute} view={tableView} onViewChange={setTableView} tableHeight={dailySize.size.records} resizeControl={heightControl("records","기록 탐색")}/>} 
           ]}/>
-        </div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<div id="market-pulse"><MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/></div>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
+        </div><div className={resizeStyles.gutter}><StockChartResizeHandle axis="x" value={dailySize.size.share} min={dailyChartLimits.share[0]} max={dailyChartLimits.share[1]} onChange={value=>dailySize.set("share",value)} onReset={()=>dailySize.set("share",dailyChartDefaults.share)} scale={()=>100/Math.max(1,(dailyLayout.current?.clientWidth??1)-23)} label="일별 분석 가로 폭 조절"/></div><aside className="insight-column" aria-label="시장 요약"><PanelLayout scope={mode+"-aside"} items={[{id:"brief",title:"시장 브리핑",content:<div id="market-pulse"><MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/></div>},{id:"flows",title:"투자자 수급",content:<FlowPanel row={last}/>},{id:"signals",title:"최근 신호",content:<SignalPanel events={events} onSelect={focusMinute} onAll={showRecords}/>}]} /></aside></div>
       </>}
       {mode==="overview"&&<section className="mockup-shortcuts" aria-label="빠른 메뉴">
         <Link href="/history" className="mockup-shortcut-card calendar"><span className="mockup-shortcut-icon"><Icon name="calendar" size={26}/></span><div><strong>시장 캘린더</strong><p>과거를 보면 오늘이 보입니다.</p></div><Icon name="right" size={16}/></Link>
