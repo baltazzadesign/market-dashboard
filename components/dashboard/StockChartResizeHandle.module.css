@@ -1,0 +1,12 @@
+.horizontal,.vertical{touch-action:none;user-select:none;-webkit-user-select:none;position:relative;display:flex;align-items:center;justify-content:center;color:#8b9a82;outline-offset:-2px;border-radius:4px}
+.horizontal{height:27px;width:100%;gap:8px;cursor:ns-resize;margin:1px 0 5px}
+.horizontal>span{height:4px;width:33px;border-top:1px solid #68714f;border-bottom:1px solid #68714f}
+.horizontal small{font-size:9px;letter-spacing:.04em}
+.vertical{width:13px;align-self:stretch;cursor:ew-resize;min-height:80px}
+.vertical>span{position:sticky;top:48vh;align-self:flex-start;margin-top:250px;height:40px;width:4px;border-left:1px solid #68714f;border-right:1px solid #68714f}
+.vertical small{display:none}
+.horizontal:hover,.vertical:hover,.horizontal[data-dragging],.vertical[data-dragging]{background:#d9b87110;color:#e2c890}
+.horizontal:hover>span,.vertical:hover>span,.horizontal[data-dragging]>span,.vertical[data-dragging]>span{border-color:#d9b871}
+.horizontal:focus-visible,.vertical:focus-visible{outline:2px solid #d9b871}
+@media(max-width:950px){.vertical{display:none}}
+@media(max-width:620px){.horizontal{height:32px}.horizontal small{font-size:10px}}

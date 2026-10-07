@@ -7,16 +7,16 @@ import type {CashTimelineDay} from '@/lib/cash-flow-timeline';
 export const flowNumber = (v: number | null | undefined, unit: StockFlowUnit, signed = true) => v == null ? '—' : (signed && v > 0 ? '+' : '') + new Intl.NumberFormat('ko-KR',{maximumFractionDigits:unit === 'money' ? 2 : 0}).format(v);
 const priceNumber = (v: number) => new Intl.NumberFormat('ko-KR',{maximumFractionDigits:0}).format(v);
 function compact(v: number) { return Math.abs(v) >= 10000 ? (v/10000).toLocaleString('ko-KR',{maximumFractionDigits:1})+'만' : v.toLocaleString('ko-KR',{maximumFractionDigits:1}); }
-export default function StockFlowChart({rows,values,selected,unit,mode,split,showPrice,onSelect,activeIndex,cashDays,onFilingSelect}: {
+export default function StockFlowChart({rows,values,selected,unit,mode,split,showPrice,onSelect,activeIndex,cashDays,onFilingSelect,height:requestedHeight}: {
   rows:StockFlowRow[]; values:StockFlowValues[]; selected:StockInvestor[]; unit:StockFlowUnit; mode:StockFlowMode;
-  split:boolean; showPrice:boolean; onSelect:(index:number)=>void; activeIndex?:number|null; cashDays?:CashTimelineDay[]; onFilingSelect?:(index:number)=>void;
+  split:boolean; showPrice:boolean; onSelect:(index:number)=>void; activeIndex?:number|null; cashDays?:CashTimelineDay[]; onFilingSelect?:(index:number)=>void; height?:number;
 }) {
   const container = useRef<HTMLDivElement>(null), [width,setWidth] = useState(1000), [hover,setHover] = useState<number|null>(null);
   const clip = useId().replaceAll(':','');
   useEffect(()=>{const el=container.current;if(!el)return;const observer=new ResizeObserver(([e])=>setWidth(Math.max(260,e.contentRect.width)));observer.observe(el);return ()=>observer.disconnect();},[]);
-  const small=width<520, height=split?640:450, left=small?48:68, right=small?52:72, top=34, bottom=34;
+  const small=width<520, height=requestedHeight??(split?640:450), left=small?48:68, right=small?52:72, top=34, bottom=34;
   const plotW=width-left-right, volumeTop=height-bottom-51, volumeH=42;
-  const priceBottom=split?230:volumeTop-23, flowTop=split?278:top, flowBottom=volumeTop-23;
+  const flowBottom=volumeTop-23,priceBottom=split?top+(flowBottom-top)*.394:flowBottom,flowTop=split?priceBottom+48:top;
   const lows=rows.map(r=>r.low),highs=rows.map(r=>r.high),min=Math.min(...lows),max=Math.max(...highs);
   const spread=max-min||Math.max(1,max*.02), upper=max+spread*.12, lower=min-spread*.12;
   const bound=Math.max(1,...values.flatMap(v=>selected.flatMap(k=>v[k]===null?[]:[Math.abs(v[k]!)])))*1.12;
@@ -36,7 +36,7 @@ export default function StockFlowChart({rows,values,selected,unit,mode,split,sho
   }
   return <div className={s.plotWrap} ref={container}>
     {!rows.length ? <div className={s.empty}>이 기간에 표시할 주가 기록이 없습니다.</div> : <>
-    <svg data-stock-flow-chart data-layout={split?'split':'overlay'} className={s.plot} viewBox={`0 0 ${width} ${height}`} style={{height}} role="img" tabIndex={0} aria-label="주가 캔들과 투자자별 순매수 차트. 좌우 방향키로 날짜 선택" onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();select((hover??rows.length-1)+(e.key==='ArrowLeft'?-1:1));}if(e.key==='Home'){e.preventDefault();select(0);}if(e.key==='End'){e.preventDefault();select(rows.length-1);}}} onPointerMove={e=>{const rect=e.currentTarget.getBoundingClientRect();const mx=(e.clientX-rect.left)/rect.width*width;select(Math.floor((mx-left)/plotW*rows.length));}} onPointerLeave={()=>setHover(null)}>
+    <svg data-stock-flow-chart data-chart-height={height} data-layout={split?'split':'overlay'} className={s.plot} viewBox={`0 0 ${width} ${height}`} style={{height}} role="img" tabIndex={0} aria-label="주가 캔들과 투자자별 순매수 차트. 좌우 방향키로 날짜 선택" onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();select((hover??rows.length-1)+(e.key==='ArrowLeft'?-1:1));}if(e.key==='Home'){e.preventDefault();select(0);}if(e.key==='End'){e.preventDefault();select(rows.length-1);}}} onPointerMove={e=>{const rect=e.currentTarget.getBoundingClientRect();const mx=(e.clientX-rect.left)/rect.width*width;select(Math.floor((mx-left)/plotW*rows.length));}} onPointerLeave={()=>setHover(null)}>
       <title>주가와 투자자 수급 · KRX 일별</title>
       <defs><clipPath id={clip}><rect x={left} y={top-1} width={plotW} height={height-top-bottom+2}/></clipPath></defs>
       <text x={left} y={14} fill="#aeb5a7" fontSize="11">{showPrice?'주가 (원)':'주가 숨김'}</text>
