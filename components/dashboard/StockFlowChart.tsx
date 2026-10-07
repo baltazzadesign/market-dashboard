@@ -2,13 +2,14 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { stockInvestors, type StockFlowRow, type StockFlowValues, type StockFlowUnit, type StockFlowMode, type StockInvestor } from '@/lib/stock-flow-model';
 import s from './StockFlowWorkspace.module.css';
+import type {CashTimelineDay} from '@/lib/cash-flow-timeline';
 
 export const flowNumber = (v: number | null | undefined, unit: StockFlowUnit, signed = true) => v == null ? '—' : (signed && v > 0 ? '+' : '') + new Intl.NumberFormat('ko-KR',{maximumFractionDigits:unit === 'money' ? 2 : 0}).format(v);
 const priceNumber = (v: number) => new Intl.NumberFormat('ko-KR',{maximumFractionDigits:0}).format(v);
 function compact(v: number) { return Math.abs(v) >= 10000 ? (v/10000).toLocaleString('ko-KR',{maximumFractionDigits:1})+'만' : v.toLocaleString('ko-KR',{maximumFractionDigits:1}); }
-export default function StockFlowChart({rows,values,selected,unit,mode,split,showPrice,onSelect}: {
+export default function StockFlowChart({rows,values,selected,unit,mode,split,showPrice,onSelect,activeIndex,cashDays,onFilingSelect}: {
   rows:StockFlowRow[]; values:StockFlowValues[]; selected:StockInvestor[]; unit:StockFlowUnit; mode:StockFlowMode;
-  split:boolean; showPrice:boolean; onSelect:(index:number)=>void;
+  split:boolean; showPrice:boolean; onSelect:(index:number)=>void; activeIndex?:number|null; cashDays?:CashTimelineDay[]; onFilingSelect?:(index:number)=>void;
 }) {
   const container = useRef<HTMLDivElement>(null), [width,setWidth] = useState(1000), [hover,setHover] = useState<number|null>(null);
   const clip = useId().replaceAll(':','');
@@ -25,6 +26,7 @@ export default function StockFlowChart({rows,values,selected,unit,mode,split,sho
   const bar=Math.max(.8,Math.min(12,plotW/Math.max(1,rows.length)*.62));
   const maxVolume=Math.max(1,...rows.map(r=>r.volume??0));
   const tickCount=Math.min(rows.length,small?3:6),ticks=Array.from({length:tickCount},(_,i)=>Math.round(i*(rows.length-1)/Math.max(1,tickCount-1)));
+  const cursor=hover??activeIndex??null;
   const active=hover===null?null:rows[Math.min(hover,rows.length-1)];
   function select(i:number) { const index=Math.max(0,Math.min(rows.length-1,i));setHover(index);onSelect(index); }
   function lineSegments(key:StockInvestor) {
@@ -46,8 +48,9 @@ export default function StockFlowChart({rows,values,selected,unit,mode,split,sho
         {showPrice&&rows.map((r,i)=>{const color=r.close>=r.open?'#f06a60':'#48bba9';return <g key={r.date} data-price-candle><line x1={x(i)} x2={x(i)} y1={py(r.high)} y2={py(r.low)} stroke={color}/><rect x={x(i)-bar/2} y={Math.min(py(r.open),py(r.close))} width={bar} height={Math.max(1,Math.abs(py(r.open)-py(r.close)))} fill={color}/></g>;})}
         {stockInvestors.filter(c=>selected.includes(c.key)).map(c=><g key={c.key} data-flow-line={c.key}>{lineSegments(c.key).map((group,j)=>group.length===1?<circle key={j} cx={x(group[0])} cy={fy(values[group[0]][c.key]!)} r="2.3" fill={c.color}/>:<polyline key={j} points={group.map(i=>`${x(i)},${fy(values[i][c.key]!)}`).join(' ')} stroke={c.color} strokeWidth="2" fill="none" strokeLinejoin="round"/>)}</g>)}
         {rows.map((r,i)=>r.volume===null?null:<rect key={'v'+r.date} x={x(i)-bar/2} y={volumeTop+volumeH-r.volume/maxVolume*volumeH} width={bar} height={r.volume/maxVolume*volumeH} fill={r.close>=r.open?'#ba625655':'#439d9055'}/>)}
-        {active&&hover!==null&&<line x1={x(hover)} x2={x(hover)} y1={top} y2={height-bottom} stroke="#e4c17b" strokeDasharray="3 4"/>}
+        {cursor!==null&&rows[cursor]&&<line data-image-exclude x1={x(cursor)} x2={x(cursor)} y1={top} y2={height-bottom} stroke="#e4c17b" strokeDasharray="3 4"/>}
       </g>
+      {cashDays?.map((day,i)=>day.filings.length&&rows[i]?<g key={'filing'+day.date} data-cash-filing role="button" tabIndex={0} aria-label={`${day.filings.map(f=>f.label+(f.correction?' 정정':'')+' 공시 '+f.date).join(', ')}. 상세 보기`} onClick={()=>{select(i);onFilingSelect?.(i);}} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();select(i);onFilingSelect?.(i);}}} style={{cursor:'pointer'}}><title>{day.filings.map(f=>f.name+' · '+f.date).join(' / ')}</title><line x1={x(i)} x2={x(i)} y1={top+15} y2={height-bottom} stroke="#bca477" opacity=".3" strokeDasharray="3 4"/><rect data-filing-hit x={x(i)-15} y={top-11} width="30" height="30" fill="transparent"/><circle cx={x(i)} cy={top+4} r="9" fill="#302819" stroke={day.filings.some(f=>f.correction)?'#b29ac8':'#d9b871'}/><text x={x(i)} y={top+7} textAnchor="middle" fontSize="9" fill="#edcf91">{day.filings.some(f=>f.correction)?'정':'공'}</text></g>:null)}
       <line x1={left} x2={width-right} y1={volumeTop-6} y2={volumeTop-6} stroke="#2d362a"/>
       <text x={left} y={volumeTop-12} fill="#8c9788" fontSize="10">거래량 (주)</text>
     </svg>
