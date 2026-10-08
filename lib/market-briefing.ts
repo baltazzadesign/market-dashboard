@@ -1,11 +1,12 @@
 import { formatNumber as fmt, isValidDate, kstParts, moveDate, normalizeRow, numeric, record, timeToMinute, type MarketRow } from './balta-model';
 import { marketClosedReason } from './market-calendar';
 import type { NewsItem } from './terminal-model';
+import { interpretBriefing, type BriefingInsight } from './market-briefing-insight';
 
 export type BriefingPoint = {
   time: string; minute: number;
-  kospi: { price: number | null; change: number | null };
-  kosdaq: { price: number | null; change: number | null };
+  kospi: { price: number | null; change: number | null; verified?: boolean };
+  kosdaq: { price: number | null; change: number | null; verified?: boolean };
   breadth: { up: number; down: number; flat: number; total: number; share: number } | null;
   foreign: number | null; institution: number | null; individual: number | null;
 };
@@ -15,6 +16,7 @@ export type Briefing = {
   latest: BriefingPoint | null; headline: string; summary: { title: string; text: string }[];
   timeline: { time: string; title: string; text: string }[];
   sectors: BriefingSector[]; count: number; firstTime: string | null; warnings: string[];
+  insight: BriefingInsight | null;
 };
 
 export function briefingDates(today: string, holidays: readonly string[] = []) {
@@ -33,7 +35,7 @@ function point(raw: unknown, row: MarketRow): BriefingPoint {
     const source = String(data.priceSource ?? '');
     const unavailable = source !== '' && source !== 'LIVE';
     const price = unavailable ? null : numeric(data.price) ?? row[key];
-    return { price: price !== null && price > 0 ? price : null,
+    return { price: price !== null && price > 0 ? price : null, verified: source === 'LIVE',
       change: unavailable || price === null || price <= 0 ? null : numeric(data.changePct) };
   };
   const total = row.up + row.down + row.flat;
@@ -99,6 +101,8 @@ export function briefingSectors(rows: unknown[], date: string, now: Date): Brief
     for (const value of Array.isArray(row.sectors) ? row.sectors : []) {
       const s = record(value), code = String(s.code ?? '').trim(), name = String(s.name ?? '').trim(), change = numeric(s.change);
       if (!code || !name || change === null || ['0001', '1001'].includes(code) || /^(종합|코스피|코스닥|KOSPI|KOSDAQ)$/i.test(name)) continue;
+      // The feed also includes strategy/derivative indices, which are not industries.
+      if (/인버스|레버리지|선물|inverse|leverag|futures|^F[-\s]/i.test(name)) continue;
       const key = market + ':' + code;
       if (found.has(key) && timeToMinute(found.get(key)!.time) >= minute) continue;
       found.set(key, { code, name, change, market: market as 'kospi' | 'kosdaq', time, rank: 0, count: 0 });
@@ -129,10 +133,19 @@ export function buildBriefing(date: string, rawRows: unknown[], sectors: unknown
     if (at) picked.set(at.minute, at);
   }
   if (latest) picked.set(latest.minute, latest);
+  const blocked = latest && date === clock.date && clock.minute >= 540 && clock.minute < 930 && clock.minute - latest.minute >= 5
+    ? `마지막 기록(${latest.time})이 5분 이상 지연되어 현재 방향 판단을 보류합니다.` : undefined;
+  const insight = interpretBriefing(points, { blocked, historical: date < clock.date || clock.minute >= 930 });
   return { ok: true, date, today: clock.date, generatedAt: now.toISOString(), closedReason, latest,
     headline: latest ? briefingHeadline(latest) : closedReason ? `${closedReason} · 시장 휴장` : '선택한 날짜의 시장 기록이 없습니다',
     summary: latest ? briefingSummaries(latest) : [],
-    timeline: [...picked.values()].map(p => ({ time: p.time, title: briefingHeadline(p), text: briefingSummaries(p).slice(0, 3).map(s => s.text).join(' ') })),
+    insight,
+    timeline: [...picked.values()].map(p => {
+      const at = interpretBriefing(points.filter(row => row.minute <= p.minute), { historical: true });
+      return { time: p.time, title: briefingHeadline(p), text: at
+        ? at.explanation.map(s => s.text).join(' ') + ` 해당 시점 판단: ${at.outlook.label}. ${at.outlook.text}`
+        : briefingSummaries(p).slice(0, 3).map(s => s.text).join(' ') };
+    }),
     sectors: closedReason ? [] : briefingSectors(sectors, date, now), count: points.length, firstTime: points[0]?.time ?? null,
     warnings: [...new Set(notices)] };
 }

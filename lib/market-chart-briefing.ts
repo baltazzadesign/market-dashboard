@@ -1,6 +1,7 @@
-import { formatNumber as fmt, minuteLabel, numeric, type MarketRow } from './balta-model';
+import { formatNumber as fmt, kstParts, minuteLabel, numeric, type MarketRow } from './balta-model';
 import { briefingHeadline, briefingSummaries, type BriefingPoint } from './market-briefing';
 import { investorCategories } from './investor-flow';
+import { interpretBriefing } from './market-briefing-insight';
 
 export type ChartBriefing = {
   title: string; subtitle: string[]; headline: string;
@@ -9,22 +10,25 @@ export type ChartBriefing = {
 const sessions: Record<string, string> = { REGULAR: '정규장', AFTER_HOURS_CLOSE: '장후 종가', KRX_AFTER_MARKET: '애프터마켓', OLD_AFTER_HOURS_SINGLE_PRICE: '시간외 단일가', CLOSED: '장 종료', UNKNOWN: '세션 확인 필요' };
 
 /** Pure snapshot: never fetch newer briefing data while the PNG is rendering. */
-export function buildMarketChartBriefing(rows: MarketRow[], date: string, bounds: readonly [number, number]): ChartBriefing {
+export function buildMarketChartBriefing(rows: MarketRow[], date: string, bounds: readonly [number, number], now = new Date()): ChartBriefing {
   const visible = rows.filter(r => r.date === date && r.minute >= bounds[0] && r.minute <= bounds[1]).sort((a, b) => a.minute - b.minute);
   const last = visible.at(-1), first = visible[0], range = `${minuteLabel(bounds[0])}–${minuteLabel(bounds[1])}`;
   const subtitle = [`${date} · 표시 구간 ${range} KST · 요약 기준 ${last?.time ?? '—'} · ${visible.length}개 기록`];
   if (!last) return { title: '시장 브리핑', subtitle, headline: '선택 구간의 시장 기록이 없습니다', sections: [], notes: ['구간 밖의 기록으로 브리핑을 대체하지 않습니다.'] };
 
   const price = (value: unknown) => { const n = numeric(value); return n !== null && n > 0 ? n : null; };
-  const total = last.up + last.down + last.flat;
-  const breadth = last.breadthSource === 'LIVE' && [last.up, last.down, last.flat].every(n => Number.isInteger(n) && n >= 0) && total > 0
-    ? { up: last.up, down: last.down, flat: last.flat, total, share: last.up / total * 100 } : null;
-  // Normalized chart rows have index levels, but not a verified previous close.
-  const p: BriefingPoint = { time: last.time, minute: last.minute,
-    kospi: { price: price(last.kospi), change: null }, kosdaq: { price: price(last.kosdaq), change: null }, breadth,
-    foreign: last.flowSource === 'LIVE' ? numeric(last.foreignFlow) : null,
-    institution: last.flowSource === 'LIVE' ? numeric(last.instFlow) : null,
-    individual: last.flowSource === 'LIVE' ? numeric(last.indivFlow) : null };
+  // Normalized rows preserve price provenance, but have no verified previous close.
+  const toPoint = (r: MarketRow): BriefingPoint => {
+    const total = r.up + r.down + r.flat;
+    const breadth = r.breadthSource === 'LIVE' && [r.up, r.down, r.flat].every(n => Number.isInteger(n) && n >= 0) && total > 0
+      ? { up: r.up, down: r.down, flat: r.flat, total, share: r.up / total * 100 } : null;
+    return { time: r.time, minute: r.minute,
+      kospi: { price: price(r.kospi), change: null, verified: r.priceSources?.kospi === 'LIVE' }, kosdaq: { price: price(r.kosdaq), change: null, verified: r.priceSources?.kosdaq === 'LIVE' }, breadth,
+      foreign: r.flowSource === 'LIVE' ? numeric(r.foreignFlow) : null,
+      institution: r.flowSource === 'LIVE' ? numeric(r.instFlow) : null,
+      individual: r.flowSource === 'LIVE' ? numeric(r.indivFlow) : null };
+  };
+  const p = toPoint(last), breadth = p.breadth;
   const sections = briefingSummaries(p);
   const index = (key: 'kospi' | 'kosdaq', label: string) => {
     const value = p[key].price, start = price(first[key]);
@@ -47,6 +51,18 @@ export function buildMarketChartBriefing(rows: MarketRow[], date: string, bounds
     ].filter(Boolean).join(', ')}입니다.${detail.source === 'PARTIAL' ? ' 일부 항목이 누락되어 전체 항목의 순위는 아닙니다.' : ''}` });
   }
   const notes = [`${sessions[last.session] ?? '세션 확인 필요'} · 저장 버튼을 누른 시점의 차트 기록으로 생성한 자동 요약입니다.`];
+  if (visible.every(r => r.session === 'REGULAR')) {
+    const clock = kstParts(now);
+    const blocked = date === clock.date && clock.minute >= 540 && clock.minute < 930 && clock.minute - last.minute >= 5
+      ? '장중 마지막 기록이 5분 이상 지연되어 현재 방향 판단을 보류합니다.' : undefined;
+    const insight = interpretBriefing(visible.map(toPoint), { blocked, historical: true });
+    if (insight) {
+      sections.push({ title: '흐름 해석', text: insight.explanation.filter(s => s.title !== '지수의 의미').map(s => s.text).join(' ') });
+      sections.push({ title: '최근 구간 변화', text: `${insight.window}\n${insight.recent.map(s => `${s.label} ${s.value}`).join(' · ')}` });
+      sections.push({ title: '조건부 전망', text: `${insight.outlook.label} · ${insight.outlook.horizon}\n${insight.outlook.text}` }, ...insight.outlook.scenarios);
+      notes.push(...insight.limitations);
+    }
+  } else notes.push('조건부 방향 전망은 한 정규장 안의 정상 기록만 비교합니다. 장후·혼합 세션에는 제공하지 않습니다.');
   if (!breadth) notes.push('시장폭은 정상 출처를 확인할 수 없어 판단에서 제외했습니다.');
   if ([p.foreign, p.institution, p.individual].some(v => v === null)) notes.push('확인되지 않은 수급과 직전 값 유지 상태는 현재 순매수·순매도로 판단하지 않았습니다.');
   if (p.kospi.price === null || p.kosdaq.price === null) notes.push('일부 지수 값은 확인되지 않았습니다.');

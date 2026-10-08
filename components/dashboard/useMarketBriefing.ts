@@ -8,6 +8,7 @@ type ResponseData = Briefing & { dates: string[] };
 type State = { date: string; data: ResponseData | null; loading: boolean; error: string; news: NewsItem[]; newsMessage: string };
 export function useMarketBriefing(initialDate: string) {
   const [today, setToday] = useState(() => kstParts().date);
+  const [minute, setMinute] = useState(() => kstParts().minute);
   const [date, setDate] = useState(() => isValidDate(initialDate) && initialDate <= kstParts().date && initialDate >= '2000-01-01' ? initialDate : kstParts().date);
   const [auto, setAuto] = useState(true);
   const [state, setState] = useState<State>({ date: '', data: null, loading: true, error: '', news: [], newsMessage: '' });
@@ -44,7 +45,7 @@ export function useMarketBriefing(initialDate: string) {
   useEffect(() => { void refresh(); return () => { pending.current?.abort(); version.current++; }; }, [refresh]);
   useEffect(() => {
     const tick = () => {
-      const now = kstParts(); setToday(now.date);
+      const now = kstParts(); setToday(now.date); setMinute(now.minute);
       if (auto && date === now.date && !document.hidden && !pending.current) void refresh();
     };
     const timer = window.setInterval(tick, 60000);
@@ -59,5 +60,5 @@ export function useMarketBriefing(initialDate: string) {
   }
   const current = state.date === date ? state : { date, data: null, loading: true, error: '', news: [], newsMessage: '' };
   const dates = current.data?.today === today ? current.data.dates : briefingDates(today);
-  return { ...current, today, dates, auto, setAuto, selectDate, refresh };
+  return { ...current, today, minute, dates, auto, setAuto, selectDate, refresh };
 }

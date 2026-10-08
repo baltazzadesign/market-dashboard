@@ -16,6 +16,7 @@ export type MarketRow = {
   flowSource: string; breadthSource: string; marketState: string; marketTone: string;
   marketScore: number; signals: RawRecord[]; alert: string; createdAt: string;
   investorFlows?: InvestorFlowSnapshot;
+  priceSources?: { kospi: string; kosdaq: string };
 };
 export type MarketEvent = {
   id: string; date: string; time: string; minute: number; type: string;
@@ -103,6 +104,7 @@ export function normalizeRow(value: unknown, date: string): MarketRow {
   return {
     id: n("id") ?? 0, date, time, minute, session, up, down, flat, diff, accel: n("accel") ?? 0,
     upRatio, downRatio, kospi: (n("kospi") ?? 0) > 0 ? n("kospi") : null, kosdaq: (n("kosdaq") ?? 0) > 0 ? n("kosdaq") : null,
+    priceSources: { kospi: String(record(marketData.kospi).priceSource ?? record(r.priceSources).kospi ?? 'UNKNOWN'), kosdaq: String(record(marketData.kosdaq).priceSource ?? record(r.priceSources).kosdaq ?? 'UNKNOWN') },
     foreignFlow, instFlow, indivFlow, flowPower, flowTrend: flow(r.flowTrend ?? r.flowtrend), flowMomentum: flow(r.flowMomentum ?? r.flowmomentum),
     flowSource, breadthSource, marketState: state, marketTone: String(r.marketTone ?? r.markettone ?? ""),
     marketScore: Math.max(-100, Math.min(100, numeric(r.marketScore ?? r.marketscore) ?? calcScore(diff, upRatio, downRatio))),
