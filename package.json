@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test:terminal": "node --test tests/terminal.test.cjs",
     "futures:worker": "node --env-file=.env.local --import tsx scripts/kis-futures-worker.ts",
+    "investor:collect": "node --env-file=.env.local --import tsx scripts/kis-investor-ranking-worker.ts",
+    "investor:watch": "node --env-file=.env.local --import tsx scripts/kis-investor-ranking-worker.ts --watch",
     "test:futures": "node --import tsx --test tests/futures.test.ts tests/futures-api.test.cjs"
   },
   "dependencies": {

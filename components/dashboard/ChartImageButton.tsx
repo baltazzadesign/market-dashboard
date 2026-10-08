@@ -19,7 +19,7 @@ export default function ChartImageButton({ createJob, disabled, label = '차트 
         const start = performance.now(); let ready = 0;
         while (ready < 3) {
           await new Promise(resolve => setTimeout(resolve, 80)); abort.signal.throwIfAborted();
-          const plots = stage.current?.querySelectorAll<SVGSVGElement>('svg.recharts-surface, svg[data-stock-flow-chart], svg[data-stock-cash-chart]');
+          const plots = stage.current?.querySelectorAll<SVGSVGElement>('svg.recharts-surface, svg[data-stock-flow-chart], svg[data-stock-cash-chart], svg[data-investor-ranking-chart]');
           ready = plots?.length === job.plots && Array.from(plots).every(svg => svg.getBoundingClientRect().width > 200) ? ready + 1 : 0;
           if (performance.now() - start > 10000) throw new Error('차트 준비가 지연되었습니다. 잠시 후 다시 저장해 주세요.');
         }

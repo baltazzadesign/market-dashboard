@@ -7,7 +7,7 @@ import { Modal } from './Modal';
 import OnlinePresence from './OnlinePresence';
 import headerStyles from './TerminalHeader.module.css';
 
-const links = [['/', '대시보드'], ['/briefing', '시장 브리핑'], ['/daily', '일별 분석'], ['/flow', '시장 수급'], ['/breadth', '시장폭'], ['/pulse', 'Market Pulse'], ['/research', '시장리서치'], ['/history', '캘린더'], ['/notes', '내 메모'], ['/stock-flow', '종목 수급 분석'], ['/cash-flow', '기업 현금흐름']];
+const links = [['/', '대시보드'], ['/briefing', '시장 브리핑'], ['/daily', '일별 분석'], ['/flow', '시장 수급'], ['/breadth', '시장폭'], ['/pulse', 'Market Pulse'], ['/research', '시장리서치'], ['/history', '캘린더'], ['/notes', '내 메모'], ['/stock-flow', '종목 수급 분석'], ['/investor-ranking', '투자자 매매 순위'], ['/cash-flow', '기업 현금흐름']];
 export default function TerminalHeader() {
   const path = usePathname(), router = useRouter();
   const navigation = useRef<HTMLElement>(null);
