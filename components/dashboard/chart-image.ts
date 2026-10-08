@@ -6,7 +6,8 @@ export type ImagePanel = {
   title: string; subtitle: string; metrics: ImageMetric[]; plot?: ImagePlot;
   empty?: string; notes?: string[]; wide?: boolean;
 };
-export type ChartImageReport = { title: string; subtitle: string[]; panels: ImagePanel[]; notes: string[] };
+export type ImageBriefing = { title: string; subtitle: string[]; headline: string; sections: { title: string; text: string }[]; notes: string[] };
+export type ChartImageReport = { title: string; subtitle: string[]; panels: ImagePanel[]; notes: string[]; briefing?: ImageBriefing };
 const FONT = 'Arial, "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 const WIDTH = 1440, PAD = 32, GAP = 20;
 
@@ -46,6 +47,34 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, width: number): strin
   return lines;
 }
 function font(ctx: CanvasRenderingContext2D, size: number, weight = 400) { ctx.font = `${weight} ${size}px ${FONT}`; }
+function measureBriefing(ctx: CanvasRenderingContext2D, briefing: ImageBriefing, width: number) {
+  const inner = width - 56;
+  font(ctx, 15); const subtitles = briefing.subtitle.flatMap(text => wrap(ctx, text, inner));
+  font(ctx, 27, 600); const headline = wrap(ctx, briefing.headline, inner);
+  font(ctx, 17); const sections = briefing.sections.map(s => ({ ...s, lines: wrap(ctx, s.text, inner - 150) }));
+  font(ctx, 14); const notes = briefing.notes.flatMap(text => wrap(ctx, text, inner));
+  const height = 24 + 34 + subtitles.length * 23 + 20 + headline.length * 38 + 24
+    + sections.reduce((sum, s) => sum + Math.max(26, s.lines.length * 27) + 18, 0) + 18 + notes.length * 22 + 22;
+  return { subtitles, headline, sections, notes, height };
+}
+function drawBriefing(ctx: CanvasRenderingContext2D, briefing: ImageBriefing, layout: ReturnType<typeof measureBriefing>, y: number, width: number) {
+  const x = PAD + 28, inner = width - 56;
+  ctx.fillStyle = '#111a10'; ctx.strokeStyle = '#947747'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(PAD, y, width, layout.height, 8); ctx.fill(); ctx.stroke();
+  let top = y + 24;
+  font(ctx, 23, 600); ctx.fillStyle = '#edd192'; ctx.fillText(briefing.title, x, top, inner);
+  font(ctx, 12); ctx.fillStyle = '#a7b395'; ctx.textAlign = 'right'; ctx.fillText('차트 기록 기반 · 자동 요약', PAD + width - 28, top + 5); ctx.textAlign = 'left';
+  top += 34; font(ctx, 15); ctx.fillStyle = '#a8b29d'; layout.subtitles.forEach(line => { ctx.fillText(line, x, top); top += 23; });
+  top += 20; font(ctx, 27, 600); ctx.fillStyle = '#e9d7a5'; layout.headline.forEach(line => { ctx.fillText(line, x, top); top += 38; });
+  top += 24;
+  for (const section of layout.sections) {
+    font(ctx, 16, 600); ctx.fillStyle = '#c9bf91'; ctx.fillText(section.title, x, top + 2, 132);
+    font(ctx, 17); ctx.fillStyle = '#c2cbb6'; section.lines.forEach((line, i) => ctx.fillText(line, x + 150, top + i * 27));
+    top += Math.max(26, section.lines.length * 27) + 18;
+  }
+  ctx.strokeStyle = '#3e4b33'; ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x + inner, top); ctx.stroke();
+  top += 18; font(ctx, 14); ctx.fillStyle = '#929f83'; layout.notes.forEach(line => { ctx.fillText(line, x, top); top += 22; });
+}
 function loadPlot(plot: ImagePlot, signal: AbortSignal): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new DOMException('Cancelled', 'AbortError')); return; }
@@ -84,6 +113,8 @@ export async function buildChartPNG(report: ChartImageReport, signal: AbortSigna
     placements.push(entry);
   }
   if (pendingHeight) y += pendingHeight + GAP;
+  const briefingY = y, briefingLayout = report.briefing ? measureBriefing(ctx, report.briefing, full) : null;
+  if (briefingLayout) y += briefingLayout.height + GAP;
   const height = y + 38 + footerLines.length * 23 + 44;
   // Bound memory on phones while keeping desktop exports crisp.
   const scale = Math.min(2, Math.sqrt(12_000_000 / (WIDTH * height)), 8192 / height);
@@ -120,6 +151,7 @@ export async function buildChartPNG(report: ChartImageReport, signal: AbortSigna
       top += p.plotHeight + 10;
       font(ctx, 14); ctx.fillStyle = '#9ca791'; p.notes.forEach((text, n) => ctx.fillText(text, x, top + n * 21));
     }
+    if (report.briefing && briefingLayout) drawBriefing(ctx, report.briefing, briefingLayout, briefingY, full);
     ctx.strokeStyle = '#4c422e'; ctx.beginPath(); ctx.moveTo(PAD, y + 5); ctx.lineTo(WIDTH - PAD, y + 5); ctx.stroke();
     font(ctx, 14); ctx.fillStyle = '#9ca791'; footerLines.forEach((text, i) => ctx.fillText(text, PAD, y + 24 + i * 23));
     signal.throwIfAborted();

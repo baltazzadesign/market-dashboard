@@ -72,7 +72,7 @@ export function briefingHeadline(p: BriefingPoint) {
   if (flow !== null) return `${first}, 외국인·기관 ${flow === 0 ? '합산 수급 균형' : flow > 0 ? '합산 순매수' : '합산 순매도'}`;
   return `${first} · ${index && breadth ? breadth : '수급 확인 필요'}`;
 }
-function summaries(p: BriefingPoint) {
+export function briefingSummaries(p: BriefingPoint) {
   const index = (label: string, q: BriefingPoint['kospi']) => `${label} ${q.price === null ? '확인 필요' : fmt(q.price, 2) + 'pt'}${q.change === null ? '' : ` (전일 대비 ${fmt(q.change, 2, true)}%)`}`;
   const b = p.breadth, flow = combined(p);
   const breadth = b ? `상승 ${fmt(b.up)}개 · 하락 ${fmt(b.down)}개 · 보합 ${fmt(b.flat)}개. 조회된 ${fmt(b.total)}개 중 상승 비율 ${fmt(b.share, 1)}%.` : '정상 출처의 시장폭 값이 없어 상승·하락 확산을 판단하지 않습니다.';
@@ -131,8 +131,8 @@ export function buildBriefing(date: string, rawRows: unknown[], sectors: unknown
   if (latest) picked.set(latest.minute, latest);
   return { ok: true, date, today: clock.date, generatedAt: now.toISOString(), closedReason, latest,
     headline: latest ? briefingHeadline(latest) : closedReason ? `${closedReason} · 시장 휴장` : '선택한 날짜의 시장 기록이 없습니다',
-    summary: latest ? summaries(latest) : [],
-    timeline: [...picked.values()].map(p => ({ time: p.time, title: briefingHeadline(p), text: summaries(p).slice(0, 3).map(s => s.text).join(' ') })),
+    summary: latest ? briefingSummaries(latest) : [],
+    timeline: [...picked.values()].map(p => ({ time: p.time, title: briefingHeadline(p), text: briefingSummaries(p).slice(0, 3).map(s => s.text).join(' ') })),
     sectors: closedReason ? [] : briefingSectors(sectors, date, now), count: points.length, firstTime: points[0]?.time ?? null,
     warnings: [...new Set(notices)] };
 }
