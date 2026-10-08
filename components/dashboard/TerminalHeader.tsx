@@ -5,8 +5,9 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Brand, Icon } from './Icon';
 import { Modal } from './Modal';
 import OnlinePresence from './OnlinePresence';
+import headerStyles from './TerminalHeader.module.css';
 
-const links = [['/', '대시보드'], ['/daily', '일별 분석'], ['/flow', '시장 수급'], ['/breadth', '시장폭'], ['/pulse', 'Market Pulse'], ['/research', '시장리서치'], ['/history', '캘린더'], ['/notes', '내 메모'], ['/stock-flow', '종목 수급 분석'], ['/cash-flow', '기업 현금흐름']];
+const links = [['/', '대시보드'], ['/briefing', '시장 브리핑'], ['/daily', '일별 분석'], ['/flow', '시장 수급'], ['/breadth', '시장폭'], ['/pulse', 'Market Pulse'], ['/research', '시장리서치'], ['/history', '캘린더'], ['/notes', '내 메모'], ['/stock-flow', '종목 수급 분석'], ['/cash-flow', '기업 현금흐름']];
 export default function TerminalHeader() {
   const path = usePathname(), router = useRouter();
   const navigation = useRef<HTMLElement>(null);
@@ -17,7 +18,7 @@ export default function TerminalHeader() {
   function search(event: FormEvent) { event.preventDefault(); router.push('/stock-flow' + (query.trim() ? '?q=' + encodeURIComponent(query.trim()) : '')); setMenu(false); }
   function theme() { const next = !soft; setSoft(next); document.documentElement.dataset.terminalContrast = next ? 'soft' : 'black'; try { localStorage.setItem('balta.soft-dark', next ? '1' : '0'); } catch {} }
   async function logout() { try { const response = await fetch('/api/auth/logout', { method: 'POST' }); if (!response.ok) throw new Error(); window.location.assign('/login'); } catch { setMessage('로그아웃하지 못했습니다. 다시 시도해 주세요.'); } }
-  return <><header className="terminal-header"><div className="terminal-header-inner">
+  return <><header className="terminal-header"><div className={'terminal-header-inner ' + headerStyles.frame}>
     <Link href="/" className="terminal-brand-link" aria-label="발타툴 대시보드"><Brand /></Link>
     <nav ref={navigation} className="terminal-navigation" aria-label="주요 메뉴">{links.map(([url, label]) => <Link href={url} key={url} className={path === url ? 'active' : ''} aria-current={path === url ? 'page' : undefined}>{label}</Link>)}</nav>
     <form className="terminal-search" role="search" onSubmit={search}><input aria-label="종목명 또는 코드 검색" value={query} onChange={e => setQuery(e.target.value)} placeholder="종목명 또는 코드 검색..." maxLength={60}/><button aria-label="검색"><Icon name="search" size={17}/></button></form>
