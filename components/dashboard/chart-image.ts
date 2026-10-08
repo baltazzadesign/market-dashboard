@@ -6,8 +6,13 @@ export type ImagePanel = {
   title: string; subtitle: string; metrics: ImageMetric[]; plot?: ImagePlot;
   empty?: string; notes?: string[]; wide?: boolean;
 };
-export type ImageBriefing = { title: string; subtitle: string[]; headline: string; sections: { title: string; text: string }[]; notes: string[] };
-export type ChartImageReport = { title: string; subtitle: string[]; panels: ImagePanel[]; notes: string[]; briefing?: ImageBriefing };
+export type ImageBriefing = { title: string; badge?: string; subtitle: string[]; headline: string; sections: { title: string; text: string }[]; notes: string[] };
+export type ImageTable = {
+  title: string; subtitle: string;
+  columns: { label: string; weight?: number; align?: 'left' | 'right'; color?: string }[];
+  rows: string[][];
+};
+export type ChartImageReport = { title: string; subtitle: string[]; panels: ImagePanel[]; notes: string[]; tables?: ImageTable[]; briefing?: ImageBriefing };
 const FONT = 'Arial, "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 const WIDTH = 1440, PAD = 32, GAP = 20;
 
@@ -63,7 +68,7 @@ function drawBriefing(ctx: CanvasRenderingContext2D, briefing: ImageBriefing, la
   ctx.beginPath(); ctx.roundRect(PAD, y, width, layout.height, 8); ctx.fill(); ctx.stroke();
   let top = y + 24;
   font(ctx, 23, 600); ctx.fillStyle = '#edd192'; ctx.fillText(briefing.title, x, top, inner);
-  font(ctx, 12); ctx.fillStyle = '#a7b395'; ctx.textAlign = 'right'; ctx.fillText('차트 기록 기반 · 자동 요약', PAD + width - 28, top + 5); ctx.textAlign = 'left';
+  font(ctx, 12); ctx.fillStyle = '#a7b395'; ctx.textAlign = 'right'; ctx.fillText(briefing.badge ?? '차트 기록 기반 · 자동 요약', PAD + width - 28, top + 5); ctx.textAlign = 'left';
   top += 34; font(ctx, 15); ctx.fillStyle = '#a8b29d'; layout.subtitles.forEach(line => { ctx.fillText(line, x, top); top += 23; });
   top += 20; font(ctx, 27, 600); ctx.fillStyle = '#e9d7a5'; layout.headline.forEach(line => { ctx.fillText(line, x, top); top += 38; });
   top += 24;
@@ -74,6 +79,43 @@ function drawBriefing(ctx: CanvasRenderingContext2D, briefing: ImageBriefing, la
   }
   ctx.strokeStyle = '#3e4b33'; ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x + inner, top); ctx.stroke();
   top += 18; font(ctx, 14); ctx.fillStyle = '#929f83'; layout.notes.forEach(line => { ctx.fillText(line, x, top); top += 22; });
+}
+function measureTable(ctx: CanvasRenderingContext2D, table: ImageTable, width: number) {
+  const inner = width - 40, weight = table.columns.reduce((sum, c) => sum + (c.weight ?? 1), 0);
+  const widths = table.columns.map(c => inner * (c.weight ?? 1) / weight);
+  font(ctx, 14); const subtitles = wrap(ctx, table.subtitle, inner);
+  font(ctx, 15, 600); const headings = table.columns.map((c, i) => wrap(ctx, c.label, widths[i] - 24));
+  const headingHeight = Math.max(1, ...headings.map(c => c.length)) * 22 + 24;
+  font(ctx, 16); const rows = table.rows.map(row => {
+    const cells = table.columns.map((_, i) => wrap(ctx, row[i] ?? '—', widths[i] - 24));
+    return { cells, height: Math.max(1, ...cells.map(c => c.length)) * 24 + 24 };
+  });
+  return { widths, subtitles, headings, headingHeight, rows, height: 72 + subtitles.length * 21 + headingHeight + rows.reduce((sum, r) => sum + r.height, 0) + 12 };
+}
+function drawTable(ctx: CanvasRenderingContext2D, table: ImageTable, layout: ReturnType<typeof measureTable>, y: number, width: number) {
+  ctx.fillStyle = '#0d120e'; ctx.strokeStyle = '#6c512b'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(PAD, y, width, layout.height, 8); ctx.fill(); ctx.stroke();
+  const x = PAD + 20;
+  font(ctx, 21, 600); ctx.fillStyle = '#edd192'; ctx.fillText(table.title, x, y + 18, width - 40);
+  font(ctx, 14); ctx.fillStyle = '#a1ab99'; layout.subtitles.forEach((line, i) => ctx.fillText(line, x, y + 48 + i * 21));
+  let top = y + 72 + layout.subtitles.length * 21;
+  function cells(lines: string[][], header: boolean) {
+    let left = x;
+    lines.forEach((cell, i) => {
+      ctx.textAlign = table.columns[i].align ?? 'left';
+      ctx.fillStyle = table.columns[i].color ?? (header ? '#c8bea1' : '#d5dbce');
+      cell.forEach((line, n) => ctx.fillText(line, ctx.textAlign === 'right' ? left + layout.widths[i] - 12 : left + 12, top + 12 + n * (header ? 22 : 24)));
+      left += layout.widths[i];
+    });
+    ctx.textAlign = 'left';
+  }
+  ctx.fillStyle = '#1a2117'; ctx.fillRect(x, top, width - 40, layout.headingHeight);
+  font(ctx, 15, 600); cells(layout.headings, true); top += layout.headingHeight;
+  layout.rows.forEach((row, i) => {
+    if (i % 2 === 1) { ctx.fillStyle = '#111910'; ctx.fillRect(x, top, width - 40, row.height); }
+    font(ctx, 16); cells(row.cells, false); top += row.height;
+    ctx.strokeStyle = '#2c3727'; ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x + width - 40, top); ctx.stroke();
+  });
 }
 function loadPlot(plot: ImagePlot, signal: AbortSignal): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -113,6 +155,11 @@ export async function buildChartPNG(report: ChartImageReport, signal: AbortSigna
     placements.push(entry);
   }
   if (pendingHeight) y += pendingHeight + GAP;
+  const tables = (report.tables ?? []).map(table => {
+    const layout = measureTable(ctx, table, full), top = y;
+    y += layout.height + GAP;
+    return { table, layout, top };
+  });
   const briefingY = y, briefingLayout = report.briefing ? measureBriefing(ctx, report.briefing, full) : null;
   if (briefingLayout) y += briefingLayout.height + GAP;
   const height = y + 38 + footerLines.length * 23 + 44;
@@ -151,6 +198,7 @@ export async function buildChartPNG(report: ChartImageReport, signal: AbortSigna
       top += p.plotHeight + 10;
       font(ctx, 14); ctx.fillStyle = '#9ca791'; p.notes.forEach((text, n) => ctx.fillText(text, x, top + n * 21));
     }
+    tables.forEach(({ table, layout, top }) => drawTable(ctx, table, layout, top, full));
     if (report.briefing && briefingLayout) drawBriefing(ctx, report.briefing, briefingLayout, briefingY, full);
     ctx.strokeStyle = '#4c422e'; ctx.beginPath(); ctx.moveTo(PAD, y + 5); ctx.lineTo(WIDTH - PAD, y + 5); ctx.stroke();
     font(ctx, 14); ctx.fillStyle = '#9ca791'; footerLines.forEach((text, i) => ctx.fillText(text, PAD, y + 24 + i * 23));
