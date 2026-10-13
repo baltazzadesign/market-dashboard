@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { investorLabel, rankingAmount, rankingInvestors, rankingMarketLabels, rankingMarkets, rankingNotes, streakLabel, type RankingEntry, type RankingMarket, type RankingResponse } from '@/lib/investor-ranking';
 import type { StockInvestor } from '@/lib/stock-flow-model';
 import InvestorRankingImageButton from './InvestorRankingImageButton';
+import InvestorFlowWatch from './InvestorFlowWatch';
 import { Icon } from './Icon';
 import s from './InvestorRankingWorkspace.module.css';
 
@@ -25,11 +26,13 @@ function RankingList({rows,side,total,count,maximum,partial}:{rows:RankingEntry[
   </section>;
 }
 export default function InvestorRankingWorkspace(){
+  const [panel,setPanel]=useState<'ranking'|'watch'|'calendar'>('ranking');
   const [investor,setInvestor]=useState<StockInvestor>('pension'),[market,setMarket]=useState<RankingMarket>('all'),[date,setDate]=useState(''),[refresh,setRefresh]=useState(0);
   const [result,setResult]=useState<{key:string;data:RankingResponse}|null>(null),[dates,setDates]=useState<string[]>([]),[pending,setPending]=useState(true),[error,setError]=useState('');
   const key=[investor,market,date,refresh].join('|'),visible=result?.key===key?result.data:null;
   const loading=pending||!visible&&!error;
   useEffect(()=>{
+    if(panel!=='ranking')return;
     let alive=true;const abort=new AbortController();setPending(true);setError('');
     (async()=>{try{
       const params=new URLSearchParams({investor,market});if(date)params.set('date',date);
@@ -39,19 +42,20 @@ export default function InvestorRankingWorkspace(){
     }catch(e){if(alive){setResult(null);setError(e instanceof Error&&e.name==='TimeoutError'?'조회 시간이 길어지고 있습니다. 다시 조회해 주세요.':e instanceof Error?e.message:'순위 조회에 실패했습니다.');}}
     finally{if(alive)setPending(false);}})();
     return()=>{alive=false;abort.abort();};
-  },[investor,market,date,refresh,key]);
+  },[investor,market,date,refresh,key,panel]);
   const group=visible?.group,partial=!!group&&group.covered<group.expected;
   const maximum=Math.max(1,...(group?.buy??[]).map(r=>r.net),...(group?.sell??[]).map(r=>-r.net));
   return <main className={s.page}>
     <div className={s.hero}><div><span className={s.eyebrow}>INVESTOR FLOW RANKING</span><h1>{investorLabel(investor)} 매매 순위</h1><p>어떤 종목을 담고, 어떤 종목을 덜었을까.</p></div><span className={s.sourceTag}>KRX · 장후 일별 수급</span></div>
+    <div className={s.viewTabs} role="group" aria-label="매매 순위 보기 방식">{([['ranking','매매 순위'],['watch','수급 추적'],['calendar','수급 캘린더']] as const).map(([key,label])=><button key={key} aria-pressed={panel===key} onClick={()=>setPanel(key)}>{label}</button>)}</div>
     <div className={s.controls}>
       <div className={s.tabs} role="group" aria-label="투자 주체">{rankingInvestors.map(key=><button key={key} aria-pressed={investor===key} onClick={()=>setInvestor(key)}>{investorLabel(key)}</button>)}</div>
       <div className={s.filters}><div className={s.marketTabs} role="group" aria-label="시장">{rankingMarkets.map(key=><button key={key} aria-pressed={market===key} onClick={()=>setMarket(key)}>{key==='all'?'전체':rankingMarketLabels[key]}</button>)}</div>
-        <label>기준일 <select aria-label="순위 기준일" value={date} onChange={e=>setDate(e.target.value)}><option value="">최근 수집일{dates[0]?' · '+dates[0]:''}</option>{dates.map(day=><option key={day} value={day}>{day}</option>)}</select></label>
-        <button onClick={()=>setRefresh(v=>v+1)} disabled={pending} className={s.refresh}><Icon name="refresh" size={14}/>{pending?'조회 중':'새로고침'}</button><InvestorRankingImageButton data={visible} disabled={loading}/>
+        {panel==='ranking'&&<><label>기준일 <select aria-label="순위 기준일" value={date} onChange={e=>setDate(e.target.value)}><option value="">최근 수집일{dates[0]?' · '+dates[0]:''}</option>{dates.map(day=><option key={day} value={day}>{day}</option>)}</select></label>
+        <button onClick={()=>setRefresh(v=>v+1)} disabled={pending} className={s.refresh}><Icon name="refresh" size={14}/>{pending?'조회 중':'새로고침'}</button><InvestorRankingImageButton data={visible} disabled={loading}/></>}
       </div>
     </div>
-    {error?<div role="alert" className={s.notice}><strong>순위를 불러오지 못했어요.</strong><p>{error}</p><button onClick={()=>setRefresh(v=>v+1)}>다시 조회</button></div>
+    {panel!=='ranking'?<InvestorFlowWatch investor={investor} market={market} view={panel} initialDate={date}/>:error?<div role="alert" className={s.notice}><strong>순위를 불러오지 못했어요.</strong><p>{error}</p><button onClick={()=>setRefresh(v=>v+1)}>다시 조회</button></div>
       :loading?<div className={s.empty} role="status"><span className={s.eyebrow}>LOADING</span><h2>저장된 매매 순위를 불러오는 중</h2><p>선택한 날짜와 투자 주체를 확인하고 있어요.</p></div>
       :!group?<div className={s.empty}><span className={s.eyebrow}>WAITING FOR DATA</span><h2>아직 수집된 순위가 없어요.</h2><p>장후 수집이 끝나면 순매수·순매도 TOP30을 여기서 확인할 수 있습니다.</p><p>저장된 날짜만 조회할 수 있어요. 첫 적용 시 수집기를 한 번 실행해 주세요.</p></div>
       :<>

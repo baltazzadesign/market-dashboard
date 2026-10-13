@@ -21,7 +21,7 @@ export default function StockCashFlowChart({days,view,activeIndex,onSelect,heigh
   const axisNumber=(v:number)=>v.toLocaleString('ko-KR',{maximumFractionDigits:axis.unit==='조원'?2:1});
   return <div ref={container} className={s.plotWrap}>
     <svg data-stock-cash-chart data-view={view} data-chart-height={height} className={s.plot} viewBox={`0 0 ${width} ${height}`} style={{height}} role="img" tabIndex={0} aria-label="공시 반영일 기준 영업현금흐름과 잉여현금흐름 계단 차트. 좌우 방향키로 날짜 선택" onPointerMove={e=>{const r=e.currentTarget.getBoundingClientRect();select(Math.floor(((e.clientX-r.left)/r.width*width-left)/plotW*days.length));}} onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();select((activeIndex??days.length-1)+(e.key==='ArrowLeft'?-1:1));}if(e.key==='Home'){e.preventDefault();select(0);}if(e.key==='End'){e.preventDefault();select(days.length-1);}}}>
-      <title>기업 현금흐름 · {view==='ttm'?'최근 4분기 합계':'단독 분기'} · {axis.unit}</title>
+      <title>{`기업 현금흐름 · ${view==='ttm'?'최근 4분기 합계':'단독 분기'} · ${axis.unit}`}</title>
       <defs><clipPath id={id}><rect x={left} y={top-3} width={plotW} height={height-top-bottom+6}/></clipPath></defs>
       <text data-cash-axis-unit x={left-9} y="19" textAnchor="end" fill="#acb59f" fontSize="10">{axis.unit}</text>
       {bands.map((b,i)=>{const bx=x(b.start-.5),bw=x(b.end+.5)-bx;return <g key={b.start} data-cash-period-band><rect x={bx} y="3" width={bw} height="24" fill={i%2?'#cfb36d0f':'#91b49b0d'}/>{bw>42&&<text x={bx+bw/2} y="19" textAnchor="middle" fill="#b0b69f" fontSize="10">{bw>105?b.label:b.label.replace(/^\d{4}년 /,'')}</text>}<line x1={bx} x2={bx} y1={top} y2={height-bottom} stroke="#4c5941" opacity=".4" strokeDasharray="3 5"/></g>;})}

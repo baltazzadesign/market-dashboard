@@ -16,11 +16,11 @@ import s from './StockFlowWorkspace.module.css';
 type Stock = {code:string;name:string;market:string};
 const periods:Record<StockRange,string>={'1M':'1개월','3M':'3개월','6M':'6개월','1Y':'1년'};
 const num=(v:number|null|undefined)=>v==null?'—':v.toLocaleString('ko-KR');
-export default function StockFlowWorkspace({initialCode='',initialQuery=''}:{initialCode?:string;initialQuery?:string}) {
+export default function StockFlowWorkspace({initialCode='',initialQuery='',initialInvestor,initialMode='cumulative'}:{initialCode?:string;initialQuery?:string;initialInvestor?:StockInvestor;initialMode?:StockFlowMode}) {
   const [code,setCode]=useState(initialCode || (initialQuery ? '' : '005930'));
   const [query,setQuery]=useState(initialQuery),[results,setResults]=useState<Stock[]>([]),[searching,setSearching]=useState(false),[searchError,setSearchError]=useState(''),[searchOpen,setSearchOpen]=useState(Boolean(initialQuery)),[searchIndex,setSearchIndex]=useState(-1);
   const [range,setRange]=useState<StockRange>('1M'),[data,setData]=useState<StockFlowResponse|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[refresh,setRefresh]=useState(0);
-  const [unit,setUnit]=useState<StockFlowUnit>('money'),[mode,setMode]=useState<StockFlowMode>('cumulative'),[split,setSplit]=useState(false),[showPrice,setShowPrice]=useState(true),[selected,setSelected]=useState<StockInvestor[]>(['foreign','institution','individual']),[day,setDay]=useState<number|null>(null);
+  const [unit,setUnit]=useState<StockFlowUnit>('money'),[mode,setMode]=useState<StockFlowMode>(initialMode),[split,setSplit]=useState(false),[showPrice,setShowPrice]=useState(true),[selected,setSelected]=useState<StockInvestor[]>(initialInvestor?[initialInvestor]:['foreign','institution','individual']),[day,setDay]=useState<number|null>(null);
   const [showCash,setShowCash]=useState(true),[cashView,setCashView]=useState<CashFlowView>('quarter'),[filingDay,setFilingDay]=useState<CashTimelineDay|null>(null);
   const cash=useStockCashFlow(code,showCash,refresh);
   const chartSize=useStockChartSize(),layoutRef=useRef<HTMLDivElement>(null);

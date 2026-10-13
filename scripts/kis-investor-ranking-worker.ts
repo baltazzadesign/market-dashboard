@@ -4,9 +4,12 @@ import path from 'node:path';
 import { kstParts } from '../lib/balta-model';
 import { marketClosedReason, parseAdditionalHolidays } from '../lib/market-calendar';
 import { loadReversalUniverse } from '../lib/reversal-data';
-import { loadRankingObservation } from '../lib/investor-ranking-data';
+import { loadRankingBundle } from '../lib/investor-ranking-data';
 import { buildRankingSnapshot, rankingInvestors, type RankingObservation } from '../lib/investor-ranking';
 import { writeRankingSnapshot, readRankingSnapshot } from '../lib/investor-ranking-store';
+import { buildFlowHistoryDays, type FlowHistoryBundle } from '../lib/investor-flow-history';
+import { verifyFlowHistoryStore, writeFlowHistoryDays } from '../lib/investor-flow-watch-data';
+import { rankingCollectionSlot } from '../lib/investor-ranking-schedule';
 
 const directory=path.resolve('.runtime/investor-ranking'),lockPath=path.join(directory,'collector.lock');
 const watch=process.argv.includes('--watch'),refresh=process.argv.includes('--refresh');
@@ -28,24 +31,26 @@ async function acquireLock(){
 }
 async function collect(){
   const now=kstParts(),closed=marketClosedReason(now.date,parseAdditionalHolidays(process.env.MARKET_HOLIDAYS));
-  if(!closed&&now.time<'16:40')throw Error('당일 순위 수집은 한국시간 16:40 이후 실행해 주세요.');
+  if(!closed&&now.time<'16:30')throw Error('당일 순위 수집은 한국시간 16:30 이후 실행해 주세요.');
   // Existing universe verifies the latest date against actual index daily rows.
   const universe=await loadReversalUniverse();
   // Fail early if the new table or credentials are missing, before thousands of calls.
   await readRankingSnapshot(universe.date);
+  await verifyFlowHistoryStore();
   const file=path.join(directory,universe.date+'.json');
-  let startedAt=new Date().toISOString();const rows=new Map<string,RankingObservation>();
+  let startedAt=new Date().toISOString();const rows=new Map<string,RankingObservation>(),history=new Map<string,FlowHistoryBundle>();
   if(!refresh){
     try{
       const saved=JSON.parse(await readFile(file,'utf8'));
-      if(saved.version===1&&saved.context===universe.context&&Array.isArray(saved.rows)){
-        for(const row of saved.rows as RankingObservation[])if(complete(row))rows.set(row.code,row);
+      if(saved.version===2&&saved.context===universe.context&&Array.isArray(saved.rows)&&Array.isArray(saved.history)){
+        for(const bundle of saved.history as FlowHistoryBundle[])if(Array.isArray(bundle.days))history.set(bundle.code,bundle);
+        for(const row of saved.rows as RankingObservation[])if(complete(row)&&history.has(row.code))rows.set(row.code,row);
         if(typeof saved.startedAt==='string')startedAt=saved.startedAt;
       }
     }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')log('복구 파일을 읽지 못해 처음부터 수집합니다.');}
   }
   async function checkpoint(){
-    const temp=file+'.tmp';await writeFile(temp,JSON.stringify({version:1,context:universe.context,startedAt,rows:[...rows.values()]}));await rename(temp,file);
+    const temp=file+'.tmp';await writeFile(temp,JSON.stringify({version:2,context:universe.context,startedAt,rows:[...rows.values()],history:[...history.values()]}));await rename(temp,file);
   }
   log(`${universe.date} · 대상 ${universe.rows.length}종목 · 복구 ${rows.size}종목`);
   let consecutiveFailures=0,processed=0;
@@ -53,10 +58,10 @@ async function collect(){
     if(stopping)break;
     if(rows.has(stock.code))continue;
     try{
-      let observation:RankingObservation;
-      try{observation=await loadRankingObservation(stock,universe.dates);}
-      catch{await delay(12000);if(stopping)break;observation=await loadRankingObservation(stock,universe.dates);}
-      rows.set(stock.code,observation);consecutiveFailures=0;
+      let bundle:Awaited<ReturnType<typeof loadRankingBundle>>;
+      try{bundle=await loadRankingBundle(stock,universe.dates);}
+      catch{await delay(12000);if(stopping)break;bundle=await loadRankingBundle(stock,universe.dates);}
+      rows.set(stock.code,bundle.observation);history.set(stock.code,bundle.history);consecutiveFailures=0;
     }catch{consecutiveFailures++;log(stock.code+' 조회 실패 · 다음 실행에서 재시도합니다.');}
     processed++;
     if(processed%25===0){await checkpoint();log(`조회 ${rows.size}/${universe.rows.length} · 모든 주체 금액 확인 ${[...rows.values()].filter(complete).length}`);}
@@ -67,6 +72,8 @@ async function collect(){
   const snapshot=buildRankingSnapshot(universe.rows,[...rows.values()],universe.dates,startedAt,new Date().toISOString());
   if(!Object.values(snapshot.groups).some(group=>group.covered>0))throw Error('기준일에 확인된 수급 금액이 없습니다. 원천 데이터 갱신 후 다시 실행해 주세요.');
   await writeRankingSnapshot(snapshot);
+  log('최근 거래일별 전체 수급 이력을 저장합니다.');
+  await writeFlowHistoryDays(buildFlowHistoryDays(universe.rows,[...history.values()],universe.dates,now.date,snapshot.collectedAt));
   const saved=await readRankingSnapshot(universe.date);
   if(saved?.collectedAt!==snapshot.collectedAt)log('기존 저장본의 수집 범위가 더 넓어 기존 결과를 유지했습니다.');
   const full=Object.values(snapshot.groups).every(group=>group.covered===group.expected);
@@ -75,16 +82,15 @@ async function collect(){
   return full;
 }
 async function main(){
-  if(process.argv.some(arg=>arg==='--help')){console.log('node --env-file=.env.local --import tsx scripts/kis-investor-ranking-worker.ts [--watch] [--refresh]\n기본: 장후 1회, --watch: 영업일 16:40·18:00 이후 실행, --refresh: 중단 복구 대신 전체 재조회');return;}
+  if(process.argv.some(arg=>arg==='--help')){console.log('node --env-file=.env.local --import tsx scripts/kis-investor-ranking-worker.ts [--watch] [--refresh]\n기본: 장후 1회, --watch: 영업일 16:30·18:00 이후 실행, --refresh: 중단 복구 대신 전체 재조회');return;}
   for(const key of ['KIS_APPKEY','KIS_APPSECRET','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY'])if(!process.env[key])throw Error(key+' 설정이 필요합니다.');
   await acquireLock();process.on('SIGINT',()=>{stopping=true;});process.on('SIGTERM',()=>{stopping=true;});
   if(!watch){if(!await collect())process.exitCode=2;return;}
-  log('장후 자동 수집 대기 · KST 16:40 / 18:00 · 종료 Ctrl+C');
+  log('장후 자동 수집 대기 · KST 16:30 / 18:00 · 종료 Ctrl+C');
   let lastSlot='',retryAfter=0;
   while(!stopping){
-    const now=kstParts(),closed=marketClosedReason(now.date,parseAdditionalHolidays(process.env.MARKET_HOLIDAYS));
-    const slot=now.date+':'+(now.time>='18:00'?'18:00':'16:40');
-    if(!closed&&now.time>='16:40'&&slot!==lastSlot&&Date.now()>=retryAfter){
+    const slot=rankingCollectionSlot(new Date(),parseAdditionalHolidays(process.env.MARKET_HOLIDAYS));
+    if(slot&&slot!==lastSlot&&Date.now()>=retryAfter){
       try{const full=await collect();if(full)lastSlot=slot;else retryAfter=Date.now()+30*60000;}
       catch(error){console.error('[investor-ranking]',error instanceof Error?error.message:'수집 실패');retryAfter=Date.now()+30*60000;}
     }
