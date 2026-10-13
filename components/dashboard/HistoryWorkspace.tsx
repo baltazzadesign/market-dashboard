@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import {useEffect,useMemo,useState} from "react";
 import {Brand,Icon} from "./Icon";
 import {Modal} from "./Modal";
+import MarketCalendarImageButton from "./MarketCalendarImageButton";
 import {useMarketFeed} from "./useMarketFeed";
 import {buildMarketEvents} from "@/lib/balta-signals";
 import {kstParts,formatNumber as n,valueClass,isValidDate,OPEN_MINUTE,CLOSE_MINUTE,record} from "@/lib/balta-model";
@@ -61,7 +62,7 @@ export default function HistoryWorkspace(){
       {month&&(month.slice(0,4)!=="2026"||(tab==="positions"&&start&&start.slice(0,4)!=="2026"))&&<div className="notice" role="status"><Icon name="calendar"/><span>2026년 외의 기간은 주말·고정 휴일만 기본 반영됩니다. 대체·음력·임시 휴장일은 해당 연도 목록을 추가로 설정해야 합니다.</span></div>}
       {error?<div className="notice" role="alert"><Icon name="warning"/><span>{error}</span><button className="button small" onClick={()=>setReload(v=>v+1)}>다시 시도</button></div>:loading?<div className="chart-loading" role="status"><Icon name="refresh" className="spin"/>시장 기록을 불러오는 중</div>:<>
       {!days.length&&<div className="notice" role="status"><Icon name="calendar"/><span>조회 기간의 저장 기록이 없습니다. 데이터 수집 후 캘린더와 분석이 채워집니다.</span></div>}
-      {tab==="calendar"&&<section className="panel"><div className="panel-header"><div><h2 className="panel-title">{month.replace("-","년 ")}월</h2><p className="panel-subtitle">{report.days.length}일 기록 · 날짜를 눌러 장중 그래프 확인</p></div><span className="tag">수급·시장폭: 양 시장 합계</span></div><div className="calendar-scroll"><div className="market-calendar"><div className="calendar-week">{['월','화','수','목','금'].map(d=><div key={d}>{d}</div>)}</div><div className="calendar-days">{dates.map((date,i)=>{
+      {tab==="calendar"&&<section className="panel"><div className="panel-header"><div><h2 className="panel-title">{month.replace("-","년 ")}월</h2><p className="panel-subtitle">{report.days.length}일 기록 · 날짜를 눌러 장중 그래프 확인</p></div><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><span className="tag">수급·시장폭: 양 시장 합계</span><MarketCalendarImageButton month={month} today={today} days={report.days} closedDates={closedDates} asOf={asOf}/></div></div><div className="calendar-scroll"><div className="market-calendar"><div className="calendar-week">{['월','화','수','목','금'].map(d=><div key={d}>{d}</div>)}</div><div className="calendar-days">{dates.map((date,i)=>{
         if(!date)return <div className="calendar-blank" key={'blank'+i}/>;
         const closure=closedDates[date]??marketClosedReason(date),day=closure?undefined:byDate.get(date),future=date>today;
         return <button key={date} className={"calendar-day"+(day?" has-data":"")+(date===today?" is-today":"")+(closure?" is-closed":"")} disabled={future||Boolean(closure)} onClick={()=>setDetail(date)} aria-label={date+(closure?" "+closure+" 휴장":day?" 시장 기록 상세":" 기록 조회")}>
