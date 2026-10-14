@@ -8,7 +8,8 @@ import styles from './AiResearchSimulator.module.css';
 const costs=[0,.15,.3,.5,1] as const;
 const strategyNames:Record<AiStrategy,string>={
  FLOW_V1:'동반 순매수',FLOW_ACCEL_V1:'순매수 가속',
- FLOW_PERSIST_V1:'5일 지속',FLOW_LIQUID_V1:'거래대금 보정'
+ FLOW_PERSIST_V1:'5일 지속',FLOW_LIQUID_V1:'거래대금 보정',
+ FLOW_CASH_V1:'수급 + 현금흐름'
 };
 const fmt=(n:number|null,unit='%')=>n===null?'—':(n>0?'+':'')+n.toLocaleString('ko-KR',{minimumFractionDigits:2,maximumFractionDigits:2})+unit;
 export default function AiResearchSimulator({data,horizon,strategy}:{
@@ -67,7 +68,7 @@ export default function AiResearchSimulator({data,horizon,strategy}:{
    </table>
   </div>
   <div className={styles.strategyInfo}>
-    {strategy==='all'?'4개 수급 전략을 합산한 연구 관측입니다. 동일 종목 중복 추천은 전략별 별도 관측으로 집계됩니다.':strategyNames[strategy]+' 전략의 연구 관측입니다.'}
+    {strategy==='all'?'5개 독립 전략을 합산한 연구 관측입니다. 동일 종목 중복 추천은 전략별 별도 관측으로 집계됩니다.':strategyNames[strategy]+' 전략의 연구 관측입니다.'}
   </div>
   <div className={styles.notes}>
    <p><strong>비용 가정:</strong> 선택한 0~1.00%는 매수·매도 수수료, 거래세, 슬리피지를 합친 임의 왕복 비용으로, 공식 요율이나 실제 체결비용이 아닙니다. 비용 반영 수익률은 총 모의 수익률에서 비용을 %p 단위로 차감한 근사치입니다.</p>

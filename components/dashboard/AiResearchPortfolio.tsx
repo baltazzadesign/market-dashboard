@@ -8,7 +8,8 @@ import styles from './AiResearchPortfolio.module.css';
 
 const strategyNames:Record<AiStrategy,string>={
  FLOW_V1:'외국인·기관 동반 순매수',FLOW_ACCEL_V1:'수급 가속',
- FLOW_PERSIST_V1:'5일 지속·상대 강도',FLOW_LIQUID_V1:'거래대금 보정'
+ FLOW_PERSIST_V1:'5일 지속·상대 강도',FLOW_LIQUID_V1:'거래대금 보정',
+ FLOW_CASH_V1:'수급 + 현금흐름'
 };
 const percentages=(v:number|null,suffix='%')=>v===null?'—':(v>0?'+':'')+
  v.toLocaleString('ko-KR',{minimumFractionDigits:2,maximumFractionDigits:2})+suffix;
