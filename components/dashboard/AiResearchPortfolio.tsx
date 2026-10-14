@@ -12,7 +12,6 @@ const strategyNames:Record<AiStrategy,string>={
 };
 const percentages=(v:number|null,suffix='%')=>v===null?'—':(v>0?'+':'')+
  v.toLocaleString('ko-KR',{minimumFractionDigits:2,maximumFractionDigits:2})+suffix;
-const won=(v:number)=>new Intl.NumberFormat('ko-KR',{maximumFractionDigits:0}).format(v);
 const exitStyles=(v:number|null)=>v===null?styles.muted:v>0?styles.gain:v<0?styles.loss:styles.muted;
 
 export default function AiResearchPortfolio({data}:{data:AiResearchPayload}){
