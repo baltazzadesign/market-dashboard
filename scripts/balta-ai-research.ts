@@ -8,6 +8,7 @@ import { researchStrategies, selectResearchCandidates, markResearchOutcomes } fr
 import { comparePairedDailyReturns, type OutcomeForScorecard } from '../lib/balta-ai-evaluation';
 import { kisTerminal, outputRows } from '../lib/kis-terminal';
 import { parseStockBars, stockDate, stockNumber, type StockBar } from '../lib/stock-flow-model';
+import { retryResearch, RetryableResearchError, failureReason } from '../lib/balta-ai-reliability';
 
 type Signal={trade_date:string;strategy:string;source_date:string;generated_at:string;picks:ResearchPick[]};
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
@@ -16,11 +17,23 @@ if(!base||!secret)throw Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY requir
 const holidays=parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
 
 async function db<T>(resource:string,options:RequestInit={}):Promise<T>{
-  const response=await fetch(base+'/rest/v1/'+resource,{...options,
-    headers:{apikey:secret!,authorization:'Bearer '+secret,'content-type':'application/json',...options.headers},
-    cache:'no-store',signal:AbortSignal.timeout(20000)});
-  if(!response.ok)throw Error('BALTA storage error '+response.status+' '+(await response.text()).slice(0,160));
-  const raw=await response.text();return (raw?JSON.parse(raw):null) as T;
+  return retryResearch(async()=>{
+    let response:Response;
+    try{
+      response=await fetch(base+'/rest/v1/'+resource,{...options,
+        headers:{apikey:secret!,authorization:'Bearer '+secret,'content-type':'application/json',...options.headers},
+        cache:'no-store',signal:AbortSignal.timeout(15000)});
+    }catch{
+      throw new RetryableResearchError('Supabase network/timeout unavailable','http',503);
+    }
+    // Never print response bodies; avoid leaking credentials or private data in Actions logs.
+    if(!response.ok){
+      if([408,429].includes(response.status)||response.status>=500)
+        throw new RetryableResearchError('Supabase temporarily unavailable','http',response.status);
+      throw new Error('BALTA storage HTTP '+response.status);
+    }
+    const raw=await response.text();return (raw?JSON.parse(raw):null) as T;
+  },{attempts:3,delayMs:1500});
 }
 async function insertImmutable(table:string,row:unknown,conflict:string){
   await db(table+'?on_conflict='+conflict,{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},body:JSON.stringify(row)});
@@ -68,26 +81,54 @@ async function morning(date:string){
   console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,signals:picks},null,2));
 }
 async function tradingCalendar(date:string):Promise<string[]>{
-  const body=await kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-index-daily-price','FHPUP02120000',{
-    FID_PERIOD_DIV_CODE:'D',FID_COND_MRKT_DIV_CODE:'U',FID_INPUT_ISCD:'0001',FID_INPUT_DATE_1:date.replaceAll('-','')
-  },0);
-  const dates=[...new Set(outputRows(body.output2).flatMap(r=>{
-    const d=stockDate(r.stck_bsop_date),price=stockNumber(r.bstp_nmix_prpr);
-    return d&&d<=date&&price!==null&&price>0&&!marketClosedReason(d,holidays)?[d]:[];
-  }))].sort();
-  if(!dates.length||dates.at(-1)!==date)throw Error('Today\'s completed market index date is not yet available');
-  return dates;
+  // KIS caches failed responses for 10 seconds; retry once after its cooldown.
+  return retryResearch(async()=>{
+    let body:Awaited<ReturnType<typeof kisTerminal>>;
+    try{
+      body=await kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-index-daily-price','FHPUP02120000',{
+        FID_PERIOD_DIV_CODE:'D',FID_COND_MRKT_DIV_CODE:'U',FID_INPUT_ISCD:'0001',FID_INPUT_DATE_1:date.replaceAll('-','')
+      },0);
+    }catch{throw new RetryableResearchError('KIS index source temporarily unavailable');}
+    const dates=[...new Set(outputRows(body.output2).flatMap(r=>{
+      const d=stockDate(r.stck_bsop_date),price=stockNumber(r.bstp_nmix_prpr);
+      return d&&d<=date&&price!==null&&price>0&&!marketClosedReason(d,holidays)?[d]:[];
+    }))].sort();
+    if(!dates.length||dates.at(-1)!==date)
+      throw new RetryableResearchError('Latest market index date not confirmed');
+    return dates;
+  },{attempts:2,delayMs:11000});
 }
 async function getBars(code:string,tradeDate:string,date:string):Promise<StockBar[]>{
-  const body=await kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice','FHKST03010100',{
-    FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:code,
-    FID_INPUT_DATE_1:tradeDate.replaceAll('-',''),FID_INPUT_DATE_2:date.replaceAll('-',''),
-    FID_PERIOD_DIV_CODE:'D',FID_ORG_ADJ_PRC:'0' // KIS: 0=adjusted, 1=unadjusted
-  },0);
-  return parseStockBars(outputRows(body.output2));
+  return retryResearch(async()=>{
+    let body:Awaited<ReturnType<typeof kisTerminal>>;
+    try{
+      body=await kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice','FHKST03010100',{
+        FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:code,
+        FID_INPUT_DATE_1:tradeDate.replaceAll('-',''),FID_INPUT_DATE_2:date.replaceAll('-',''),
+        FID_PERIOD_DIV_CODE:'D',FID_ORG_ADJ_PRC:'0' // 0=adjusted, 1=unadjusted
+      },0);
+    }catch{throw new RetryableResearchError('KIS stock daily source unavailable');}
+    // Empty rows can mean a halted/delisted security; keep these as unavailable, not zero.
+    return parseStockBars(outputRows(body.output2));
+  },{attempts:2,delayMs:11000});
 }
 function earliestDate(days:number,date:string){
   const d=new Date(date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-days);return d.toISOString().slice(0,10);
+}
+type SavedOutcomeKey={trade_date:string;strategy:string;stock_code:string;horizon:number};
+async function savedOutcomeKeys(from:string):Promise<Set<string>>{
+  const all=new Set<string>();
+  for(let offset=0;offset<=9500;offset+=500){
+    const q=new URLSearchParams({select:'trade_date,strategy,stock_code,horizon',
+      order:'trade_date.asc,stock_code.asc,horizon.asc,strategy.asc',
+      limit:'500',offset:String(offset)});
+    q.set('trade_date','gte.'+from);
+    const page=await db<SavedOutcomeKey[]>('balta_ai_outcomes?'+q.toString());
+    if(!Array.isArray(page))throw Error('Invalid outcome ledger response');
+    for(const x of page)all.add([x.trade_date,x.strategy,x.stock_code,x.horizon].join(':'));
+    if(page.length<500)return all;
+  }
+  throw Error('Outcome ledger exceeded query window');
 }
 async function close(date:string){
   const prior=earliestDate(25,date);
@@ -100,19 +141,30 @@ async function close(date:string){
     return;
   }
   const calendar=await tradingCalendar(date);
-  let attempted=0,pending=0,unavailable=0,sourceErrors=0;
+  const completed=await savedOutcomeKeys(prior);
+  let attempted=0,pending=0,unavailable=0,sourceErrors=0,alreadyRecorded=0;
   const cache=new Map<string,Promise<StockBar[]>>();
   for(const signal of signals){
     if(Date.parse(signal.generated_at)>=Date.parse(signal.trade_date+'T09:00:00+09:00')){
       console.warn('[balta-ai] Late signal excluded from simulated entry',signal.trade_date,signal.strategy);unavailable+=signal.picks.length*4;continue;
     }
     for(const pick of signal.picks){
+      const start=calendar.indexOf(signal.trade_date);
+      const due=[0,1,3,5].filter(h=>start>=0&&calendar[start+h]&&
+        !completed.has([signal.trade_date,signal.strategy,pick.code,h].join(':')));
+      if(!due.length){
+        alreadyRecorded++;
+        if(start<0)pending+=4;
+        continue;
+      }
       const cacheKey=pick.code+':'+signal.trade_date;
       if(!cache.has(cacheKey))cache.set(cacheKey,getBars(pick.code,signal.trade_date,date));
       let bars:StockBar[];
       try{bars=await cache.get(cacheKey)!;}catch{sourceErrors++;cache.delete(cacheKey);continue;}
       const marks=markResearchOutcomes(signal.trade_date,calendar,bars,date);
       for(const mark of marks){
+        if(mark.status==='ready'&&completed.has([signal.trade_date,signal.strategy,pick.code,mark.value.horizon].join(':')))
+          continue;
         if(mark.status!=='ready'){
           if(mark.status==='pending')pending++; else unavailable++;
           continue;
@@ -123,6 +175,7 @@ async function close(date:string){
           entry_open:result.entry_open,exit_close:result.exit_close,return_pct:result.return_pct,
           source:'KIS_DAILY_ADJUSTED'},'trade_date,strategy,stock_code,horizon');
         attempted++;
+        completed.add([signal.trade_date,signal.strategy,pick.code,result.horizon].join(':'));
       }
     }
   }
@@ -134,17 +187,26 @@ async function close(date:string){
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
-  await runLog(date,'close',sourceErrors?'incomplete':'complete',{signals:signals.length,attempted,pending,unavailable,sourceErrors,comparison,
+  await runLog(date,'close',sourceErrors||unavailable?'incomplete':'complete',{signals:signals.length,attempted,alreadyRecorded,pending,unavailable,sourceErrors,comparison,
     preference,caution:'No trading costs, slippage, benchmark adjustment or completed real-money out-of-sample optimization'});
-  console.log(JSON.stringify({date,phase:'close',attempted,pending,unavailable,sourceErrors,comparison,preference},null,2));
+  console.log(JSON.stringify({date,phase:'close',attempted,alreadyRecorded,pending,unavailable,sourceErrors,comparison,preference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
-  if(!['morning','close'].includes(phase??''))throw Error('Use --phase=morning or --phase=close');
+  if(phase!=='morning'&&phase!=='close')throw Error('Use --phase=morning or --phase=close');
   const closed=marketClosedReason(now.date,holidays);
-  if(closed){console.log('Market closed:',closed);return;}
+  if(closed){console.log('[balta-ai] KRX closed; skipped');return;}
   if(phase==='morning'&&now.time>='09:00')throw Error('Morning signal cutoff is 09:00 KST');
   if(phase==='close'&&now.time<'16:30')throw Error('Closing evaluation begins at 16:30 KST');
-  if(phase==='morning')await morning(now.date);else await close(now.date);
+  try{
+    if(phase==='morning')await morning(now.date);else await close(now.date);
+  }catch(error){
+    const reason=failureReason(error);
+    // Safe metadata only: no response bodies or credentials in logs/database.
+    try{await runLog(now.date,phase,'incomplete',{reason,recoverable:reason!=='unknown'});}
+    catch{console.error('[balta-ai] Run failure could not be saved to database');}
+    console.error('[balta-ai] Phase failed',phase,reason);
+    process.exitCode=1;
+  }
 }
-main().catch(e=>{console.error('[balta-ai]',e instanceof Error?e.message:e);process.exitCode=1;});
+main().catch(()=>{console.error('[balta-ai] Unexpected worker failure');process.exitCode=1;});
