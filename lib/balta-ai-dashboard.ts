@@ -6,7 +6,8 @@ export type AiHorizon=0|1|3|5;
 export type AiPick={
   code:string;name:string;market:string;score:number;
   foreign:number;institution:number;pension:number;
-  prior_foreign?:number;prior_institution?:number;reason:string
+  prior_foreign?:number;prior_institution?:number;reason:string;
+  positive_sessions_5?:number;relative_flow_ratio?:number;relative_acceleration?:number;mean_abs_flow_5?:number;five_day_net?:number;feature_version?:string
 };
 export type AiSignal={
   trade_date:string;strategy:AiStrategy;source_date:string;source_observed_at:string;
