@@ -1,0 +1,67 @@
+name: BALTA AI daily paper research
+on:
+  schedule:
+    # UTC 22:37 Sunday-Thursday = KST 07:37 Monday-Friday.
+    - cron: "37 22 * * 0-4"
+    # UTC 08:17 Monday-Friday = KST 17:17 Monday-Friday.
+    - cron: "17 8 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "Paper research phase"
+        required: true
+        type: choice
+        options: [morning, close]
+permissions:
+  contents: read
+concurrency:
+  group: balta-ai-paper-research
+  cancel-in-progress: false
+jobs:
+  paper:
+    if: github.repository == 'baltazzadesign/market-dashboard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      KIS_APPKEY: ${{ secrets.KIS_APPKEY }}
+      KIS_APPSECRET: ${{ secrets.KIS_APPSECRET }}
+      KIS_BASE: ${{ secrets.KIS_BASE }}
+      MARKET_HOLIDAYS: ${{ vars.MARKET_HOLIDAYS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify configured secrets
+        id: guard
+        shell: bash
+        run: |
+          if [ -n "${SUPABASE_URL}" ] && [ -n "${SUPABASE_SERVICE_ROLE_KEY}" ] && [ -n "${KIS_APPKEY}" ] && [ -n "${KIS_APPSECRET}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::BALTA AI secrets are not configured; no research run performed"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+        if: steps.guard.outputs.ready == 'true'
+      - name: Run read-only KIS / write-only paper research worker
+        if: steps.guard.outputs.ready == 'true'
+        shell: bash
+        env:
+          MANUAL_PHASE: ${{ inputs.phase }}
+          SCHEDULE_EXPR: ${{ github.event.schedule }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            phase="${MANUAL_PHASE}"
+          elif [ "${SCHEDULE_EXPR}" = "37 22 * * 0-4" ]; then
+            phase=morning
+          elif [ "${SCHEDULE_EXPR}" = "17 8 * * 1-5" ]; then
+            phase=close
+          else
+            echo "::error::Unknown schedule"; exit 1
+          fi
+          node --import tsx scripts/balta-ai-research.ts "--phase=${phase}"
