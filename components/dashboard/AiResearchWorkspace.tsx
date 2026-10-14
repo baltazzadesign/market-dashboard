@@ -110,7 +110,6 @@ export default function AiResearchWorkspace(){
       <span className={styles.emptyGlyph}>◎</span>
       <strong>아직 저장된 AI 매수 후보가 없습니다.</strong>
       <p>평일 아침 후보 선정이 성공하고 Supabase에 기록되면 이곳에 나타납니다. 후보가 없을 때 임의 종목이나 수익률을 표시하지 않습니다.</p>
-      <a href="https://github.com/baltazzadesign/market-dashboard/actions/workflows/balta-ai-paper-daily.yml" target="_blank" rel="noopener noreferrer">자동 실행 기록 확인 ↗</a>
     </div>}
 
     <div className={styles.metricGrid} aria-label="연구 성과 지표">
