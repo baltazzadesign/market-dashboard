@@ -41,11 +41,12 @@ export default function AiResearchInsights({data,horizon}:{data:AiResearchPayloa
    </div>
    <div className={styles.healthMetrics}>
     <span>전략 기록 <strong>{health.signals}건</strong></span>
+    <span>수급 원천 <strong className={styles[health.sourceFreshness==='stale'?'missed':health.sourceFreshness==='current'?'healthy':'waiting']}>{health.sourceFreshness==='current'?'일치':health.sourceFreshness==='stale'?'날짜 재확인':'첫 자료 대기'}</strong></span>
     <span>선정 후보 <strong>{health.candidates}건</strong></span>
     <span>당일 성과 기록 <strong>{health.zeroDayMarks}건</strong></span>
     <span>시장 지수 성과 <strong>{health.benchmarks}건</strong></span>
    </div>
-   <p className={styles.note}>실행 기록은 DB에 저장된 결과만 반영합니다. 첫 실행 이전·마감 평가 이전·휴장일은 장애로 판단하지 않습니다. 성과 건수는 완료 여부 판정이 아닌 기록량입니다.</p>
+   <p className={styles.note}>실행 기록은 DB에 저장된 결과만 반영합니다. 첫 실행 이전·마감 평가 이전·휴장일은 장애로 판단하지 않습니다. 수급 원천은 직전 거래일 자료와 기록 시점을 대조합니다. 성과 건수는 완료 여부 판정이 아닌 기록량입니다.</p>
   </section>
   <section className={styles.section} aria-label="시장 상태별 수급전략 검증">
    <div className={styles.head}>
