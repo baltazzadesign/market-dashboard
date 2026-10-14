@@ -90,9 +90,16 @@ function earliestDate(days:number,date:string){
   const d=new Date(date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-days);return d.toISOString().slice(0,10);
 }
 async function close(date:string){
-  const calendar=await tradingCalendar(date);
   const prior=earliestDate(25,date);
   const signals=await db<Signal[]>('balta_ai_signals?select=trade_date,strategy,source_date,generated_at,picks&trade_date=gte.'+prior+'&trade_date=lte.'+date+'&order=trade_date.desc&limit=90');
+  // First activation may occur after the morning selection window has passed.
+  // A missing prior signal is not evidence of a 0% return.
+  if(!signals.length){
+    await runLog(date,'close','skipped',{reason:'No pre-open research signals exist yet'});
+    console.log('[balta-ai] No earlier paper-trade signals; closing evaluation skipped');
+    return;
+  }
+  const calendar=await tradingCalendar(date);
   let attempted=0,pending=0,unavailable=0,sourceErrors=0;
   const cache=new Map<string,Promise<StockBar[]>>();
   for(const signal of signals){
