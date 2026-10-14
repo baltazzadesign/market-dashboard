@@ -13,9 +13,9 @@ import styles from './AiResearchWorkspace.module.css';
 const periods=[7,30,60,90] as const;
 const horizons:[AiHorizon,string][]=[[0,'당일 종가'],[1,'1거래일'],[3,'3거래일'],[5,'5거래일']];
 const strategies:({value:'all'|AiStrategy;label:string})[]=[
-  {value:'all',label:'전체 전략'},{value:'FLOW_V1',label:'동반 순매수'},{value:'FLOW_ACCEL_V1',label:'순매수 가속'}
+  {value:'all',label:'전체 전략'},{value:'FLOW_V1',label:'동반 순매수'},{value:'FLOW_ACCEL_V1',label:'순매수 가속'},{value:'FLOW_PERSIST_V1',label:'5일 지속·상대 강도'}
 ];
-const strategyLabel=(value:string)=>value==='FLOW_V1'?'동반 순매수':value==='FLOW_ACCEL_V1'?'순매수 가속':value;
+const strategyLabel=(value:string)=>value==='FLOW_V1'?'동반 순매수':value==='FLOW_ACCEL_V1'?'순매수 가속':value==='FLOW_PERSIST_V1'?'5일 지속·상대 강도':value;
 const nf=new Intl.NumberFormat('ko-KR',{maximumFractionDigits:1});
 function fixed(v:number|null,digits=2){
   return v===null||!Number.isFinite(v)?'—':v.toLocaleString('ko-KR',{minimumFractionDigits:digits,maximumFractionDigits:digits});
@@ -73,7 +73,8 @@ export default function AiResearchWorkspace(){
   const chartData=useMemo(()=>dailyPerformance(signals,outcomes,horizon).map(x=>({
     ...x,date:x.date.slice(5),
     baseline:x.baseline===null?null:Number(x.baseline.toFixed(2)),
-    acceleration:x.acceleration===null?null:Number(x.acceleration.toFixed(2))
+    acceleration:x.acceleration===null?null:Number(x.acceleration.toFixed(2)),
+    persistence:x.persistence===null?null:Number(x.persistence.toFixed(2))
   })),[signals,outcomes,horizon]);
   const outcomeMap=useMemo(()=>makeOutcomeMap(outcomes),[outcomes]);
   const benchmarkMap=useMemo(()=>validBenchmarks(benchmarks),[benchmarks]);
@@ -148,10 +149,11 @@ export default function AiResearchWorkspace(){
               <ReferenceLine y={0} stroke="#665d4a" strokeDasharray="3 5"/>
               <Line name="동반 순매수" type="monotone" dataKey="baseline" stroke="#d6b36c" strokeWidth={2} connectNulls={false} dot={{r:2}} activeDot={{r:5}}/>
               <Line name="순매수 가속" type="monotone" dataKey="acceleration" stroke="#76bdac" strokeWidth={2} connectNulls={false} dot={{r:2}} activeDot={{r:5}}/>
+              <Line name="5일 지속·상대 강도" type="monotone" dataKey="persistence" stroke="#a9a4ff" strokeWidth={2} connectNulls={false} dot={{r:2}} activeDot={{r:5}}/>
             </LineChart>
           </ResponsiveContainer>}
       </div>
-      <div className={styles.legend}><span><i style={{background:'#d6b36c'}}/>동반 순매수 (FLOW_V1)</span><span><i style={{background:'#76bdac'}}/>순매수 가속 (FLOW_ACCEL_V1)</span><span>차트 공백 = 미검증</span></div>
+      <div className={styles.legend}><span><i style={{background:'#d6b36c'}}/>동반 순매수 (FLOW_V1)</span><span><i style={{background:'#76bdac'}}/>순매수 가속 (FLOW_ACCEL_V1)</span><span><i style={{background:'#a9a4ff'}}/>5일 지속·상대 강도 (FLOW_PERSIST_V1)</span><span>차트 공백 = 미검증</span></div>
     </section>
 
     <section className={styles.panel} style={{marginTop:17}}>
@@ -207,7 +209,7 @@ export default function AiResearchWorkspace(){
                 stock.return_pct-index.return_pct:null;
               return <tr key={[s.trade_date,s.strategy,p.code].join(':')}>
                 <td><small className={styles.strategy}>{strategyLabel(s.strategy)}</small><br/>#{i+1}</td>
-                <td><Link href={'/stock-flow?code='+encodeURIComponent(p.code)} className={styles.stockName}>{p.name}</Link><small className={styles.code}>{p.code} · {p.market.toUpperCase()}</small></td>
+                <td><Link href={'/stock-flow?code='+encodeURIComponent(p.code)} className={styles.stockName}>{p.name}</Link><small className={styles.code}>{p.code} · {p.market.toUpperCase()}</small>{p.positive_sessions_5!==undefined&&<small className={styles.code}>동반매수 {p.positive_sessions_5}/5일 · 상대 {fixed(p.relative_flow_ratio??null,2)}배</small>}</td>
                 <td className={styles.foreign}>{fixed(p.foreign,1)}</td>
                 <td className={styles.institution}>{fixed(p.institution,1)}</td>
                 <td>{fixed(p.score,1)}</td>
@@ -217,7 +219,7 @@ export default function AiResearchWorkspace(){
             }))}{!selected.some(s=>s.picks.length)&&<tr><td colSpan={10} className={styles.noRows}>선택한 날짜와 전략에 저장된 후보가 없습니다.</td></tr>}
           </tbody></table>
         </div>
-        <div className={styles.tableNote}>금액·점수 단위: 억원. 수익률은 저장된 KIS 수정주가 기반 모의 평가이며, 빈 값은 수익률 0%가 아니라 미검증을 의미합니다. 시장 초과는 위에서 선택한 보유 기간에 대한 값입니다.</div>
+        <div className={styles.tableNote}>외국인·기관 순매수는 억원, 지속·상대 강도 점수는 무차원입니다. 5일 전략은 거래대금 대비 순매수 비율이 아니라 종목 자체 5일 수급 규모로 정규화한 실험입니다. 수익률은 저장된 KIS 수정주가 기반 모의 평가이며, 빈 값은 수익률 0%가 아니라 미검증을 의미합니다. 시장 초과는 위에서 선택한 보유 기간에 대한 값입니다.</div>
       </section>
 
       <aside className={styles.sideColumn}>
@@ -249,7 +251,7 @@ export default function AiResearchWorkspace(){
 
     <footer className={styles.disclaimer}>
       <strong>연구 자료 · 실거래 아님</strong>
-      외국인·기관 수급 기반 후보를 매일 기록하는 실험입니다. 시가 체결 가능성, 호가 잔량, 거래비용·세금·슬리피지, 지수 대비 초과수익은 반영하지 않았습니다. 과거 모의 성과는 미래 수익을 보장하지 않으며 매수 권유가 아닙니다.
+      외국인·기관 수급 기반 후보를 매일 기록하는 실험입니다. 5일 수급 정규화에는 거래대금·시가총액 필터가 적용되지 않았습니다. 시가 체결 가능성, 호가 잔량, 거래비용·세금·슬리피지, 지수 대비 초과수익은 반영하지 않았습니다. 과거 모의 성과는 미래 수익을 보장하지 않으며 매수 권유가 아닙니다.
     </footer>
   </main>;
 }

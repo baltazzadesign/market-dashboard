@@ -5,6 +5,7 @@ on:
       - "lib/balta-ai-model.ts"
       - "lib/balta-ai-dashboard.ts"
       - "lib/balta-ai-benchmark.ts"
+      - "lib/balta-ai-flow-strategy.ts"
       - "components/dashboard/AiResearchWorkspace.tsx"
       - "components/dashboard/AiResearchWorkspace.module.css"
       - "components/dashboard/TerminalHeader.tsx"
@@ -17,12 +18,14 @@ on:
       - "tests/balta-ai-model.test.ts"
       - "tests/balta-ai-dashboard.test.ts"
       - "tests/balta-ai-benchmark.test.ts"
+      - "tests/balta-ai-flow-strategy.test.ts"
       - "tests/balta-ai-dashboard-api.test.ts"
       - "tests/balta-ai-evaluation.test.ts"
       - "tests/balta-ai-reliability.test.ts"
       - ".github/workflows/balta-ai-paper-daily.yml"
       - "supabase/migrations/20261014_balta_ai_research.sql"
       - "supabase/migrations/20261014_balta_ai_benchmarks.sql"
+      - "supabase/migrations/20261014_balta_ai_flow_persist_v1.sql"
       - ".github/workflows/balta-ai-tests.yml"
   workflow_dispatch:
 permissions:
@@ -38,7 +41,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts tests/balta-ai-dashboard.test.ts tests/balta-ai-benchmark.test.ts tests/balta-ai-dashboard-api.test.ts
+      - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts tests/balta-ai-dashboard.test.ts tests/balta-ai-benchmark.test.ts tests/balta-ai-flow-strategy.test.ts tests/balta-ai-dashboard-api.test.ts
       - run: npm run typecheck
       - run: npm run build
   connectivity:

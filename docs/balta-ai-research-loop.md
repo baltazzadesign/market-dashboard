@@ -28,6 +28,16 @@ This is a **paper-research prototype**, not a live trading system. Its pure sign
 6. The GitHub CI runs offline candidate and outcome tests and TypeScript compilation. End-to-end KIS/Supabase response simulations, idempotency, price adjustments, throughput, and live first-run validation remain required.
 7. Add transaction costs, market benchmark, a measured baseline and chronological walk-forward comparison before updating any signal selection weights.
 
+## Experimental version 3: FLOW_PERSIST_V1 (2026-10-14)
+- Baselines `FLOW_V1` and `FLOW_ACCEL_V1` retain exactly their original frozen candidate logic and history.
+- Only the five actual market sessions ending immediately before the signal are eligible. Missing sessions, future-observed snapshots, or missing foreign/institution net amounts are not imputed.
+- Per-stock, require the latest foreign and institutional flow both positive and their sum >=1 eok KRW. Across the five days, require at least three sessions in which both parties were net buyers.
+- Divide latest combined net flow by `max(1 eok KRW, average(abs(foreign+institution)) over 5 sessions)`. Clamp the relative ratio to at most 5 for ranking; combine with 5-day buying continuity and relative one-session acceleration using fixed research weights. Persist raw components, feature version and as-of dates in each selected pick.
+- This is **within-stock flow normalization only**, NOT net buying as a fraction of transaction value or market cap. Those denominators are not available in the historical `investor_flow_history` payload, and no unverified liquidity filter is applied.
+- The third strategy is stored under a distinct immutable `FLOW_PERSIST_V1` key and is visible in the research dashboard, alongside historical returns and KOSPI/KOSDAQ-matched index excess returns.
+- Its one-day performance is compared to the frozen `FLOW_V1` baseline on matched chronological trading days (min 30 training + 10 holdout). This is an audit hypothesis, not self-training, automatic allocation or proof of edge.
+- Read-only staging source audit for 2026-10-13: 2,633 archived stocks, 2,520 with complete 5-session buy/sell amounts, 78 passing provisional continuous-buy conditions. Not a profit or predictability measurement.
+
 ## Critical implementation notes
 - The stock investor history is collected **after 16:30 KST**, so 17:00 KST is the preliminary close-evaluation window; if KIS daily prices have not settled, defer and retry. Some investor-flow data may be collected later than 17:00.
 - The ChatGPT 08:00/17:00 reminder is independent of the backend worker. Reminders alone do not guarantee DB writes or redeploy code.
