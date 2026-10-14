@@ -1,6 +1,7 @@
 import { hasDashboardAccess } from '@/lib/balta-access';
 import { MarketDataError, marketError } from '@/lib/balta-data';
 import { kstParts } from '@/lib/balta-model';
+import { parseAdditionalHolidays } from '@/lib/market-calendar';
 import { researchRequest } from '@/lib/research-data';
 import type { AiSignal, AiOutcome, AiRun, AiResearchPayload } from '@/lib/balta-ai-dashboard';
 
@@ -40,12 +41,13 @@ export async function GET(request:Request){
     if(!['7','30','60','90'].includes(raw))throw new MarketDataError('조회 기간을 확인해 주세요.',400);
     const days=Number(raw),asOf=kstParts().date,from=beginning(asOf,days);
     const [signals,outcomes,benchmarks,runs]=await Promise.all([
-      allRows('balta_ai_signals','trade_date,strategy,source_date,source_observed_at,generated_at,picks',from,asOf,request.signal),
+      allRows('balta_ai_signals','trade_date,strategy,source_date,source_observed_at,generated_at,market_snapshot,picks',from,asOf,request.signal),
       allRows('balta_ai_outcomes','trade_date,strategy,stock_code,horizon,return_pct,entry_date,exit_date,entry_open,exit_close',from,asOf,request.signal),
       allRows('balta_ai_benchmarks','trade_date,market,horizon,entry_date,exit_date,entry_open,exit_close,return_pct',from,asOf,request.signal),
       allRows('balta_ai_run_log','trade_date,phase,result,executed_at,details',from,asOf,request.signal)
     ]);
-    const result:AiResearchPayload={ok:true,asOf,lookbackDays:days,
+    const result:AiResearchPayload={ok:true,asOf,serverNow:new Date().toISOString(),
+      additionalHolidays:parseAdditionalHolidays(process.env.MARKET_HOLIDAYS),lookbackDays:days,
       signals:signals as unknown as AiSignal[],
       outcomes:outcomes as unknown as AiOutcome[],
       benchmarks:benchmarks as AiResearchPayload['benchmarks'],
