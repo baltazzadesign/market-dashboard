@@ -40,6 +40,19 @@ This is a **paper-research prototype**, not a live trading system. Its pure sign
 - The API exposes only the last 30 calendar days of simulation records to cap response size even if the main screen is filtered to 60/90 days; this coverage is declared in the response and UI. Later, extend with server-side aggregates for a true long-period report.
 - Vendor-adjusted historical OHLC, unknown intraday order, opening gaps and unmodeled liquidity make this an **exploratory backtest**, not a replicable live trade history or a calibrated expected return.
 
+## Paper stop follow-up + prior-day bearish no-entry (2026-10-14)
+
+- Hypothesis: in a falling market, repeated tight stops can lose more than **declining new entries entirely**, but skipping may forgo rebounds. No directional claim is made before real follow-up samples exist.
+- **Frozen admission test**: prior trade date 15:30 market snapshot already embedded at recommendation time, as validated by `classifyFrozenSignal()`. Only regime `falling` is skipped. The `unknown` regime is excluded, never reclassified ex post. Up/sideways scenarios hypothetically enter at the research convention's day-open price. The original four strategies and outcomes are not changed.
+- Skipped recommendation returns are **explicit cash 0%** with no fees. Entered trades incur a researcher-selected flat roundtrip cost (%p). The always-trade counterfactual charges the same cost on *all* entered hypothetical trades. Evaluation compares the same historical stocks and same fixed horizon, not two disjoint profitable cohorts.
+- Publish both foregone winners and avoided losers among skipped names. Actual trade profits, cash interest, leverage, rebalance frequency, portfolio capital allocation, maximum drawdown and risk-adjusted alpha cannot be inferred from this per-pick unweighted experiment.
+- **Stop event**: archived `BALTA_OHLC_EXIT_V1` stop in `STOP_3`, `TP5_SL3` or `TP8_SL5`. Deduplicate different horizon records referencing the same stop date and scenario; do not count a profit-taking sale as a stop.
+- **Post-stop follow-up**: after a simulated stop, wait for exactly 1, 3 and 5 **subsequent KRX sessions**, then archive the close-vs-stop-price return, highest-price recovery of the original entry *after the stop day*, closing-price recovery at the horizon, and lowest-price downside since the stop. Day-of-stop highs are excluded because an OHLC candle cannot confirm whether the high occurred before the stop.
+- Immutable follow-ups live in RLS-protected `balta_ai_stop_followups`; they do not rewrite original signals, simulated exits or stock/index outcomes. An uncompleted future horizon is **pending**, a missing stock bar is **unavailable**, and neither yields a made-up zero.
+- Sample gates: at least 30 observations spanning at least 10 distinct signal dates to display gross/net return or recovery percentages in either study; until then, show counts and waiting state. Observations from multiple candidate strategies can overlap and are **not statistically independent**.
+- Raw stocks are retrieved by the existing scheduled KIS after-close worker. No broker execution, actual fill, premium execution data, real short selling or purchases are involved.
+- Analysis window in the server UI: 30 calendar days of follow-ups, stated explicitly; underlying old candidate signals may be queried over 7/30/60/90 days for the no-entry comparison.
+
 ## Experimental version 3: FLOW_PERSIST_V1 (2026-10-14)
 - Baselines `FLOW_V1` and `FLOW_ACCEL_V1` retain exactly their original frozen candidate logic and history.
 - Only the five actual market sessions ending immediately before the signal are eligible. Missing sessions, future-observed snapshots, or missing foreign/institution net amounts are not imputed.
