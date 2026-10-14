@@ -15,7 +15,7 @@ const base:PersistentFlowPick={
  relative_flow_ratio:2,positive_sessions_5:4,mean_abs_flow_5:7.5,
  five_day_net:40,relative_acceleration:0.8,feature_version:'five_session_self_normalized_v1'
 };
-const obs=(bars=rows)=>({date:end,bars:parseTurnoverBars(bars),capEok:3000,quotePrice:10500,
+const obs=(bars=rows)=>({date:end,bars:parseTurnoverBars(bars,end),capEok:3000,quotePrice:10500,
  capturedAt:'2026-10-14T00:00:00Z'});
 test('KIS daily transaction values are KRW and converted into units of 100 million',()=>{
  const parsed=parseTurnoverBars(rows,end);
