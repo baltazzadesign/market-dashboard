@@ -83,7 +83,8 @@ test('pre-open bearish skip avoids a loss but reports forgone rebound with cash 
  const r=evaluateBearMarketSkip(signals,out,1,'FLOW_V1',.3);
  assert.equal(r.traded,1);assert.equal(r.skipped,1);
  assert.equal(r.avoidedLosingTrades,1);assert.equal(r.foregoneWinningTrades,0);
- assert.equal(r.unconditionalNet,-.3);assert.equal(r.conditionalNet,2.35);
+ assert.ok(r.unconditionalNet!==null&&Math.abs(r.unconditionalNet-(-.3))<1e-8);
+ assert.ok(r.conditionalNet!==null&&Math.abs(r.conditionalNet-2.35)<1e-8);
  assert.equal(r.netDifference,2.65);assert.equal(r.status,'low_sample');
  const rising=evaluateBearMarketSkip([signal(days[0],'falling','005930')],[outcome('005930',8)],1);
  assert.equal(rising.foregoneWinningTrades,1);
