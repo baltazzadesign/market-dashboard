@@ -18,9 +18,9 @@ const annual=(year:number,op:number,fcf:number,receipt:string):CashFlowYear=>({
  warnings:[],fundingItems:[]
 });
 const years=[
- annual(2023,100,65,'20240401000000'),
- annual(2024,115,75,'20250320000000'),
- annual(2025,140,85,'20260320000000')
+ annual(2023,10_000_000_000,6_500_000_000,'20240401000000'),
+ annual(2024,11_500_000_000,7_500_000_000,'20250320000000'),
+ annual(2025,14_000_000_000,8_500_000_000,'20260320000000')
 ];
 const report=(partial:Partial<CashFlowResponse>={}):CashFlowResponse=>({
  ok:true,code:'005930',name:'테스트기업',corpCode:'00123456',
@@ -37,7 +37,7 @@ test('cash experiment retains distinct original flow signal while freezing publi
  assert.equal(result.pick.cash_feature_version,CASH_FEATURE_VERSION);
  assert.equal(result.pick.cash_year,2025);
  assert.equal(result.pick.cash_receipts.length,3);
- assert.equal(result.pick.cash_fcf_eok,0.00000085);
+ assert.equal(result.pick.cash_fcf_eok,85);
  assert.equal(result.pick.cash_regime,'cash_generative');
  assert.equal(pick().score,3);
  assert.ok(result.pick.score>3);
