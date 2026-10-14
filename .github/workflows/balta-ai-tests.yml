@@ -1,0 +1,25 @@
+name: BALTA AI research tests
+on:
+  pull_request:
+    paths:
+      - "lib/balta-ai-model.ts"
+      - "scripts/balta-ai-research.ts"
+      - "tests/balta-ai-model.test.ts"
+      - "supabase/migrations/20261014_balta_ai_research.sql"
+      - ".github/workflows/balta-ai-tests.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: node --import tsx --test tests/balta-ai-model.test.ts
+      - run: npm run typecheck
