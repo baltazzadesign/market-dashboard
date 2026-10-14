@@ -5,6 +5,7 @@ import { kstParts } from '../lib/balta-model';
 import { marketClosedReason, parseAdditionalHolidays } from '../lib/market-calendar';
 import type { ResearchHistoryRow, ResearchPick } from '../lib/balta-ai-model';
 import { researchStrategies, selectResearchCandidates, markResearchOutcomes } from '../lib/balta-ai-model';
+import { comparePairedDailyReturns, type OutcomeForScorecard } from '../lib/balta-ai-evaluation';
 import { kisTerminal, outputRows } from '../lib/kis-terminal';
 import { parseStockBars, stockDate, stockNumber, type StockBar } from '../lib/stock-flow-model';
 
@@ -29,6 +30,22 @@ async function runLog(date:string,phase:string,result:string,details:unknown){
     headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
     body:JSON.stringify({trade_date:date,phase,result,details,executed_at:new Date().toISOString()})});
 }
+async function loadOutcomeRows(from:string,onlyHorizon?:number):Promise<OutcomeForScorecard[]>{
+  const all:OutcomeForScorecard[]=[];
+  for(let offset=0;offset<=9500;offset+=500){
+    const params=new URLSearchParams({
+      select:'trade_date,strategy,horizon,return_pct',order:'trade_date.asc,stock_code.asc,horizon.asc,strategy.asc',
+      limit:'500',offset:String(offset)
+    });
+    params.set('trade_date','gte.'+from);
+    if(onlyHorizon!==undefined)params.set('horizon','eq.'+onlyHorizon);
+    const page=await db<OutcomeForScorecard[]>('balta_ai_outcomes?'+params.toString());
+    if(!Array.isArray(page))throw Error('Research outcome query returned an unexpected response');
+    all.push(...page);
+    if(page.length<500)return all;
+  }
+  throw Error('Too many outcome rows for one scoring window; reduce the query date range');
+}
 async function morning(date:string){
   const existing=await db<Pick<Signal,'strategy'>[]>('balta_ai_signals?select=strategy&trade_date=eq.'+date);
   if(existing.length===researchStrategies.length){console.log('Morning signal already frozen for',date);return;}
@@ -38,16 +55,17 @@ async function morning(date:string){
   const market=await db<{trade_date:string;snapshot:unknown;updated_at:string}[]>('market_daily?select=trade_date,snapshot,updated_at&trade_date=lte.'+source.date+'&order=trade_date.desc&limit=1');
   // Do not use a market snapshot that was written after the morning signal time.
   const validMarket=market[0]&&Date.parse(market[0].updated_at)<=Date.parse(observedAt)?market[0]:null;
+  const preference=comparePairedDailyReturns(await loadOutcomeRows(earliestDate(120,date),1));
   for(const strategy of researchStrategies)if(!existing.some(s=>s.strategy===strategy)){
     await insertImmutable('balta_ai_signals',{trade_date:date,strategy,source_date:source.date,
       source_observed_at:source.observed_at,source_snapshot:{
         rows:sourceRows.map(r=>({date:r.date,universe_date:r.universe_date,observed_at:r.observed_at})),
         feature_contract:'foreign/institution/pension daily net in eok_krw; prior values fixed in picks',
-        universe:coverage.universe,qualified:coverage.qualified
+        universe:coverage.universe,qualified:coverage.qualified,preference
       },market_snapshot:validMarket??{},picks:picks[strategy]},'trade_date,strategy');
   }
-  await runLog(date,'morning','complete',{source_date:source.date,coverage,per_strategy:Object.fromEntries(researchStrategies.map(s=>[s,picks[s].length]))});
-  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,signals:picks},null,2));
+  await runLog(date,'morning','complete',{source_date:source.date,coverage,preference,per_strategy:Object.fromEntries(researchStrategies.map(s=>[s,picks[s].length]))});
+  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,signals:picks},null,2));
 }
 async function tradingCalendar(date:string):Promise<string[]>{
   const body=await kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-index-daily-price','FHPUP02120000',{
@@ -73,7 +91,7 @@ function earliestDate(days:number,date:string){
 }
 async function close(date:string){
   const calendar=await tradingCalendar(date);
-  const prior=earliestDate(45,date);
+  const prior=earliestDate(25,date);
   const signals=await db<Signal[]>('balta_ai_signals?select=trade_date,strategy,source_date,generated_at,picks&trade_date=gte.'+prior+'&trade_date=lte.'+date+'&order=trade_date.desc&limit=90');
   let attempted=0,pending=0,unavailable=0,sourceErrors=0;
   const cache=new Map<string,Promise<StockBar[]>>();
@@ -101,8 +119,8 @@ async function close(date:string){
       }
     }
   }
-  const summary=await db<{trade_date:string;strategy:string;horizon:number;return_pct:number}[]>(
-    'balta_ai_outcomes?select=trade_date,strategy,horizon,return_pct&trade_date=gte.'+prior+'&order=trade_date.desc&limit=1000');
+  const summary=await loadOutcomeRows(prior);
+  const preference=comparePairedDailyReturns(await loadOutcomeRows(earliestDate(120,date),1));
   const comparison=Object.fromEntries(researchStrategies.map(strategy=>[strategy,[0,1,3,5].map(horizon=>{
     const r=summary.filter(s=>s.strategy===strategy&&s.horizon===horizon);
     const avg=r.length?r.reduce((a,b)=>a+Number(b.return_pct),0)/r.length:null;
@@ -110,8 +128,8 @@ async function close(date:string){
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
   await runLog(date,'close',sourceErrors?'incomplete':'complete',{signals:signals.length,attempted,pending,unavailable,sourceErrors,comparison,
-    caution:'No trading costs, slippage, benchmark adjustment or completed out-of-sample optimization'});
-  console.log(JSON.stringify({date,phase:'close',attempted,pending,unavailable,sourceErrors,comparison},null,2));
+    preference,caution:'No trading costs, slippage, benchmark adjustment or completed real-money out-of-sample optimization'});
+  console.log(JSON.stringify({date,phase:'close',attempted,pending,unavailable,sourceErrors,comparison,preference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
