@@ -3,11 +3,19 @@ on:
   pull_request:
     paths:
       - "lib/balta-ai-model.ts"
+      - "lib/balta-ai-dashboard.ts"
+      - "components/dashboard/AiResearchWorkspace.tsx"
+      - "components/dashboard/AiResearchWorkspace.module.css"
+      - "components/dashboard/TerminalHeader.tsx"
+      - "app/ai-research/page.tsx"
+      - "app/api/ai-research/route.ts"
       - "lib/balta-ai-evaluation.ts"
       - "lib/balta-ai-reliability.ts"
       - "scripts/balta-ai-research.ts"
       - "scripts/balta-ai-preflight.ts"
       - "tests/balta-ai-model.test.ts"
+      - "tests/balta-ai-dashboard.test.ts"
+      - "tests/balta-ai-dashboard-api.test.ts"
       - "tests/balta-ai-evaluation.test.ts"
       - "tests/balta-ai-reliability.test.ts"
       - ".github/workflows/balta-ai-paper-daily.yml"
@@ -27,8 +35,9 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts
+      - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts tests/balta-ai-dashboard.test.ts tests/balta-ai-dashboard-api.test.ts
       - run: npm run typecheck
+      - run: npm run build
   connectivity:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
