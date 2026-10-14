@@ -10,14 +10,15 @@ import { kisTerminal, outputRows } from '../lib/kis-terminal';
 import { parseStockBars, stockDate, stockNumber, type StockBar } from '../lib/stock-flow-model';
 import { retryResearch, RetryableResearchError, failureReason } from '../lib/balta-ai-reliability';
 import { parseIndexBars, benchmarkKey, type AiMarket, type AiBenchmark } from '../lib/balta-ai-benchmark';
-import { fiveDayPersistentFlow, FLOW_PERSIST_V1 } from '../lib/balta-ai-flow-strategy';
+import { fiveDayPersistentFlow, FLOW_PERSIST_V1, type PersistentFlowPick } from '../lib/balta-ai-flow-strategy';
+import { FLOW_LIQUID_V1, evaluateLiquidity, parseMarketCap, parseTurnoverBars, type LiquidityPick } from '../lib/balta-ai-liquidity';
 
 type Signal={trade_date:string;strategy:string;source_date:string;generated_at:string;picks:ResearchPick[]};
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
 const secret=process.env.SUPABASE_SERVICE_ROLE_KEY;
 if(!base||!secret)throw Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required');
 const holidays=parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
-const scoredStrategies=[...researchStrategies,FLOW_PERSIST_V1] as const;
+const scoredStrategies=[...researchStrategies,FLOW_PERSIST_V1,FLOW_LIQUID_V1] as const;
 
 async function db<T>(resource:string,options:RequestInit={}):Promise<T>{
   return retryResearch(async()=>{
@@ -62,6 +63,48 @@ async function loadOutcomeRows(from:string,onlyHorizon?:number):Promise<OutcomeF
   }
   throw Error('Too many outcome rows for one scoring window; reduce the query date range');
 }
+async function preOpenLiquidityCandidates(sourceDate:string,tradeDate:string,sourceCalendar:string[],
+  initial:PersistentFlowPick[], asOf:string
+):Promise<{picks:LiquidityPick[];stats:{preselected:number;verified:number;rejected:number;sourceFailures:number;cutoff:boolean}}> {
+  const unique=new Map<string,PersistentFlowPick>();
+  for(const row of initial)if(!unique.has(row.code))unique.set(row.code,row);
+  const screening=[...unique.values()].slice(0,30);
+  const picks:LiquidityPick[]=[];
+  let verified=0,rejected=0,sourceFailures=0,cutoff=false;
+  const oldest=[...new Set(sourceCalendar)].filter(x=>x<=sourceDate).sort().slice(-20)[0];
+  if(!oldest)return {picks,stats:{preselected:screening.length,verified,rejected:screening.length,sourceFailures,cutoff}};
+  for(const p of screening){
+    // A scheduled delay must not turn pre-market analysis into an intraday, look-ahead backtest.
+    if(kstParts().date!==tradeDate || kstParts().time>='08:53'){cutoff=true;break;}
+    try{
+      const [chart,quote]=await Promise.all([
+        kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice','FHKST03010100',{
+          FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:p.code,
+          FID_INPUT_DATE_1:oldest.replaceAll('-',''),FID_INPUT_DATE_2:sourceDate.replaceAll('-',''),
+          FID_PERIOD_DIV_CODE:'D',FID_ORG_ADJ_PRC:'1'
+        },0),
+        kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-price','FHKST01010100',{
+          FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:p.code
+        },0)
+      ]);
+      const cap=parseMarketCap(quote.output);
+      const observed=new Date().toISOString();
+      if(!cap){rejected++;continue;}
+      const decision=evaluateLiquidity(p,{
+        date:sourceDate,bars:parseTurnoverBars(chart.output2,sourceDate),
+        ...cap,capturedAt:observed
+      },sourceCalendar,sourceDate,observed);
+      if(!decision.valid||!decision.pick){rejected++;continue;}
+      verified++;picks.push(decision.pick);
+    }catch{
+      sourceFailures++;
+    }
+  }
+  picks.sort((a,b)=>b.score-a.score||a.code.localeCompare(b.code));
+  return {picks:picks.slice(0,10),stats:{
+    preselected:screening.length,verified,rejected,sourceFailures,cutoff
+  }};
+}
 async function morning(date:string){
   const existing=await db<Pick<Signal,'strategy'>[]>('balta_ai_signals?select=strategy&trade_date=eq.'+date);
   const allStrategies=scoredStrategies;
@@ -77,24 +120,46 @@ async function morning(date:string){
   const pastOutcomes=await loadOutcomeRows(earliestDate(120,date),1);
   const preference=comparePairedDailyReturns(pastOutcomes);
   const persistentPreference=comparePairedDailyReturns(pastOutcomes,30,10,FLOW_PERSIST_V1);
-  for(const strategy of allStrategies)if(!existing.some(s=>s.strategy===strategy)){
+  const liquidityPreference=comparePairedDailyReturns(pastOutcomes,30,10,FLOW_LIQUID_V1);
+  // Freeze the established three strategies BEFORE any additional KIS data calls.
+  for(const strategy of allStrategies)if(strategy!==FLOW_LIQUID_V1&&!existing.some(s=>s.strategy===strategy)){
     if(strategy===FLOW_PERSIST_V1&&experimental.status!=='ready')continue;
     await insertImmutable('balta_ai_signals',{trade_date:date,strategy,source_date:source.date,
       source_observed_at:source.observed_at,source_snapshot:{
         rows:sourceRows.map(r=>({date:r.date,universe_date:r.universe_date,observed_at:r.observed_at})),
         feature_contract:'foreign/institution/pension daily net in eok_krw; prior values fixed in picks',
-        universe:coverage.universe,qualified:coverage.qualified,preference,persistentPreference,
+        universe:coverage.universe,qualified:coverage.qualified,preference,persistentPreference,liquidityPreference,
         experiment:strategy===FLOW_PERSIST_V1?{status:experimental.status,reason:experimental.reason,
           sourceDates:experimental.sourceDates,coverage:experimental.coverage,
           normalization:'5-session own mean absolute foreign+institution net flow (floor 1eok); not turnover-adjusted'}:null
       },market_snapshot:validMarket??{},picks:selections[strategy]},'trade_date,strategy');
   }
-  await runLog(date,'morning',experimental.status==='ready'?'complete':'incomplete',{
-    source_date:source.date,coverage,preference,persistentPreference,
+  let liquidity:{picks:LiquidityPick[];stats:{preselected:number;verified:number;rejected:number;sourceFailures:number;cutoff:boolean}}|null=null;
+  if(experimental.status==='ready'&&!existing.some(s=>s.strategy===FLOW_LIQUID_V1)){
+    const allowed=new Map(experimental.picks.map(p=>[p.code,p]));
+    // Only verified five-day candidates are eligible. At most 10 distinct symbols => <=20 KIS calls.
+    liquidity=await preOpenLiquidityCandidates(source.date,date,source.snapshot.calendar,[...allowed.values()],observedAt);
+    if(!liquidity.stats.cutoff&&liquidity.stats.sourceFailures===0&&kstParts().time<'09:00'){
+      await insertImmutable('balta_ai_signals',{trade_date:date,strategy:FLOW_LIQUID_V1,
+        source_date:source.date,source_observed_at:source.observed_at,
+        source_snapshot:{
+          rows:sourceRows.map(r=>({date:r.date,universe_date:r.universe_date,observed_at:r.observed_at})),
+          feature_contract:'20 verified KRX sessions: acml_tr_pbmn KRW -> eok; premarket hts_avls in eok',
+          preselection:'FLOW_PERSIST_V1 top 10 only; not full-universe liquidity ranking',
+          as_of_signal:observedAt,liquidity:liquidity.stats,liquidityPreference
+        },market_snapshot:validMarket??{},picks:liquidity.picks
+      },'trade_date,strategy');
+    }
+  }
+  const liquidRecorded=existing.some(s=>s.strategy===FLOW_LIQUID_V1)||
+    (liquidity!==null&&!liquidity.stats.cutoff&&liquidity.stats.sourceFailures===0&&kstParts().time<'09:00');
+  await runLog(date,'morning',experimental.status==='ready'&&liquidRecorded?'complete':'incomplete',{
+    source_date:source.date,coverage,preference,persistentPreference,liquidityPreference,
+    liquidity:liquidity?.stats??null,
     experimental:{status:experimental.status,reason:experimental.reason,coverage:experimental.coverage},
-    per_strategy:Object.fromEntries(allStrategies.map(s=>[s,s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length]))
+    per_strategy:Object.fromEntries(allStrategies.map(s=>[s,s===FLOW_LIQUID_V1?(liquidRecorded?(liquidity?.picks.length??null):null):(s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length)]))
   });
-  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,persistentPreference,experimentStatus:experimental.status,signals:selections},null,2));
+  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,persistentPreference,experimentStatus:experimental.status,liquidity:liquidity?.stats??null,signals:selections},null,2));
 }
 async function tradingCalendar(date:string):Promise<string[]>{
   // KIS caches failed responses for 10 seconds; retry once after its cooldown.
@@ -263,6 +328,7 @@ async function close(date:string){
   const priorResults=await loadOutcomeRows(earliestDate(120,date),1);
   const preference=comparePairedDailyReturns(priorResults);
   const persistentPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_PERSIST_V1);
+  const liquidityPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_LIQUID_V1);
   const comparison=Object.fromEntries(scoredStrategies.map(strategy=>[strategy,[0,1,3,5].map(horizon=>{
     const r=summary.filter(s=>s.strategy===strategy&&s.horizon===horizon);
     const avg=r.length?r.reduce((a,b)=>a+Number(b.return_pct),0)/r.length:null;
@@ -270,8 +336,8 @@ async function close(date:string){
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
   await runLog(date,'close',sourceErrors||unavailable||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
-    preference,persistentPreference,caution:'Benchmark comparisons require same entry/exit dates. No trading costs, slippage or validated real-money alpha.'});
-  console.log(JSON.stringify({date,phase:'close',attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference},null,2));
+    preference,persistentPreference,liquidityPreference,caution:'Benchmark comparisons require same entry/exit dates. No trading costs, slippage or validated real-money alpha.'});
+  console.log(JSON.stringify({date,phase:'close',attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
