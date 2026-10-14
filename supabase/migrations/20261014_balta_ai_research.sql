@@ -28,7 +28,7 @@ create table if not exists public.balta_ai_outcomes (
   source text not null default 'KIS_DAILY_ADJUSTED',
   primary key (trade_date,strategy,stock_code,horizon),
   foreign key (trade_date,strategy) references public.balta_ai_signals(trade_date,strategy) on delete restrict,
-  check (exit_date>=entry_date)
+  check (entry_date=trade_date and exit_date>=entry_date)
 );
 create index if not exists balta_ai_outcomes_eval_idx on public.balta_ai_outcomes (evaluated_at desc);
 create table if not exists public.balta_ai_run_log (
@@ -43,5 +43,6 @@ alter table public.balta_ai_signals enable row level security;
 alter table public.balta_ai_outcomes enable row level security;
 alter table public.balta_ai_run_log enable row level security;
 revoke all on public.balta_ai_signals,public.balta_ai_outcomes,public.balta_ai_run_log from anon,authenticated;
-grant select,insert,update on public.balta_ai_signals,public.balta_ai_outcomes,public.balta_ai_run_log to service_role;
+grant select,insert on public.balta_ai_signals,public.balta_ai_outcomes to service_role;
+grant select,insert,update on public.balta_ai_run_log to service_role;
 commit;
