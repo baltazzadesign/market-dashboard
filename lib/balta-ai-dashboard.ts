@@ -1,7 +1,7 @@
 import type { AiBenchmark } from './balta-ai-benchmark';
 // Pure BALTA AI research dashboard analytics. No data fetching, model training or trade execution.
-export type AiStrategy='FLOW_V1'|'FLOW_ACCEL_V1';
-export const aiStrategies:AiStrategy[]=['FLOW_V1','FLOW_ACCEL_V1'];
+export type AiStrategy='FLOW_V1'|'FLOW_ACCEL_V1'|'FLOW_PERSIST_V1';
+export const aiStrategies:AiStrategy[]=['FLOW_V1','FLOW_ACCEL_V1','FLOW_PERSIST_V1'];
 export type AiHorizon=0|1|3|5;
 export type AiPick={
   code:string;name:string;market:string;score:number;
@@ -64,13 +64,13 @@ export function cohortPerformance(
   }
   return performance(values);
 }
-export type DailyPoint={date:string;baseline:number|null;acceleration:number|null;baselineCount:number;accelerationCount:number};
+export type DailyPoint={date:string;baseline:number|null;acceleration:number|null;persistence:number|null;baselineCount:number;accelerationCount:number;persistenceCount:number};
 export function dailyPerformance(signals:AiSignal[],outcomes:AiOutcome[],horizon:AiHorizon):DailyPoint[]{
   const map=makeOutcomeMap(outcomes);
-  const byDate=new Map<string,{baseline:number[];acceleration:number[]}>();
+  const byDate=new Map<string,{baseline:number[];acceleration:number[];persistence:number[]}>();
   for(const s of signals){
-    const cohort=byDate.get(s.trade_date)??{baseline:[],acceleration:[]};
-    const bucket=s.strategy==='FLOW_V1'?cohort.baseline:cohort.acceleration;
+    const cohort=byDate.get(s.trade_date)??{baseline:[],acceleration:[],persistence:[]};
+    const bucket=s.strategy==='FLOW_V1'?cohort.baseline:s.strategy==='FLOW_ACCEL_V1'?cohort.acceleration:cohort.persistence;
     for(const pick of s.picks){
       const outcome=map.get(outcomeKey(s.trade_date,s.strategy,pick.code,horizon));
       if(outcome)bucket.push(outcome.return_pct);
@@ -79,7 +79,8 @@ export function dailyPerformance(signals:AiSignal[],outcomes:AiOutcome[],horizon
   }
   return [...byDate].sort((a,b)=>a[0].localeCompare(b[0])).map(([date,v])=>({
     date,baseline:performance(v.baseline).mean,acceleration:performance(v.acceleration).mean,
-    baselineCount:v.baseline.length,accelerationCount:v.acceleration.length
+    persistence:performance(v.persistence).mean,
+    baselineCount:v.baseline.length,accelerationCount:v.acceleration.length,persistenceCount:v.persistence.length
   }));
 }
 export function latestRunForPhase(runs:AiRun[],phase:AiRun['phase']):AiRun|null{
