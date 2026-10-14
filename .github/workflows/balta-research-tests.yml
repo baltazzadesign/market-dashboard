@@ -1,0 +1,47 @@
+name: BALTA RESEARCH validation
+on:
+  pull_request:
+    paths:
+      - "lib/balta-daily-research.ts"
+      - "lib/balta-research-auth.ts"
+      - "scripts/balta-research-daily.ts"
+      - "scripts/balta-research-pdf.py"
+      - "app/balta-research/**"
+      - "app/api/balta-research/**"
+      - "components/dashboard/BaltaResearchWorkspace*"
+      - "components/dashboard/TerminalHeader.tsx"
+      - "supabase/migrations/20261014_balta_research_publications.sql"
+      - "tests/balta-daily-research.test.ts"
+      - ".github/workflows/balta-research-daily.yml"
+      - ".github/workflows/balta-research-tests.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - name: Investor/price evidence and AI anti-hallucination tests
+        run: node --import tsx --test tests/balta-daily-research.test.ts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Next.js production build
+        run: npm run build
+      - name: Korean PDF render smoke test
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-nanum poppler-utils
+          python -m pip install --disable-pip-version-check "reportlab==4.4.4"
+          python scripts/balta-research-pdf.py .runtime/balta-research/fixture.json .runtime/balta-research/fixture.pdf
+          pdfinfo .runtime/balta-research/fixture.pdf | grep 'Pages: *11'
+          test "$(stat -c%s .runtime/balta-research/fixture.pdf)" -gt 15000
