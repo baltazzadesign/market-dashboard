@@ -302,8 +302,10 @@ async function saveStockStopFollowups(
    const key=stopKey({...event,followup_horizon:h});
    if(completed.has(key))continue;
    const mark=assessStopFollowup(event,h,calendar,bars,asOf);
-   if(mark.status==='pending')continue;
-   if(mark.status==='unavailable'){unavailable++;continue;}
+   if(mark.status!=='ready'){
+    if(mark.status==='unavailable')unavailable++;
+    continue;
+   }
    await insertImmutable('balta_ai_stop_followups',mark.value,
     'trade_date,strategy,stock_code,scenario,stop_date,followup_horizon');
    completed.add(key);recorded++;
