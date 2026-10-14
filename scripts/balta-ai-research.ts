@@ -88,8 +88,10 @@ async function close(date:string){
       try{bars=await cache.get(cacheKey)!;}catch{sourceErrors++;cache.delete(cacheKey);continue;}
       const marks=markResearchOutcomes(signal.trade_date,calendar,bars,date);
       for(const mark of marks){
-        if(mark.status==='pending'){pending++;continue;}
-        if(mark.status==='unavailable'){unavailable++;continue;}
+        if(mark.status!=='ready'){
+          if(mark.status==='pending')pending++; else unavailable++;
+          continue;
+        }
         const result=mark.value;
         await insertImmutable('balta_ai_outcomes',{trade_date:signal.trade_date,strategy:signal.strategy,stock_code:pick.code,
           horizon:result.horizon,entry_date:result.entry_date,exit_date:result.exit_date,
