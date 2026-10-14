@@ -11,6 +11,8 @@ import { parseStockBars, stockDate, stockNumber, type StockBar } from '../lib/st
 import { retryResearch, RetryableResearchError, failureReason } from '../lib/balta-ai-reliability';
 import { parseIndexBars, benchmarkKey, type AiMarket, type AiBenchmark } from '../lib/balta-ai-benchmark';
 import { fiveDayPersistentFlow, FLOW_PERSIST_V1, type PersistentFlowPick } from '../lib/balta-ai-flow-strategy';
+import { loadCashFlow } from '../lib/cash-flow-data';
+import { assessCashFlow,rankCashFlowAssessments,FLOW_CASH_V1,CASH_FEATURE_VERSION,type CashFlowAssessment,type CashFlowExperiment } from '../lib/balta-ai-cash-strategy';
 import { FLOW_LIQUID_V1, evaluateLiquidity, parseMarketCap, parseTurnoverBars, type LiquidityPick } from '../lib/balta-ai-liquidity';
 import { simulateExits,type SimulationViewRow } from '../lib/balta-ai-exits';
 import { stopEvents,assessStopFollowup,stopKey,followupHorizons,
@@ -108,10 +110,49 @@ async function preOpenLiquidityCandidates(sourceDate:string,tradeDate:string,sou
     preselected:screening.length,verified,rejected,sourceFailures,cutoff
   }};
 }
+
+// Annual DART facts are sampled DURING the preopen collection and preserved with
+// filing receipts. Never backfill historic picks from today's restated statements.
+async function preOpenCashCandidates(
+ tradeDate:string,persist:PersistentFlowPick[],source:string
+):Promise<CashFlowExperiment>{
+ const screening=persist.slice(0,10);
+ const empty=(reason:string):CashFlowExperiment=>({status:'unavailable',reason,picks:[],
+  coverage:{preselected:screening.length,assessed:0,qualified:0,excluded:0,failed:0,cutoff:false}});
+ if(!process.env.DART_API_KEY)return empty('DART_API_KEY_NOT_CONFIGURED');
+ if(!screening.length)return empty('NO_PERSISTENT_CANDIDATES');
+ const assessed:{base:PersistentFlowPick;decision:CashFlowAssessment}[]=[];
+ let failed=0,cutoff=false;
+ const counts=new Map<string,number>();
+ for(const base of screening){
+  // Abort before 08:53 to protect the original pre-market signal deadline.
+  if(kstParts().date!==tradeDate||kstParts().time>='08:53'){cutoff=true;break;}
+  try{
+   const response=await loadCashFlow(base.code,Number(tradeDate.slice(0,4))-1);
+   const now=new Date().toISOString();
+   if(kstParts().date!==tradeDate||kstParts().time>='08:53'){cutoff=true;break;}
+   const decision=assessCashFlow(base,response,tradeDate,now);
+   assessed.push({base,decision});
+   if(decision.status==='excluded')counts.set(decision.reason,(counts.get(decision.reason)??0)+1);
+  }catch{
+   failed++; // API/auth/limit/errors never masquerade as bad financial health.
+  }
+ }
+ const picks=rankCashFlowAssessments(assessed);
+ const excluded=assessed.filter(x=>x.decision.status==='excluded').length;
+ const status:CashFlowExperiment['status']=failed===0&&!cutoff?'ready':'unavailable';
+ return {status,
+  reason:status==='ready'?'Annual DART statements verified before 09:00; '+source:
+   cutoff?'PREOPEN_CUTOFF':failed?'DART_SOURCE_UNAVAILABLE':'INCOMPLETE_CASH_SAMPLE',
+  picks:status==='ready'?picks:[],
+  coverage:{preselected:screening.length,assessed:assessed.length,
+   qualified:assessed.length-excluded,excluded,failed,cutoff}};
+}
+
 async function morning(date:string){
   const existing=await db<Pick<Signal,'strategy'>[]>('balta_ai_signals?select=strategy&trade_date=eq.'+date);
   const allStrategies=scoredStrategies;
-  if(allStrategies.every(strategy=>existing.some(s=>s.strategy===strategy))){console.log('Morning signals already frozen for',date);return;}
+  if([...allStrategies,FLOW_CASH_V1].every(strategy=>existing.some(s=>s.strategy===strategy))){console.log('Morning signals already frozen for',date);return;}
   const sourceRows=await db<ResearchHistoryRow[]>('investor_flow_history?select=date,universe_date,observed_at,snapshot&date=lt.'+date+'&order=date.desc&limit=6');
   const observedAt=new Date().toISOString();
   const {source,picks:baselinePicks,coverage}=selectResearchCandidates(sourceRows,date,observedAt,holidays);
@@ -156,13 +197,37 @@ async function morning(date:string){
   }
   const liquidRecorded=existing.some(s=>s.strategy===FLOW_LIQUID_V1)||
     (liquidity!==null&&!liquidity.stats.cutoff&&liquidity.stats.sourceFailures===0&&kstParts().time<'09:00');
-  await runLog(date,'morning',experimental.status==='ready'&&liquidRecorded?'complete':'incomplete',{
+  // The new financial experiment runs LAST. Any failure cannot rewrite or
+  // displace the four original frozen strategy rows.
+  let cash:CashFlowExperiment|null=null;
+  if(experimental.status==='ready'&&!existing.some(s=>s.strategy===FLOW_CASH_V1)){
+   cash=await preOpenCashCandidates(date,experimental.picks,source.date);
+   if(cash.status==='ready'&&kstParts().date===date&&kstParts().time<'09:00'){
+    await insertImmutable('balta_ai_signals',{
+     trade_date:date,strategy:FLOW_CASH_V1,source_date:source.date,
+     source_observed_at:source.observed_at,
+     source_snapshot:{
+      rows:sourceRows.map(r=>({date:r.date,universe_date:r.universe_date,observed_at:r.observed_at})),
+      feature_contract:CASH_FEATURE_VERSION,
+      preselection:'FLOW_PERSIST_V1 top 10 only; NOT all-market cash-flow rank',
+      fetch_phase:'same-morning-before-open',
+      source:'OpenDART annual KRW, filing receipts frozen per pick; PERSIST only',
+      cutoff_before:'09:00 KST',cash_coverage:cash.coverage,
+      classifications:'cash_generative OR cash_improving; no financial-sector scoring',
+      anti_lookahead:'filing receipt strictly before signal date; fetchedAt <= observedAt'
+     },market_snapshot:validMarket??{},picks:cash.picks
+    },'trade_date,strategy');
+   }
+  }
+  const cashRecorded=existing.some(s=>s.strategy===FLOW_CASH_V1)||
+   (cash?.status==='ready'&&kstParts().date===date&&kstParts().time<'09:00');
+  await runLog(date,'morning',experimental.status==='ready'&&liquidRecorded&&cashRecorded?'complete':'incomplete',{
     source_date:source.date,coverage,preference,persistentPreference,liquidityPreference,
-    liquidity:liquidity?.stats??null,
+    liquidity:liquidity?.stats??null,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage,picks:cash.picks.length}:null,
     experimental:{status:experimental.status,reason:experimental.reason,coverage:experimental.coverage},
-    per_strategy:Object.fromEntries(allStrategies.map(s=>[s,s===FLOW_LIQUID_V1?(liquidRecorded?(liquidity?.picks.length??null):null):(s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length)]))
+    per_strategy:Object.fromEntries([...allStrategies,FLOW_CASH_V1].map(s=>[s,s===FLOW_CASH_V1?(cashRecorded?(cash?.picks.length??null):null):s===FLOW_LIQUID_V1?(liquidRecorded?(liquidity?.picks.length??null):null):(s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length)]))
   });
-  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,persistentPreference,experimentStatus:experimental.status,liquidity:liquidity?.stats??null,signals:selections},null,2));
+  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,persistentPreference,experimentStatus:experimental.status,liquidity:liquidity?.stats??null,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage}:null,signals:selections},null,2));
 }
 async function tradingCalendar(date:string):Promise<string[]>{
   // KIS caches failed responses for 10 seconds; retry once after its cooldown.
@@ -497,7 +562,7 @@ async function close(date:string){
   const preference=comparePairedDailyReturns(priorResults);
   const persistentPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_PERSIST_V1);
   const liquidityPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_LIQUID_V1);
-  const comparison=Object.fromEntries(scoredStrategies.map(strategy=>[strategy,[0,1,3,5].map(horizon=>{
+  const comparison=Object.fromEntries([...scoredStrategies,FLOW_CASH_V1].map(strategy=>[strategy,[0,1,3,5].map(horizon=>{
     const r=summary.filter(s=>s.strategy===strategy&&s.horizon===horizon);
     const avg=r.length?r.reduce((a,b)=>a+Number(b.return_pct),0)/r.length:null;
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
