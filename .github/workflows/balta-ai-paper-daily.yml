@@ -32,6 +32,8 @@ jobs:
       KIS_APPKEY: ${{ secrets.KIS_APPKEY }}
       KIS_APPSECRET: ${{ secrets.KIS_APPSECRET }}
       KIS_BASE: ${{ secrets.KIS_BASE }}
+      # Only the independent FLOW_CASH_V1 needs this; missing key leaves four original strategies live.
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
       MARKET_HOLIDAYS: ${{ vars.MARKET_HOLIDAYS }}
     steps:
       - uses: actions/checkout@v4
