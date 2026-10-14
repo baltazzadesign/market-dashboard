@@ -3,7 +3,7 @@
 import type { StockBar } from './stock-flow-model';
 import type { AiSignal,AiOutcome,AiHorizon,AiStrategy } from './balta-ai-dashboard';
 import { classifyFrozenSignal } from './balta-ai-regime';
-import { costAdjusted,type SimulationViewRow,type SimulationOutcome,type ExitScenarioId } from './balta-ai-exits';
+import { costAdjusted,type SimulationViewRow,type ExitScenarioId } from './balta-ai-exits';
 
 export const followupHorizons=[1,3,5] as const;
 export type FollowupHorizon=typeof followupHorizons[number];
@@ -109,7 +109,7 @@ export function evaluateBearMarketSkip(
  const lookup=new Map(outcomes.filter(o=>o.horizon===horizon&&Number.isFinite(o.return_pct))
   .map(o=>[[o.trade_date,o.strategy,o.stock_code,o.horizon].join(':'),o]));
  let traded=0,skipped=0,unknown=0,unsettled=0,avoidedLosingTrades=0,foregoneWinningTrades=0;
- const unconditional:number[]=[],conditional:number[]=[],holdGross:number[]=[],cashHoldGross:number[]=[];
+ const unconditional:number[]=[],conditional:number[]=[],holdGross:number[]=[],policyGross:number[]=[],cashHoldGross:number[]=[];
  const days=new Set<string>(),seen=new Set<string>();
  for(const s of eligibleSignals){
   const regime=classifyFrozenSignal(s).regime;
@@ -125,15 +125,15 @@ export function evaluateBearMarketSkip(
    if(adjusted===null){unknown++;continue;}
    days.add(s.trade_date);holdGross.push(o.return_pct);unconditional.push(adjusted);
    if(regime==='falling'){
-    skipped++;cashHoldGross.push(o.return_pct);conditional.push(0);
+    skipped++;cashHoldGross.push(o.return_pct);conditional.push(0);policyGross.push(0);
     if(o.return_pct<0)avoidedLosingTrades++;
     if(o.return_pct>0)foregoneWinningTrades++;
-   }else{traded++;conditional.push(adjusted);}
+   }else{traded++;conditional.push(adjusted);policyGross.push(o.return_pct);}
   }
  }
  const count=conditional.length,base=average(unconditional),active=average(conditional);
  return {eligible:count,days:days.size,traded,skipped,unknown,unsettled,
-  unconditionalGross:average(holdGross),conditionalGross:average(conditional.map((n,i)=>n)), // gross view not used for net conclusions
+  unconditionalGross:average(holdGross),conditionalGross:average(policyGross),
   unconditionalNet:base,conditionalNet:active,
   netDifference:base===null||active===null?null:Number((active-base).toFixed(6)),
   avoidedLosingTrades,foregoneWinningTrades,skippedHoldAverage:average(cashHoldGross),
