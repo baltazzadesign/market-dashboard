@@ -15,7 +15,7 @@ export type ResearchComparison={
 };
 const rounded=(n:number)=>Number(n.toFixed(4));
 const average=(a:number[])=>a.reduce((x,y)=>x+y,0)/a.length;
-export function comparePairedDailyReturns(rows:OutcomeForScorecard[],minTraining=30,holdout=10,alternative:'FLOW_ACCEL_V1'|'FLOW_PERSIST_V1'='FLOW_ACCEL_V1'):ResearchComparison{
+export function comparePairedDailyReturns(rows:OutcomeForScorecard[],minTraining=30,holdout=10,alternative:'FLOW_ACCEL_V1'|'FLOW_PERSIST_V1'|'FLOW_LIQUID_V1'='FLOW_ACCEL_V1'):ResearchComparison{
   const buckets=new Map<string,number[]>();
   for(const item of rows){
     if(item.horizon!==1||!['FLOW_V1',alternative].includes(item.strategy)||!/^\d{4}-\d{2}-\d{2}$/.test(item.trade_date))continue;
