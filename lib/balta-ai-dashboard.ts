@@ -1,6 +1,7 @@
 import type { AiBenchmark } from './balta-ai-benchmark';
 import type { SimulationViewRow } from './balta-ai-exits';
 import type { StopFollowup } from './balta-ai-stop-policy';
+import type { PortfolioBar } from './balta-ai-portfolio';
 // Pure BALTA AI research dashboard analytics. No data fetching, model training or trade execution.
 export type AiStrategy='FLOW_V1'|'FLOW_ACCEL_V1'|'FLOW_PERSIST_V1'|'FLOW_LIQUID_V1';
 export const aiStrategies:AiStrategy[]=['FLOW_V1','FLOW_ACCEL_V1','FLOW_PERSIST_V1','FLOW_LIQUID_V1'];
@@ -22,7 +23,7 @@ export type AiOutcome={
 };
 export type AiRun={trade_date:string;phase:'morning'|'close';result:'complete'|'skipped'|'incomplete';executed_at:string;details:Record<string,unknown>};
 export type AiResearchPayload={
-  ok:true;asOf:string;serverNow:string;additionalHolidays:string[];lookbackDays:number;simulationLookbackDays:number;signals:AiSignal[];outcomes:AiOutcome[];benchmarks:AiBenchmark[];simulations:SimulationViewRow[];stopFollowups:StopFollowup[];runs:AiRun[]
+  ok:true;asOf:string;serverNow:string;additionalHolidays:string[];lookbackDays:number;simulationLookbackDays:number;portfolioLookbackDays:number;portfolioBars:PortfolioBar[];portfolioSessions:string[];signals:AiSignal[];outcomes:AiOutcome[];benchmarks:AiBenchmark[];simulations:SimulationViewRow[];stopFollowups:StopFollowup[];runs:AiRun[]
 };
 export type AiPerformance={
   observations:number;wins:number;winRate:number|null;mean:number|null;median:number|null
