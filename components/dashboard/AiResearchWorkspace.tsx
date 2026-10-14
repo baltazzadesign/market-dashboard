@@ -8,6 +8,7 @@ import {
   makeOutcomeMap,outcomeKey,signalDays,type AiHorizon,type AiResearchPayload,type AiRun,type AiStrategy
 } from '@/lib/balta-ai-dashboard';
 import { matchedOutcomes,excessSummary,excessDaily,validBenchmarks,benchmarkKey } from '@/lib/balta-ai-benchmark';
+import AiResearchInsights from './AiResearchInsights';
 import styles from './AiResearchWorkspace.module.css';
 
 const periods=[7,30,60,90] as const;
@@ -115,6 +116,8 @@ export default function AiResearchWorkspace(){
         {strategies.map(v=><option value={v.value} key={v.value}>{v.label}</option>)}
       </select></label>
     </div>
+
+    {!loading&&!error&&data&&<AiResearchInsights data={data} horizon={horizon}/>}
 
     {error&&<div className={styles.error} role="alert"><strong>데이터 조회 실패</strong><span>{error}</span><button onClick={()=>setRefresh(v=>v+1)}>다시 시도</button></div>}
     {loading&&<div className={styles.loading} role="status">발타 리서치 데이터를 불러오는 중입니다…</div>}
