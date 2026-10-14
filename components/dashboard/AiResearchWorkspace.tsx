@@ -17,9 +17,9 @@ import styles from './AiResearchWorkspace.module.css';
 const periods=[7,30,60,90] as const;
 const horizons:[AiHorizon,string][]=[[0,'당일 종가'],[1,'1거래일'],[3,'3거래일'],[5,'5거래일']];
 const strategies:({value:'all'|AiStrategy;label:string})[]=[
-  {value:'all',label:'전체 전략'},{value:'FLOW_V1',label:'동반 순매수'},{value:'FLOW_ACCEL_V1',label:'순매수 가속'},{value:'FLOW_PERSIST_V1',label:'5일 지속·상대 강도'},{value:'FLOW_LIQUID_V1',label:'거래대금 보정'}
+  {value:'all',label:'전체 전략'},{value:'FLOW_V1',label:'동반 순매수'},{value:'FLOW_ACCEL_V1',label:'순매수 가속'},{value:'FLOW_PERSIST_V1',label:'5일 지속·상대 강도'},{value:'FLOW_LIQUID_V1',label:'거래대금 보정'},{value:'FLOW_CASH_V1',label:'수급 + 현금흐름'}
 ];
-const strategyLabel=(value:string)=>value==='FLOW_V1'?'동반 순매수':value==='FLOW_ACCEL_V1'?'순매수 가속':value==='FLOW_PERSIST_V1'?'5일 지속·상대 강도':value==='FLOW_LIQUID_V1'?'거래대금 보정':value;
+const strategyLabel=(value:string)=>value==='FLOW_V1'?'동반 순매수':value==='FLOW_ACCEL_V1'?'순매수 가속':value==='FLOW_PERSIST_V1'?'5일 지속·상대 강도':value==='FLOW_LIQUID_V1'?'거래대금 보정':value==='FLOW_CASH_V1'?'수급 + 현금흐름':value;
 const nf=new Intl.NumberFormat('ko-KR',{maximumFractionDigits:1});
 function fixed(v:number|null,digits=2){
   return v===null||!Number.isFinite(v)?'—':v.toLocaleString('ko-KR',{minimumFractionDigits:digits,maximumFractionDigits:digits});
@@ -79,7 +79,8 @@ export default function AiResearchWorkspace(){
     baseline:x.baseline===null?null:Number(x.baseline.toFixed(2)),
     acceleration:x.acceleration===null?null:Number(x.acceleration.toFixed(2)),
     persistence:x.persistence===null?null:Number(x.persistence.toFixed(2)),
-    liquidity:x.liquidity===null?null:Number(x.liquidity.toFixed(2))
+    liquidity:x.liquidity===null?null:Number(x.liquidity.toFixed(2)),
+    cash:x.cash===null?null:Number(x.cash.toFixed(2))
   })),[signals,outcomes,horizon]);
   const outcomeMap=useMemo(()=>makeOutcomeMap(outcomes),[outcomes]);
   const benchmarkMap=useMemo(()=>validBenchmarks(benchmarks),[benchmarks]);
@@ -93,7 +94,7 @@ export default function AiResearchWorkspace(){
   const morning=useMemo(()=>latestRunForPhase(runs,'morning'),[runs]);
   const close=useMemo(()=>latestRunForPhase(runs,'close'),[runs]);
   const candidateCount=allFiltered.reduce((sum,s)=>sum+s.picks.length,0);
-  const hasChart=chartData.some(x=>x.baseline!==null||x.acceleration!==null);
+  const hasChart=chartData.some(x=>x.baseline!==null||x.acceleration!==null||x.cash!==null||x.persistence!==null||x.liquidity!==null);
 
   return <main className={'terminal-detail-page '+styles.workspace} id="main-content">
     <div className={styles.hero}>
@@ -161,10 +162,11 @@ export default function AiResearchWorkspace(){
               <Line name="순매수 가속" type="monotone" dataKey="acceleration" stroke="#76bdac" strokeWidth={2} connectNulls={false} dot={{r:2}} activeDot={{r:5}}/>
               <Line name="5일 지속·상대 강도" type="monotone" dataKey="persistence" stroke="#a9a4ff" strokeWidth={2} connectNulls={false} dot={{r:2}} activeDot={{r:5}}/>
               <Line name="거래대금 보정" type="monotone" dataKey="liquidity" stroke="#f0b278" strokeWidth={2} connectNulls={false} dot={{r:2}} activeDot={{r:5}}/>
+              <Line name="수급 + 현금흐름" type="monotone" dataKey="cash" stroke="#b0dc9b" strokeWidth={2} connectNulls={false} dot={{r:2}} activeDot={{r:5}}/>
             </LineChart>
           </ResponsiveContainer>}
       </div>
-      <div className={styles.legend}><span><i style={{background:'#d6b36c'}}/>동반 순매수 (FLOW_V1)</span><span><i style={{background:'#76bdac'}}/>순매수 가속 (FLOW_ACCEL_V1)</span><span><i style={{background:'#a9a4ff'}}/>5일 지속·상대 강도 (FLOW_PERSIST_V1)</span><span><i style={{background:'#f0b278'}}/>거래대금 보정 (FLOW_LIQUID_V1)</span><span>차트 공백 = 미검증</span></div>
+      <div className={styles.legend}><span><i style={{background:'#d6b36c'}}/>동반 순매수 (FLOW_V1)</span><span><i style={{background:'#76bdac'}}/>순매수 가속 (FLOW_ACCEL_V1)</span><span><i style={{background:'#a9a4ff'}}/>5일 지속·상대 강도 (FLOW_PERSIST_V1)</span><span><i style={{background:'#f0b278'}}/>거래대금 보정 (FLOW_LIQUID_V1)</span><span><i style={{background:'#b0dc9b'}}/>수급 + 현금흐름 (FLOW_CASH_V1)</span><span>차트 공백 = 미검증</span></div>
     </section>
 
     <section className={styles.panel} style={{marginTop:17}}>
@@ -220,7 +222,7 @@ export default function AiResearchWorkspace(){
                 stock.return_pct-index.return_pct:null;
               return <tr key={[s.trade_date,s.strategy,p.code].join(':')}>
                 <td><small className={styles.strategy}>{strategyLabel(s.strategy)}</small><br/>#{i+1}</td>
-                <td><Link href={'/stock-flow?code='+encodeURIComponent(p.code)} className={styles.stockName}>{p.name}</Link><small className={styles.code}>{p.code} · {p.market.toUpperCase()}</small>{p.net_to_turnover_pct!==undefined&&<small className={styles.code}>순매수/20일 거래대금 {fixed(p.net_to_turnover_pct,2)}% · 시총 {fixed(p.market_cap_eok??null,0)}억원</small>}{p.positive_sessions_5!==undefined&&<small className={styles.code}>동반매수 {p.positive_sessions_5}/5일 · 상대 {fixed(p.relative_flow_ratio??null,2)}배</small>}</td>
+                <td><Link href={'/stock-flow?code='+encodeURIComponent(p.code)} className={styles.stockName}>{p.name}</Link><small className={styles.code}>{p.code} · {p.market.toUpperCase()}</small>{p.cash_score!==undefined&&<small className={styles.code}>현금흐름 {p.cash_score}/100 · {p.cash_year}년 {p.cash_basis} · 영업CF {fixed(p.cash_operating_eok??null,1)}억 · FCF {fixed(p.cash_fcf_eok??null,1)}억 · {p.cash_momentum==='improving'?'개선 중':'현금창출'}</small>}{p.net_to_turnover_pct!==undefined&&<small className={styles.code}>순매수/20일 거래대금 {fixed(p.net_to_turnover_pct,2)}% · 시총 {fixed(p.market_cap_eok??null,0)}억원</small>}{p.positive_sessions_5!==undefined&&<small className={styles.code}>동반매수 {p.positive_sessions_5}/5일 · 상대 {fixed(p.relative_flow_ratio??null,2)}배</small>}</td>
                 <td className={styles.foreign}>{fixed(p.foreign,1)}</td>
                 <td className={styles.institution}>{fixed(p.institution,1)}</td>
                 <td>{fixed(p.score,1)}</td>
@@ -262,7 +264,7 @@ export default function AiResearchWorkspace(){
 
     <footer className={styles.disclaimer}>
       <strong>연구 자료 · 실거래 아님</strong>
-      외국인·기관 수급 기반 후보를 매일 기록하는 실험입니다. 5일 지속 전략에는 거래대금 필터가 없으며, 거래대금 보정 전략은 사전 선정된 상위 종목만 검증합니다. 시가 체결 가능성, 호가 잔량, 거래비용·세금·슬리피지, 지수 대비 초과수익은 반영하지 않았습니다. 과거 모의 성과는 미래 수익을 보장하지 않으며 매수 권유가 아닙니다.
+      외국인·기관 수급 기반 후보를 매일 기록하는 실험입니다. 현금흐름 결합 전략은 해당일 오전까지 조회·봉인된 공시 기준의 신규 독립 실험이며, 누락 공시와 금융업은 임의 점수 없이 제외합니다. 5일 지속 전략에는 거래대금 필터가 없으며, 거래대금 보정 전략은 사전 선정된 상위 종목만 검증합니다. 시가 체결 가능성, 호가 잔량, 거래비용·세금·슬리피지, 지수 대비 초과수익은 반영하지 않았습니다. 과거 모의 성과는 미래 수익을 보장하지 않으며 매수 권유가 아닙니다.
     </footer>
   </main>;
 }
