@@ -45,7 +45,7 @@ export default function AiResearchSimulator({data,horizon,strategy}:{
   </div>
   <div className={styles.metrics}>
    <div><small>평가 완료</small><strong>{featured.observations}<em>건</em></strong><span>선정일 {featured.uniqueDays}일</span></div>
-   <div><small>비용 반영 평균</small><strong className={minimum?featured.meanNet!==null&&featured.meanNet>0?styles.up:styles.down:styles.muted:styles.muted}>
+   <div><small>비용 반영 평균</small><strong className={minimum?(featured.meanNet!==null&&featured.meanNet>0?styles.up:styles.down):styles.muted}>
     {minimum?fmt(featured.meanNet):'—'}</strong><span>{minimum?'총 거래비용 가정 차감':'최소 30건·10일 필요'}</span></div>
    <div><small>비용 반영 승률</small><strong>{minimum&&featured.winRate!==null?featured.winRate.toFixed(1)+'%':'—'}</strong><span>비용 차감 후 수익률 양수</span></div>
    <div><small>관측 최악 수익률</small><strong className={styles.muted}>{minimum?fmt(featured.worstNet):'—'}</strong><span>단일 종목 최악 관측치 · MDD 아님</span></div>
