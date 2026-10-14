@@ -32,3 +32,14 @@ test('missing/null returns are excluded rather than treated as zero',()=>{
   const bad=days(40,()=>0.5).map(r=>r.strategy==='FLOW_ACCEL_V1'?{...r,return_pct:null}:r);
   assert.equal(comparePairedDailyReturns(bad).status,'insufficient_sample');
 });
+
+test('third strategy is independently walk-forward evaluated without changing legacy comparison',()=>{
+  const original=days(40,()=>0.25);
+  const third=original.filter(x=>x.strategy==='FLOW_ACCEL_V1').map(x=>({...x,strategy:'FLOW_PERSIST_V1',return_pct:2}));
+  const score=comparePairedDailyReturns([...original,...third],30,10,'FLOW_PERSIST_V1');
+  assert.equal(score.status,'alternative_supported');
+  assert.equal(score.preferred,'FLOW_PERSIST_V1');
+  assert.equal(score.paired_days,40);
+  const legacy=comparePairedDailyReturns([...original,...third]);
+  assert.equal(legacy.preferred,'FLOW_ACCEL_V1');
+});
