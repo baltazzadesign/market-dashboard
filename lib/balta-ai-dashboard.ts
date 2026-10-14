@@ -1,13 +1,14 @@
 import type { AiBenchmark } from './balta-ai-benchmark';
 // Pure BALTA AI research dashboard analytics. No data fetching, model training or trade execution.
-export type AiStrategy='FLOW_V1'|'FLOW_ACCEL_V1'|'FLOW_PERSIST_V1';
-export const aiStrategies:AiStrategy[]=['FLOW_V1','FLOW_ACCEL_V1','FLOW_PERSIST_V1'];
+export type AiStrategy='FLOW_V1'|'FLOW_ACCEL_V1'|'FLOW_PERSIST_V1'|'FLOW_LIQUID_V1';
+export const aiStrategies:AiStrategy[]=['FLOW_V1','FLOW_ACCEL_V1','FLOW_PERSIST_V1','FLOW_LIQUID_V1'];
 export type AiHorizon=0|1|3|5;
 export type AiPick={
   code:string;name:string;market:string;score:number;
   foreign:number;institution:number;pension:number;
   prior_foreign?:number;prior_institution?:number;reason:string;
-  positive_sessions_5?:number;relative_flow_ratio?:number;relative_acceleration?:number;mean_abs_flow_5?:number;five_day_net?:number;feature_version?:string
+  positive_sessions_5?:number;relative_flow_ratio?:number;relative_acceleration?:number;mean_abs_flow_5?:number;five_day_net?:number;feature_version?:string;
+  avg_turnover_20_eok?:number;market_cap_eok?:number;net_to_turnover_pct?:number;net_to_market_cap_pct?:number;quote_captured_at?:string
 };
 export type AiSignal={
   trade_date:string;strategy:AiStrategy;source_date:string;source_observed_at:string;
@@ -65,13 +66,13 @@ export function cohortPerformance(
   }
   return performance(values);
 }
-export type DailyPoint={date:string;baseline:number|null;acceleration:number|null;persistence:number|null;baselineCount:number;accelerationCount:number;persistenceCount:number};
+export type DailyPoint={date:string;baseline:number|null;acceleration:number|null;persistence:number|null;liquidity:number|null;baselineCount:number;accelerationCount:number;persistenceCount:number;liquidityCount:number};
 export function dailyPerformance(signals:AiSignal[],outcomes:AiOutcome[],horizon:AiHorizon):DailyPoint[]{
   const map=makeOutcomeMap(outcomes);
-  const byDate=new Map<string,{baseline:number[];acceleration:number[];persistence:number[]}>();
+  const byDate=new Map<string,{baseline:number[];acceleration:number[];persistence:number[];liquidity:number[]}>();
   for(const s of signals){
-    const cohort=byDate.get(s.trade_date)??{baseline:[],acceleration:[],persistence:[]};
-    const bucket=s.strategy==='FLOW_V1'?cohort.baseline:s.strategy==='FLOW_ACCEL_V1'?cohort.acceleration:cohort.persistence;
+    const cohort=byDate.get(s.trade_date)??{baseline:[],acceleration:[],persistence:[],liquidity:[]};
+    const bucket=s.strategy==='FLOW_V1'?cohort.baseline:s.strategy==='FLOW_ACCEL_V1'?cohort.acceleration:s.strategy==='FLOW_PERSIST_V1'?cohort.persistence:cohort.liquidity;
     for(const pick of s.picks){
       const outcome=map.get(outcomeKey(s.trade_date,s.strategy,pick.code,horizon));
       if(outcome)bucket.push(outcome.return_pct);
@@ -80,8 +81,8 @@ export function dailyPerformance(signals:AiSignal[],outcomes:AiOutcome[],horizon
   }
   return [...byDate].sort((a,b)=>a[0].localeCompare(b[0])).map(([date,v])=>({
     date,baseline:performance(v.baseline).mean,acceleration:performance(v.acceleration).mean,
-    persistence:performance(v.persistence).mean,
-    baselineCount:v.baseline.length,accelerationCount:v.acceleration.length,persistenceCount:v.persistence.length
+    persistence:performance(v.persistence).mean,liquidity:performance(v.liquidity).mean,
+    baselineCount:v.baseline.length,accelerationCount:v.acceleration.length,persistenceCount:v.persistence.length,liquidityCount:v.liquidity.length
   }));
 }
 export function latestRunForPhase(runs:AiRun[],phase:AiRun['phase']):AiRun|null{
