@@ -17,13 +17,14 @@ async function allRows(
   columns:string,start:string,today:string,signal:AbortSignal
 ):Promise<Record<string,unknown>[]>{
   const all:Record<string,unknown>[]=[];
+  // Stable total order is mandatory for paginating multiple rows on the same signal date.
+  const order=table==='balta_ai_outcomes'?'trade_date.desc,strategy.asc,stock_code.asc,horizon.asc'
+    :table==='balta_ai_signals'?'trade_date.desc,strategy.asc':'trade_date.desc,phase.asc';
   for(let offset=0;offset<12000;offset+=500){
     const query=new URLSearchParams({
-      select:columns,trade_date:'gte.'+start,order:'trade_date.desc',
-      limit:'500',offset:String(offset)
+      select:columns,order,limit:'500',offset:String(offset)
     });
     query.set('and',`(trade_date.gte.${start},trade_date.lte.${today})`);
-    query.delete('trade_date');
     const page=await researchRequest(table+'?'+query.toString(),signal);
     all.push(...page);
     if(page.length<500)return all;
