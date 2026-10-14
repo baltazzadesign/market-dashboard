@@ -12,6 +12,7 @@ import { retryResearch, RetryableResearchError, failureReason } from '../lib/bal
 import { parseIndexBars, benchmarkKey, type AiMarket, type AiBenchmark } from '../lib/balta-ai-benchmark';
 import { fiveDayPersistentFlow, FLOW_PERSIST_V1, type PersistentFlowPick } from '../lib/balta-ai-flow-strategy';
 import { FLOW_LIQUID_V1, evaluateLiquidity, parseMarketCap, parseTurnoverBars, type LiquidityPick } from '../lib/balta-ai-liquidity';
+import { simulateExits } from '../lib/balta-ai-exits';
 
 type Signal={trade_date:string;strategy:string;source_date:string;generated_at:string;picks:ResearchPick[]};
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
@@ -226,6 +227,22 @@ async function savedOutcomeKeys(from:string):Promise<Set<string>>{
   }
   throw Error('Outcome ledger exceeded query window');
 }
+async function savedSimulationKeys(from:string):Promise<Set<string>>{
+ const result=new Set<string>();
+ for(let offset=0;offset<=19500;offset+=500){
+  const q=new URLSearchParams({
+   select:'trade_date,strategy,stock_code,horizon',
+   trade_date:'gte.'+from,scenario_version:'eq.BALTA_OHLC_EXIT_V1',
+   order:'trade_date.asc,strategy.asc,stock_code.asc,horizon.asc',
+   limit:'500',offset:String(offset)
+  });
+  const page=await db<SavedOutcomeKey[]>('balta_ai_exit_simulations?'+q.toString());
+  if(!Array.isArray(page))throw Error('Invalid simulation ledger response');
+  for(const x of page)result.add([x.trade_date,x.strategy,x.stock_code,x.horizon].join(':'));
+  if(page.length<500)return result;
+ }
+ throw Error('Simulation ledger exceeded safe page window');
+}
 async function saveMarketBenchmarks(signals:Signal[],calendar:string[],date:string){
  const from=earliestDate(25,date);
  const previous=await db<Pick<AiBenchmark,'trade_date'|'market'|'horizon'>[]>(
@@ -282,7 +299,9 @@ async function close(date:string){
   }
   const calendar=await tradingCalendar(date);
   const completed=await savedOutcomeKeys(prior);
+  const completedSims=await savedSimulationKeys(prior);
   let attempted=0,pending=0,unavailable=0,sourceErrors=0,alreadyRecorded=0;
+  let simulationsRecorded=0,simulationUnavailable=0;
   const cache=new Map<string,Promise<StockBar[]>>();
   for(const signal of signals){
     if(Date.parse(signal.generated_at)>=Date.parse(signal.trade_date+'T09:00:00+09:00')){
@@ -292,8 +311,9 @@ async function close(date:string){
       const start=calendar.indexOf(signal.trade_date);
       if(start<0){unavailable+=4;continue;} // Missing exchange calendar: never invent a holding period.
       const horizons=[0,1,3,5];
-      const due=horizons.filter(h=>Boolean(calendar[start+h])&&
-        !completed.has([signal.trade_date,signal.strategy,pick.code,h].join(':')));
+      const due=horizons.filter(h=>Boolean(calendar[start+h])&&(
+        !completed.has([signal.trade_date,signal.strategy,pick.code,h].join(':'))||
+        !completedSims.has([signal.trade_date,signal.strategy,pick.code,h].join(':'))));
       if(!due.length){
         pending+=horizons.filter(h=>!calendar[start+h]).length;
         alreadyRecorded++;
@@ -305,19 +325,37 @@ async function close(date:string){
       try{bars=await cache.get(cacheKey)!;}catch{sourceErrors++;cache.delete(cacheKey);continue;}
       const marks=markResearchOutcomes(signal.trade_date,calendar,bars,date);
       for(const mark of marks){
-        if(mark.status==='ready'&&completed.has([signal.trade_date,signal.strategy,pick.code,mark.value.horizon].join(':')))
+        if(mark.status==='ready'&&completed.has([signal.trade_date,signal.strategy,pick.code,mark.value.horizon].join(':'))&&
+          completedSims.has([signal.trade_date,signal.strategy,pick.code,mark.value.horizon].join(':')))
           continue;
         if(mark.status!=='ready'){
           if(mark.status==='pending')pending++; else unavailable++;
           continue;
         }
         const result=mark.value;
-        await insertImmutable('balta_ai_outcomes',{trade_date:signal.trade_date,strategy:signal.strategy,stock_code:pick.code,
-          horizon:result.horizon,entry_date:result.entry_date,exit_date:result.exit_date,
-          entry_open:result.entry_open,exit_close:result.exit_close,return_pct:result.return_pct,
-          source:'KIS_DAILY_ADJUSTED'},'trade_date,strategy,stock_code,horizon');
-        attempted++;
-        completed.add([signal.trade_date,signal.strategy,pick.code,result.horizon].join(':'));
+        const recordKey=[signal.trade_date,signal.strategy,pick.code,result.horizon].join(':');
+        if(!completed.has(recordKey)){
+          await insertImmutable('balta_ai_outcomes',{trade_date:signal.trade_date,strategy:signal.strategy,stock_code:pick.code,
+            horizon:result.horizon,entry_date:result.entry_date,exit_date:result.exit_date,
+            entry_open:result.entry_open,exit_close:result.exit_close,return_pct:result.return_pct,
+            source:'KIS_DAILY_ADJUSTED'},'trade_date,strategy,stock_code,horizon');
+          attempted++;
+          completed.add(recordKey);
+        }
+        if(!completedSims.has(recordKey)){
+          const sim=simulateExits(signal.trade_date,calendar,bars,date)
+            .find(x=>x.status==='ready'&&x.value.horizon===result.horizon);
+          if(sim?.status!=='ready'){
+            simulationUnavailable++;
+            continue; // Never manufacture stop/take results without complete daily OHLC.
+          }
+          await insertImmutable('balta_ai_exit_simulations',{
+            ...sim.value,strategy:signal.strategy,stock_code:pick.code,
+            source:'KIS_DAILY_ADJUSTED_OHLC'
+          },'trade_date,strategy,stock_code,horizon,scenario_version');
+          completedSims.add(recordKey);
+          simulationsRecorded++;
+        }
       }
     }
   }
@@ -335,9 +373,9 @@ async function close(date:string){
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
-  await runLog(date,'close',sourceErrors||unavailable||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
-    preference,persistentPreference,liquidityPreference,caution:'Benchmark comparisons require same entry/exit dates. No trading costs, slippage or validated real-money alpha.'});
-  console.log(JSON.stringify({date,phase:'close',attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference},null,2));
+  await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,simulationsRecorded,simulationUnavailable,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
+    preference,persistentPreference,liquidityPreference,caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
+  console.log(JSON.stringify({date,phase:'close',attempted,simulationsRecorded,simulationUnavailable,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
