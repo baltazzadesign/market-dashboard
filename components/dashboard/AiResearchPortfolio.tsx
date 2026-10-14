@@ -33,7 +33,8 @@ export default function AiResearchPortfolio({data}:{data:AiResearchPayload}){
   roundTripCostPct:cost,drawdownBrakePct:riskStop,lossPauseDays:lossPause
  },data.asOf),[signals,data.portfolioSessions,data.portfolioBars,data.asOf,strategy,horizon,policy,maxPositions,cost,riskStop,lossPause]);
  const tradeDays=new Set(result.trades.map(x=>x.entryDate)).size;
- const sufficient=result.status==='ready'&&result.trades.length>=30&&tradeDays>=10;
+ const observed=result.status==='ready'&&result.days.length>=2&&result.trades.length>0;
+ const sufficient=observed&&result.trades.length>=30&&tradeDays>=10;
  const chart=useMemo(()=>result.days.map(d=>({date:d.date.slice(5),equity:+(d.equity/1e8*100).toFixed(3)})),[result.days]);
  const stat=useMemo(()=>({
   entry:result.days.reduce((sum,d)=>sum+d.entries,0),
@@ -82,21 +83,21 @@ export default function AiResearchPortfolio({data}:{data:AiResearchPayload}){
   </div>
   <div className={styles.status}>
    <strong className={result.status==='incomplete'?styles.warning:styles.gold}>
-    {result.status==='empty'?'후보 기록 대기':result.status==='incomplete'?'계좌 검증 미완료':sufficient?'관측된 모의 계좌 성과':'검증 표본 축적 중'}
+    {result.status==='empty'?'후보 기록 대기':result.status==='incomplete'?'계좌 검증 미완료':sufficient?'모의 계좌 관측 · 충분한 표본':observed?'모의 계좌 관측 · 표본 부족':'검증 표본 축적 중'}
    </strong>
    <span>종가 평가 {result.days.length}거래일 · 청산 {result.trades.length}건 · 서로 다른 진입일 {tradeDays}일 · {data.portfolioLookbackDays}일 범위</span>
   </div>
   <div className={styles.metrics}>
-   <div><small>가상 계좌 누적 수익률</small><strong className={exitStyles(sufficient?result.totalReturnPct:null)}>{sufficient?percentages(result.totalReturnPct):'—'}</strong><span>초기 1억 원 대비 순자산 · 비용 가정 반영</span></div>
-   <div><small>최대 낙폭 (MDD)</small><strong className={exitStyles(sufficient?result.maxDrawdownPct:null)}>{sufficient?percentages(result.maxDrawdownPct):'—'}</strong><span>계좌 일별 종가 기준 · 장중 MDD 아님</span></div>
-   <div><small>가상 현금 비중</small><strong>{sufficient?percentages(result.cashEndPct):'—'}</strong><span>시장 상태·현금 투자 여력 반영</span></div>
-   <div><small>최대 연속 손실일</small><strong>{sufficient?result.maxConsecutiveLossDays+'일':'—'}</strong><span>청산 손익이 음수인 거래일 연속</span></div>
+   <div><small>가상 계좌 누적 수익률</small><strong className={exitStyles(observed?result.totalReturnPct:null)}>{observed?percentages(result.totalReturnPct):'—'}</strong><span>초기 1억 원 대비 순자산 · 비용 가정 반영</span></div>
+   <div><small>최대 낙폭 (MDD)</small><strong className={exitStyles(observed?result.maxDrawdownPct:null)}>{observed?percentages(result.maxDrawdownPct):'—'}</strong><span>계좌 일별 종가 기준 · 장중 MDD 아님</span></div>
+   <div><small>가상 현금 비중</small><strong>{observed?percentages(result.cashEndPct):'—'}</strong><span>시장 상태·현금 투자 여력 반영</span></div>
+   <div><small>최대 연속 손실일</small><strong>{observed?result.maxConsecutiveLossDays+'일':'—'}</strong><span>청산 손익이 음수인 거래일 연속</span></div>
   </div>
   <div className={styles.chartWrap}>
    <div className={styles.chartHead}><h3>계좌 순자산 변화</h3><span>시작 지수 100 · 확정된 종가만 표시</span></div>
    <div className={styles.chart}>
-    {!sufficient?<div className={styles.empty}>
-      {result.status==='incomplete'? '평가가격 누락으로 계좌 시뮬레이션이 중단됐습니다.':'최소 30개 청산과 서로 다른 10거래일의 진입 기록이 쌓인 뒤 순자산 차트를 표시합니다.'}
+    {!observed?<div className={styles.empty}>
+      {result.status==='incomplete'? '평가가격 누락으로 계좌 시뮬레이션이 중단됐습니다.':'실제 청산 1건 이상과 2개 거래일의 종가가 확인되면 계좌 관측 차트가 표시됩니다.'}
     </div>:<ResponsiveContainer width="100%" height="100%">
      <LineChart data={chart} margin={{left:0,right:20,top:20,bottom:10}}>
       <CartesianGrid vertical={false} stroke="#354034" strokeDasharray="3 4"/>
@@ -116,6 +117,6 @@ export default function AiResearchPortfolio({data}:{data:AiResearchPayload}){
    <span>시장 판정 유보일 <strong>{result.unknownRegimes}일</strong></span>
    <span>가격 누락 <strong>{result.rejectedMissingPrice}건</strong></span>
   </div>
-  <p className={styles.disclaimer}><strong>연구용 포트폴리오</strong> 비중 80/50/20%, 낙폭 -8%, 종목당 20%, 연속 손실 휴식은 검증된 최적값이 아닌 고정 연구 가정입니다. 지난 종가에서 손실을 확인한 후 <strong>다음 거래일</strong>부터 신규 진입을 제한하며 보유 종목을 즉시 강제 청산하지 않습니다. 소수점 수량·당일 시가 진입·종가 청산 및 왕복비용 분할은 실행 불가능할 수 있는 가상 가정입니다. 미확정·누락 가격은 보정하지 않고, 첫 관측일 전 기존 포지션을 소급하지 않으므로 계산 기간 밖의 손실·거래 기회는 반영되지 않습니다. 이는 30일 이내 연구 표본일 뿐 실제 계좌 수익률이나 위험 한도 보장이 아닙니다.</p>
+  <p className={styles.disclaimer}><strong>연구용 포트폴리오</strong> 비중 80/50/20%, 낙폭 -8%, 종목당 20%, 연속 손실 휴식은 검증된 최적값이 아닌 고정 연구 가정입니다. 지난 종가에서 손실을 확인한 후 <strong>다음 거래일</strong>부터 신규 진입을 제한하며 보유 종목을 즉시 강제 청산하지 않습니다. 소수점 수량·당일 시가 진입·종가 청산 및 왕복비용 분할은 실행 불가능할 수 있는 가상 가정입니다. 미확정·누락 가격은 보정하지 않고, 첫 관측일 전 기존 포지션을 소급하지 않으므로 계산 기간 밖의 손실·거래 기회는 반영되지 않습니다. 청산 30건·서로 다른 진입일 10일 미만은 소표본 관측값이므로 전략 우위 판단에 활용하지 않습니다. 이는 30일 이내 연구 표본일 뿐 실제 계좌 수익률이나 위험 한도 보장이 아닙니다.</p>
  </section>;
 }
