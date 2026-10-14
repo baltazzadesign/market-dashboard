@@ -150,11 +150,13 @@ async function close(date:string){
     }
     for(const pick of signal.picks){
       const start=calendar.indexOf(signal.trade_date);
-      const due=[0,1,3,5].filter(h=>start>=0&&calendar[start+h]&&
+      if(start<0){unavailable+=4;continue;} // Missing exchange calendar: never invent a holding period.
+      const horizons=[0,1,3,5];
+      const due=horizons.filter(h=>Boolean(calendar[start+h])&&
         !completed.has([signal.trade_date,signal.strategy,pick.code,h].join(':')));
       if(!due.length){
+        pending+=horizons.filter(h=>!calendar[start+h]).length;
         alreadyRecorded++;
-        if(start<0)pending+=4;
         continue;
       }
       const cacheKey=pick.code+':'+signal.trade_date;
