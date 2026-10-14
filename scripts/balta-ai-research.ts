@@ -17,6 +17,7 @@ const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'')
 const secret=process.env.SUPABASE_SERVICE_ROLE_KEY;
 if(!base||!secret)throw Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required');
 const holidays=parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
+const scoredStrategies=[...researchStrategies,FLOW_PERSIST_V1] as const;
 
 async function db<T>(resource:string,options:RequestInit={}):Promise<T>{
   return retryResearch(async()=>{
@@ -63,7 +64,7 @@ async function loadOutcomeRows(from:string,onlyHorizon?:number):Promise<OutcomeF
 }
 async function morning(date:string){
   const existing=await db<Pick<Signal,'strategy'>[]>('balta_ai_signals?select=strategy&trade_date=eq.'+date);
-  const allStrategies=[...researchStrategies,FLOW_PERSIST_V1] as const;
+  const allStrategies=scoredStrategies;
   if(allStrategies.every(strategy=>existing.some(s=>s.strategy===strategy))){console.log('Morning signals already frozen for',date);return;}
   const sourceRows=await db<ResearchHistoryRow[]>('investor_flow_history?select=date,universe_date,observed_at,snapshot&date=lt.'+date+'&order=date.desc&limit=6');
   const observedAt=new Date().toISOString();
@@ -73,25 +74,27 @@ async function morning(date:string){
   const market=await db<{trade_date:string;snapshot:unknown;updated_at:string}[]>('market_daily?select=trade_date,snapshot,updated_at&trade_date=lte.'+source.date+'&order=trade_date.desc&limit=1');
   // Do not use a market snapshot that was written after the morning signal time.
   const validMarket=market[0]&&Date.parse(market[0].updated_at)<=Date.parse(observedAt)?market[0]:null;
-  const preference=comparePairedDailyReturns(await loadOutcomeRows(earliestDate(120,date),1));
+  const pastOutcomes=await loadOutcomeRows(earliestDate(120,date),1);
+  const preference=comparePairedDailyReturns(pastOutcomes);
+  const persistentPreference=comparePairedDailyReturns(pastOutcomes,30,10,FLOW_PERSIST_V1);
   for(const strategy of allStrategies)if(!existing.some(s=>s.strategy===strategy)){
     if(strategy===FLOW_PERSIST_V1&&experimental.status!=='ready')continue;
     await insertImmutable('balta_ai_signals',{trade_date:date,strategy,source_date:source.date,
       source_observed_at:source.observed_at,source_snapshot:{
         rows:sourceRows.map(r=>({date:r.date,universe_date:r.universe_date,observed_at:r.observed_at})),
         feature_contract:'foreign/institution/pension daily net in eok_krw; prior values fixed in picks',
-        universe:coverage.universe,qualified:coverage.qualified,preference,
+        universe:coverage.universe,qualified:coverage.qualified,preference,persistentPreference,
         experiment:strategy===FLOW_PERSIST_V1?{status:experimental.status,reason:experimental.reason,
           sourceDates:experimental.sourceDates,coverage:experimental.coverage,
           normalization:'5-session own mean absolute foreign+institution net flow (floor 1eok); not turnover-adjusted'}:null
       },market_snapshot:validMarket??{},picks:selections[strategy]},'trade_date,strategy');
   }
   await runLog(date,'morning',experimental.status==='ready'?'complete':'incomplete',{
-    source_date:source.date,coverage,preference,
+    source_date:source.date,coverage,preference,persistentPreference,
     experimental:{status:experimental.status,reason:experimental.reason,coverage:experimental.coverage},
     per_strategy:Object.fromEntries(allStrategies.map(s=>[s,s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length]))
   });
-  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,experimentStatus:experimental.status,signals:selections},null,2));
+  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,persistentPreference,experimentStatus:experimental.status,signals:selections},null,2));
 }
 async function tradingCalendar(date:string):Promise<string[]>{
   // KIS caches failed responses for 10 seconds; retry once after its cooldown.
@@ -257,16 +260,18 @@ async function close(date:string){
   // One failed KOSPI/KOSDAQ source never becomes a fabricated 0% index return.
   const benchmark=await saveMarketBenchmarks(signals,calendar,date);
   const summary=await loadOutcomeRows(prior);
-  const preference=comparePairedDailyReturns(await loadOutcomeRows(earliestDate(120,date),1));
-  const comparison=Object.fromEntries(researchStrategies.map(strategy=>[strategy,[0,1,3,5].map(horizon=>{
+  const priorResults=await loadOutcomeRows(earliestDate(120,date),1);
+  const preference=comparePairedDailyReturns(priorResults);
+  const persistentPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_PERSIST_V1);
+  const comparison=Object.fromEntries(scoredStrategies.map(strategy=>[strategy,[0,1,3,5].map(horizon=>{
     const r=summary.filter(s=>s.strategy===strategy&&s.horizon===horizon);
     const avg=r.length?r.reduce((a,b)=>a+Number(b.return_pct),0)/r.length:null;
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
   await runLog(date,'close',sourceErrors||unavailable||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
-    preference,caution:'Benchmark comparisons require same entry/exit dates. No trading costs, slippage or validated real-money alpha.'});
-  console.log(JSON.stringify({date,phase:'close',attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference},null,2));
+    preference,persistentPreference,caution:'Benchmark comparisons require same entry/exit dates. No trading costs, slippage or validated real-money alpha.'});
+  console.log(JSON.stringify({date,phase:'close',attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
