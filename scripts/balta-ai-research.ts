@@ -10,6 +10,7 @@ import { kisTerminal, outputRows } from '../lib/kis-terminal';
 import { parseStockBars, stockDate, stockNumber, type StockBar } from '../lib/stock-flow-model';
 import { retryResearch, RetryableResearchError, failureReason } from '../lib/balta-ai-reliability';
 import { parseIndexBars, benchmarkKey, type AiMarket, type AiBenchmark } from '../lib/balta-ai-benchmark';
+import { fiveDayPersistentFlow, FLOW_PERSIST_V1 } from '../lib/balta-ai-flow-strategy';
 
 type Signal={trade_date:string;strategy:string;source_date:string;generated_at:string;picks:ResearchPick[]};
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
@@ -62,24 +63,35 @@ async function loadOutcomeRows(from:string,onlyHorizon?:number):Promise<OutcomeF
 }
 async function morning(date:string){
   const existing=await db<Pick<Signal,'strategy'>[]>('balta_ai_signals?select=strategy&trade_date=eq.'+date);
-  if(existing.length===researchStrategies.length){console.log('Morning signal already frozen for',date);return;}
-  const sourceRows=await db<ResearchHistoryRow[]>('investor_flow_history?select=date,universe_date,observed_at,snapshot&date=lt.'+date+'&order=date.desc&limit=4');
+  const allStrategies=[...researchStrategies,FLOW_PERSIST_V1] as const;
+  if(allStrategies.every(strategy=>existing.some(s=>s.strategy===strategy))){console.log('Morning signals already frozen for',date);return;}
+  const sourceRows=await db<ResearchHistoryRow[]>('investor_flow_history?select=date,universe_date,observed_at,snapshot&date=lt.'+date+'&order=date.desc&limit=6');
   const observedAt=new Date().toISOString();
-  const {source,picks,coverage}=selectResearchCandidates(sourceRows,date,observedAt,holidays);
+  const {source,picks:baselinePicks,coverage}=selectResearchCandidates(sourceRows,date,observedAt,holidays);
+  const experimental=fiveDayPersistentFlow(sourceRows,observedAt);
+  const selections={...baselinePicks,[FLOW_PERSIST_V1]:experimental.picks};
   const market=await db<{trade_date:string;snapshot:unknown;updated_at:string}[]>('market_daily?select=trade_date,snapshot,updated_at&trade_date=lte.'+source.date+'&order=trade_date.desc&limit=1');
   // Do not use a market snapshot that was written after the morning signal time.
   const validMarket=market[0]&&Date.parse(market[0].updated_at)<=Date.parse(observedAt)?market[0]:null;
   const preference=comparePairedDailyReturns(await loadOutcomeRows(earliestDate(120,date),1));
-  for(const strategy of researchStrategies)if(!existing.some(s=>s.strategy===strategy)){
+  for(const strategy of allStrategies)if(!existing.some(s=>s.strategy===strategy)){
+    if(strategy===FLOW_PERSIST_V1&&experimental.status!=='ready')continue;
     await insertImmutable('balta_ai_signals',{trade_date:date,strategy,source_date:source.date,
       source_observed_at:source.observed_at,source_snapshot:{
         rows:sourceRows.map(r=>({date:r.date,universe_date:r.universe_date,observed_at:r.observed_at})),
         feature_contract:'foreign/institution/pension daily net in eok_krw; prior values fixed in picks',
-        universe:coverage.universe,qualified:coverage.qualified,preference
-      },market_snapshot:validMarket??{},picks:picks[strategy]},'trade_date,strategy');
+        universe:coverage.universe,qualified:coverage.qualified,preference,
+        experiment:strategy===FLOW_PERSIST_V1?{status:experimental.status,reason:experimental.reason,
+          sourceDates:experimental.sourceDates,coverage:experimental.coverage,
+          normalization:'5-session own mean absolute foreign+institution net flow (floor 1eok); not turnover-adjusted'}:null
+      },market_snapshot:validMarket??{},picks:selections[strategy]},'trade_date,strategy');
   }
-  await runLog(date,'morning','complete',{source_date:source.date,coverage,preference,per_strategy:Object.fromEntries(researchStrategies.map(s=>[s,picks[s].length]))});
-  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,signals:picks},null,2));
+  await runLog(date,'morning',experimental.status==='ready'?'complete':'incomplete',{
+    source_date:source.date,coverage,preference,
+    experimental:{status:experimental.status,reason:experimental.reason,coverage:experimental.coverage},
+    per_strategy:Object.fromEntries(allStrategies.map(s=>[s,s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length]))
+  });
+  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,experimentStatus:experimental.status,signals:selections},null,2));
 }
 async function tradingCalendar(date:string):Promise<string[]>{
   // KIS caches failed responses for 10 seconds; retry once after its cooldown.
