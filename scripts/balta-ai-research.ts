@@ -357,6 +357,38 @@ async function saveMarketBenchmarks(signals:Signal[],calendar:string[],date:stri
  }
  return {targetMarkets:targets.size,recorded,missing,pending};
 }
+
+// The portfolio study archives only OHLC obtained from the existing paper KIS
+// after-close path. Sessions are confirmed from the daily KOSPI index, not inferred
+// from stock-price availability (which can include halts or missing observations).
+async function savedPortfolioBarKeys(from:string):Promise<Set<string>>{
+ const saved=new Set<string>();
+ for(let offset=0;offset<=19500;offset+=500){
+  const q=new URLSearchParams({select:'trade_date,stock_code',trade_date:'gte.'+from,
+    order:'trade_date.asc,stock_code.asc',limit:'500',offset:String(offset)});
+  const page=await db<{trade_date:string;stock_code:string}[]>('balta_ai_portfolio_bars?'+q.toString());
+  if(!Array.isArray(page))throw Error('Invalid portfolio price-ledger response');
+  for(const p of page)saved.add(p.trade_date+':'+p.stock_code);
+  if(page.length<500)return saved;
+ }
+ throw Error('Portfolio daily marks exceed bounded query window');
+}
+async function archivePortfolioSessions(calendar:string[]):Promise<void>{
+ const rows=calendar.map(trade_date=>({trade_date,source:'KIS_KOSPI_DAILY'}));
+ for(let i=0;i<rows.length;i+=200)await insertImmutable('balta_ai_market_sessions',rows.slice(i,i+200),'trade_date');
+}
+async function archivePortfolioBars(
+ collected:Map<string,{trade_date:string;stock_code:string;open:number;high:number;low:number;close:number}>,
+ known:Set<string>
+):Promise<number>{
+ const rows=[...collected].filter(([key])=>!known.has(key)).map(([,row])=>row);
+ for(let i=0;i<rows.length;i+=200){
+  await insertImmutable('balta_ai_portfolio_bars',rows.slice(i,i+200),'trade_date,stock_code');
+ }
+ for(const row of rows)known.add(row.trade_date+':'+row.stock_code);
+ return rows.length;
+}
+
 async function close(date:string){
   const prior=earliestDate(25,date);
   const signals=await db<Signal[]>('balta_ai_signals?select=trade_date,strategy,source_date,generated_at,picks&trade_date=gte.'+prior+'&trade_date=lte.'+date+'&order=trade_date.desc&limit=90');
@@ -368,6 +400,10 @@ async function close(date:string){
     return;
   }
   const calendar=await tradingCalendar(date);
+  await archivePortfolioSessions(calendar);
+  const archivedBars=await savedPortfolioBarKeys(prior);
+  const newPortfolioBars=new Map<string,{trade_date:string;stock_code:string;open:number;high:number;low:number;close:number}>();
+  let missingPortfolioMarks=0;
   const completed=await savedOutcomeKeys(prior);
   const completedSims=await savedSimulationKeys(prior);
   const completedFollowups=await savedStopFollowupKeys(prior);
@@ -389,7 +425,9 @@ async function close(date:string){
       const existingKey=[signal.trade_date,signal.strategy,pick.code].join(':');
       const simRows=pastSimulationRows.get(existingKey)??[];
       const needsStopFollowup=dueStopEvents(simRows,completedFollowups,calendar,date).length>0;
-      if(!due.length&&!needsStopFollowup){
+      const age=calendar.indexOf(date)-start;
+      const needsPortfolioMark=age>=0&&age<=5&&!archivedBars.has(date+':'+pick.code);
+      if(!due.length&&!needsStopFollowup&&!needsPortfolioMark){
         pending+=horizons.filter(h=>!calendar[start+h]).length;
         alreadyRecorded++;
         continue;
@@ -398,6 +436,14 @@ async function close(date:string){
       if(!cache.has(cacheKey))cache.set(cacheKey,getBars(pick.code,signal.trade_date,date));
       let bars:StockBar[];
       try{bars=await cache.get(cacheKey)!;}catch{sourceErrors++;cache.delete(cacheKey);continue;}
+      for(const b of bars){
+       if(b.date<signal.trade_date||b.date>date||!calendar.includes(b.date))continue;
+       const k=b.date+':'+pick.code;
+       if(!archivedBars.has(k)&&!newPortfolioBars.has(k))
+        newPortfolioBars.set(k,{trade_date:b.date,stock_code:pick.code,
+          open:b.open,high:b.high,low:b.low,close:b.close});
+      }
+      if(needsPortfolioMark&&!bars.some(b=>b.date===date))missingPortfolioMarks++;
       const marks=due.length?markResearchOutcomes(signal.trade_date,calendar,bars,date):[];
       const simMarks=due.length?simulateExits(signal.trade_date,calendar,bars,date):[];
       for(const mark of marks){
@@ -442,6 +488,7 @@ async function close(date:string){
       }
     }
   }
+  const priceBarsArchived=await archivePortfolioBars(newPortfolioBars,archivedBars);
   // Benchmarks are independently archived and compared only on exact stock entry/exit dates.
   // One failed KOSPI/KOSDAQ source never becomes a fabricated 0% index return.
   const benchmark=await saveMarketBenchmarks(signals,calendar,date);
@@ -456,9 +503,9 @@ async function close(date:string){
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
-  await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||followupUnavailable||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
+  await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||followupUnavailable||missingPortfolioMarks||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
     preference,persistentPreference,liquidityPreference,caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
-  console.log(JSON.stringify({date,phase:'close',attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference},null,2));
+  console.log(JSON.stringify({date,phase:'close',attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
