@@ -12,7 +12,9 @@ import { retryResearch, RetryableResearchError, failureReason } from '../lib/bal
 import { parseIndexBars, benchmarkKey, type AiMarket, type AiBenchmark } from '../lib/balta-ai-benchmark';
 import { fiveDayPersistentFlow, FLOW_PERSIST_V1, type PersistentFlowPick } from '../lib/balta-ai-flow-strategy';
 import { FLOW_LIQUID_V1, evaluateLiquidity, parseMarketCap, parseTurnoverBars, type LiquidityPick } from '../lib/balta-ai-liquidity';
-import { simulateExits } from '../lib/balta-ai-exits';
+import { simulateExits,type SimulationViewRow } from '../lib/balta-ai-exits';
+import { stopEvents,assessStopFollowup,stopKey,followupHorizons,
+  type StopFollowup,type StopEvent } from '../lib/balta-ai-stop-policy';
 
 type Signal={trade_date:string;strategy:string;source_date:string;generated_at:string;picks:ResearchPick[]};
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
@@ -243,6 +245,72 @@ async function savedSimulationKeys(from:string):Promise<Set<string>>{
  }
  throw Error('Simulation ledger exceeded safe page window');
 }
+
+type RawStopFollowupKey=Pick<StopFollowup,'trade_date'|'strategy'|'stock_code'|'scenario'|'stop_date'|'followup_horizon'>;
+async function savedStopFollowupKeys(from:string):Promise<Set<string>>{
+ const records=new Set<string>();
+ for(let offset=0;offset<=19500;offset+=500){
+  const q=new URLSearchParams({
+   select:'trade_date,strategy,stock_code,scenario,stop_date,followup_horizon',
+   trade_date:'gte.'+from,
+   order:'trade_date.asc,strategy.asc,stock_code.asc,scenario.asc,stop_date.asc,followup_horizon.asc',
+   limit:'500',offset:String(offset)
+  });
+  const page=await db<RawStopFollowupKey[]>('balta_ai_stop_followups?'+q.toString());
+  if(!Array.isArray(page))throw Error('Invalid post-stop study ledger');
+  for(const x of page)records.add(stopKey(x));
+  if(page.length<500)return records;
+ }
+ throw Error('Post-stop study ledger pagination cap reached');
+}
+async function existingSimulationRows(from:string):Promise<Map<string,SimulationViewRow[]>>{
+ const result=new Map<string,SimulationViewRow[]>();
+ for(let offset=0;offset<=19500;offset+=500){
+  const q=new URLSearchParams({
+   select:'trade_date,strategy,stock_code,horizon,entry_date,entry_open,scenario_version,scenarios',
+   trade_date:'gte.'+from,scenario_version:'eq.BALTA_OHLC_EXIT_V1',
+   order:'trade_date.asc,strategy.asc,stock_code.asc,horizon.asc',limit:'500',offset:String(offset)
+  });
+  const page=await db<SimulationViewRow[]>('balta_ai_exit_simulations?'+q.toString());
+  if(!Array.isArray(page))throw Error('Invalid exit simulations archive');
+  for(const row of page){
+   const key=[row.trade_date,row.strategy,row.stock_code].join(':');
+   const arr=result.get(key)??[];
+   arr.push(row);result.set(key,arr);
+  }
+  if(page.length<500)return result;
+ }
+ throw Error('Exit simulations study pagination cap reached');
+}
+function dueStopEvents(
+ rows:SimulationViewRow[],completed:Set<string>,calendar:string[],asOf:string
+):StopEvent[]{
+ return stopEvents(rows).filter(event=>{
+  const idx=calendar.indexOf(event.stop_date);
+  return idx>=0&&followupHorizons.some(h=>{
+   const settlement=calendar[idx+h];
+   return Boolean(settlement&&settlement<=asOf&&!completed.has(stopKey({...event,followup_horizon:h})));
+  });
+ });
+}
+async function saveStockStopFollowups(
+ rows:SimulationViewRow[],calendar:string[],bars:StockBar[],asOf:string,completed:Set<string>
+){
+ let recorded=0,unavailable=0;
+ for(const event of dueStopEvents(rows,completed,calendar,asOf)){
+  for(const h of followupHorizons){
+   const key=stopKey({...event,followup_horizon:h});
+   if(completed.has(key))continue;
+   const mark=assessStopFollowup(event,h,calendar,bars,asOf);
+   if(mark.status==='pending')continue;
+   if(mark.status==='unavailable'){unavailable++;continue;}
+   await insertImmutable('balta_ai_stop_followups',mark.value,
+    'trade_date,strategy,stock_code,scenario,stop_date,followup_horizon');
+   completed.add(key);recorded++;
+  }
+ }
+ return {recorded,unavailable};
+}
 async function saveMarketBenchmarks(signals:Signal[],calendar:string[],date:string){
  const from=earliestDate(25,date);
  const previous=await db<Pick<AiBenchmark,'trade_date'|'market'|'horizon'>[]>(
@@ -300,8 +368,10 @@ async function close(date:string){
   const calendar=await tradingCalendar(date);
   const completed=await savedOutcomeKeys(prior);
   const completedSims=await savedSimulationKeys(prior);
+  const completedFollowups=await savedStopFollowupKeys(prior);
+  const pastSimulationRows=await existingSimulationRows(prior);
   let attempted=0,pending=0,unavailable=0,sourceErrors=0,alreadyRecorded=0;
-  let simulationsRecorded=0,simulationUnavailable=0;
+  let simulationsRecorded=0,simulationUnavailable=0,stopFollowupsRecorded=0,followupUnavailable=0;
   const cache=new Map<string,Promise<StockBar[]>>();
   for(const signal of signals){
     if(Date.parse(signal.generated_at)>=Date.parse(signal.trade_date+'T09:00:00+09:00')){
@@ -314,7 +384,10 @@ async function close(date:string){
       const due=horizons.filter(h=>Boolean(calendar[start+h])&&(
         !completed.has([signal.trade_date,signal.strategy,pick.code,h].join(':'))||
         !completedSims.has([signal.trade_date,signal.strategy,pick.code,h].join(':'))));
-      if(!due.length){
+      const existingKey=[signal.trade_date,signal.strategy,pick.code].join(':');
+      const simRows=pastSimulationRows.get(existingKey)??[];
+      const needsStopFollowup=dueStopEvents(simRows,completedFollowups,calendar,date).length>0;
+      if(!due.length&&!needsStopFollowup){
         pending+=horizons.filter(h=>!calendar[start+h]).length;
         alreadyRecorded++;
         continue;
@@ -323,7 +396,8 @@ async function close(date:string){
       if(!cache.has(cacheKey))cache.set(cacheKey,getBars(pick.code,signal.trade_date,date));
       let bars:StockBar[];
       try{bars=await cache.get(cacheKey)!;}catch{sourceErrors++;cache.delete(cacheKey);continue;}
-      const marks=markResearchOutcomes(signal.trade_date,calendar,bars,date);
+      const marks=due.length?markResearchOutcomes(signal.trade_date,calendar,bars,date):[];
+      const simMarks=due.length?simulateExits(signal.trade_date,calendar,bars,date):[];
       for(const mark of marks){
         if(mark.status==='ready'&&completed.has([signal.trade_date,signal.strategy,pick.code,mark.value.horizon].join(':'))&&
           completedSims.has([signal.trade_date,signal.strategy,pick.code,mark.value.horizon].join(':')))
@@ -343,8 +417,7 @@ async function close(date:string){
           completed.add(recordKey);
         }
         if(!completedSims.has(recordKey)){
-          const sim=simulateExits(signal.trade_date,calendar,bars,date)
-            .find(x=>x.status==='ready'&&x.value.horizon===result.horizon);
+          const sim=simMarks.find(x=>x.status==='ready'&&x.value.horizon===result.horizon);
           if(sim?.status!=='ready'){
             simulationUnavailable++;
             continue; // Never manufacture stop/take results without complete daily OHLC.
@@ -355,7 +428,15 @@ async function close(date:string){
           },'trade_date,strategy,stock_code,horizon,scenario_version');
           completedSims.add(recordKey);
           simulationsRecorded++;
+          simRows.push({...sim.value,strategy:signal.strategy,stock_code:pick.code});
         }
+      }
+      if(simRows.length){
+        // Re-evaluate only STOP events with future sessions due. No stop-day high is
+        // permitted as evidence of a post-stop rebound; empty intervals are not zero.
+        const follow=await saveStockStopFollowups(simRows,calendar,bars,date,completedFollowups);
+        stopFollowupsRecorded+=follow.recorded;
+        followupUnavailable+=follow.unavailable;
       }
     }
   }
@@ -373,9 +454,9 @@ async function close(date:string){
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
-  await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,simulationsRecorded,simulationUnavailable,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
+  await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||followupUnavailable||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
     preference,persistentPreference,liquidityPreference,caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
-  console.log(JSON.stringify({date,phase:'close',attempted,simulationsRecorded,simulationUnavailable,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference},null,2));
+  console.log(JSON.stringify({date,phase:'close',attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
