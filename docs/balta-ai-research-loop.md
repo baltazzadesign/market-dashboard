@@ -28,6 +28,18 @@ This is a **paper-research prototype**, not a live trading system. Its pure sign
 6. The GitHub CI runs offline candidate and outcome tests and TypeScript compilation. End-to-end KIS/Supabase response simulations, idempotency, price adjustments, throughput, and live first-run validation remain required.
 7. Add transaction costs, market benchmark, a measured baseline and chronological walk-forward comparison before updating any signal selection weights.
 
+## Paper stop/take simulation (2026-10-14, version BALTA_OHLC_EXIT_V1)
+
+- The live scheduler runs exactly the four original horizons (0,1,3,5 KRX sessions) and uses the *same* read-only KIS adjusted OHLC fetched for the independent stock outcomes. It never issues an actual order.
+- New append-only table `balta_ai_exit_simulations` has its own PK (signal date, strategy, stock, horizon, simulation version). Existing immutable `balta_ai_outcomes`, index benchmarks, candidate signals and algorithm rankings are not edited.
+- Four pre-defined scenarios, frozen before performance is observed: `HOLD` (close at requested horizon), `STOP_3` (-3% stop), `TP5_SL3` (+5% take/-3% stop), `TP8_SL5` (+8% take/-5% stop).
+- Hypothetical entry: same-day adjusted open. After entry, open gaps across stop/take exit at next bar's adjusted open; when same day's high and low touch both stop and take, **stop is chosen first**, since intraday sequence is unknown.
+- Even an early stop/take is not saved under a future horizon until *that horizon's market session is complete*, so horizon comparisons use the same information cutoff. Missing or invalid daily OHLC (stock halt, failed source) does not turn into zero return. All scenarios are rechecked from frozen inputs when needed; no previously stored record is rewritten.
+- Stored exit data are **gross** returns. The browser subtracts a user-selectable flat round-trip illustrative cost (0, 0.15, 0.30, 0.50 or 1% of entry notional, approximated as a percentage-point deduction). No specific broker fees, tax schedules, slippage or order fill are asserted or validated.
+- Display scenario performance only after **at least 30 observations across 10 distinct signal dates**; before that, show counts and `—` for returns. Summary worst individual trade is *not* maximum drawdown of a portfolio.
+- The API exposes only the last 30 calendar days of simulation records to cap response size even if the main screen is filtered to 60/90 days; this coverage is declared in the response and UI. Later, extend with server-side aggregates for a true long-period report.
+- Vendor-adjusted historical OHLC, unknown intraday order, opening gaps and unmodeled liquidity make this an **exploratory backtest**, not a replicable live trade history or a calibrated expected return.
+
 ## Experimental version 3: FLOW_PERSIST_V1 (2026-10-14)
 - Baselines `FLOW_V1` and `FLOW_ACCEL_V1` retain exactly their original frozen candidate logic and history.
 - Only the five actual market sessions ending immediately before the signal are eligible. Missing sessions, future-observed snapshots, or missing foreign/institution net amounts are not imputed.

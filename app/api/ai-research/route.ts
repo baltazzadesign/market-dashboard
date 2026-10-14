@@ -14,12 +14,13 @@ function beginning(today:string,days:number):string{
   return d.toISOString().slice(0,10);
 }
 async function allRows(
-  table:'balta_ai_signals'|'balta_ai_outcomes'|'balta_ai_run_log'|'balta_ai_benchmarks',
+  table:'balta_ai_signals'|'balta_ai_outcomes'|'balta_ai_run_log'|'balta_ai_benchmarks'|'balta_ai_exit_simulations',
   columns:string,start:string,today:string,signal:AbortSignal
 ):Promise<Record<string,unknown>[]>{
   const all:Record<string,unknown>[]=[];
   // Stable total order is mandatory for paginating multiple rows on the same signal date.
-  const order=table==='balta_ai_benchmarks'?'trade_date.desc,market.asc,horizon.asc'
+  const order=table==='balta_ai_exit_simulations'?'trade_date.desc,strategy.asc,stock_code.asc,horizon.asc,scenario_version.asc'
+    :table==='balta_ai_benchmarks'?'trade_date.desc,market.asc,horizon.asc'
     :table==='balta_ai_outcomes'?'trade_date.desc,strategy.asc,stock_code.asc,horizon.asc'
     :table==='balta_ai_signals'?'trade_date.desc,strategy.asc':'trade_date.desc,phase.asc';
   for(let offset=0;offset<12000;offset+=500){
@@ -40,17 +41,21 @@ export async function GET(request:Request){
     const raw=new URL(request.url).searchParams.get('days')??'30';
     if(!['7','30','60','90'].includes(raw))throw new MarketDataError('조회 기간을 확인해 주세요.',400);
     const days=Number(raw),asOf=kstParts().date,from=beginning(asOf,days);
-    const [signals,outcomes,benchmarks,runs]=await Promise.all([
+    const simulationLookbackDays=Math.min(days,30);
+    const simFrom=beginning(asOf,simulationLookbackDays);
+    const [signals,outcomes,benchmarks,simulations,runs]=await Promise.all([
       allRows('balta_ai_signals','trade_date,strategy,source_date,source_observed_at,generated_at,market_snapshot,picks',from,asOf,request.signal),
       allRows('balta_ai_outcomes','trade_date,strategy,stock_code,horizon,return_pct,entry_date,exit_date,entry_open,exit_close',from,asOf,request.signal),
       allRows('balta_ai_benchmarks','trade_date,market,horizon,entry_date,exit_date,entry_open,exit_close,return_pct',from,asOf,request.signal),
+      allRows('balta_ai_exit_simulations','trade_date,strategy,stock_code,horizon,entry_date,entry_open,scenario_version,scenarios',simFrom,asOf,request.signal),
       allRows('balta_ai_run_log','trade_date,phase,result,executed_at,details',from,asOf,request.signal)
     ]);
     const result:AiResearchPayload={ok:true,asOf,serverNow:new Date().toISOString(),
-      additionalHolidays:parseAdditionalHolidays(process.env.MARKET_HOLIDAYS),lookbackDays:days,
+      additionalHolidays:parseAdditionalHolidays(process.env.MARKET_HOLIDAYS),lookbackDays:days,simulationLookbackDays,
       signals:signals as unknown as AiSignal[],
       outcomes:outcomes as unknown as AiOutcome[],
       benchmarks:benchmarks as AiResearchPayload['benchmarks'],
+      simulations:simulations as AiResearchPayload['simulations'],
       runs:runs as unknown as AiRun[]};
     return Response.json(result,{headers:{'Cache-Control':'private, no-store'}});
   }catch(e){return marketError(e);}
