@@ -12,7 +12,7 @@ export type AiPick={
 };
 export type AiSignal={
   trade_date:string;strategy:AiStrategy;source_date:string;source_observed_at:string;
-  generated_at:string;picks:AiPick[]
+  generated_at:string;picks:AiPick[];market_snapshot?:unknown
 };
 export type AiOutcome={
   trade_date:string;strategy:AiStrategy;stock_code:string;horizon:number;
@@ -20,7 +20,7 @@ export type AiOutcome={
 };
 export type AiRun={trade_date:string;phase:'morning'|'close';result:'complete'|'skipped'|'incomplete';executed_at:string;details:Record<string,unknown>};
 export type AiResearchPayload={
-  ok:true;asOf:string;lookbackDays:number;signals:AiSignal[];outcomes:AiOutcome[];benchmarks:AiBenchmark[];runs:AiRun[]
+  ok:true;asOf:string;serverNow:string;additionalHolidays:string[];lookbackDays:number;signals:AiSignal[];outcomes:AiOutcome[];benchmarks:AiBenchmark[];runs:AiRun[]
 };
 export type AiPerformance={
   observations:number;wins:number;winRate:number|null;mean:number|null;median:number|null
