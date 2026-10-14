@@ -7,7 +7,8 @@ export type CheckState='waiting'|'healthy'|'partial'|'missed'|'closed';
 export type PhaseCheck={phase:'morning'|'close';date:string;state:CheckState;label:string;detail:string;
  expectedAfterKst:string;latestRun:string|null};
 export type ResearchHealth={morning:PhaseCheck;close:PhaseCheck;signals:number;
- candidates:number;zeroDayMarks:number;benchmarks:number;latestTradingDate:string};
+ candidates:number;zeroDayMarks:number;benchmarks:number;latestTradingDate:string;
+ sourceDate:string|null;expectedSourceDate:string;sourceFreshness:'waiting'|'current'|'stale'};
 const activationDate='2026-10-15'; // First eligible KST automated research session.
 function kst(iso:string){
  const d=new Date(iso);
@@ -58,11 +59,19 @@ export function researchHealth(input:{
  const sorted=[...input.runs].sort((a,b)=>b.executed_at.localeCompare(a.executed_at));
  const sameSignals=input.signals.filter(s=>s.trade_date===day);
  const picks=sameSignals.reduce((n,s)=>n+s.picks.length,0);
+ const d=new Date(day+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-1);
+ const expectedSourceDate=previousTradingDate(d.toISOString().slice(0,10),holidays);
+ const sourceDate=sameSignals[0]?.source_date??null;
+ const sourceFreshness:ResearchHealth['sourceFreshness']=!sameSignals.length?'waiting':
+  sameSignals.every(s=>s.source_date===expectedSourceDate&&
+    Number.isFinite(Date.parse(s.source_observed_at))&&
+    Number.isFinite(Date.parse(s.generated_at))&&
+    Date.parse(s.source_observed_at)<=Date.parse(s.generated_at))?'current':'stale';
  // Zero-day mark counts are observations, NOT a completeness or failure claim.
  return {morning:observedPhase(day,'morning',now,sorted,input.signals,holidays),
    close:observedPhase(day,'close',now,sorted,input.signals,holidays),
    signals:sameSignals.length,candidates:picks,
    zeroDayMarks:input.outcomes.filter(x=>x.trade_date===day&&x.horizon===0).length,
    benchmarks:input.benchmarks.filter(x=>x.trade_date===day&&x.horizon===0).length,
-   latestTradingDate:day};
+   latestTradingDate:day,sourceDate,expectedSourceDate,sourceFreshness};
 }
