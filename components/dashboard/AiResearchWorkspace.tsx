@@ -209,7 +209,7 @@ export default function AiResearchWorkspace(){
                 stock.return_pct-index.return_pct:null;
               return <tr key={[s.trade_date,s.strategy,p.code].join(':')}>
                 <td><small className={styles.strategy}>{strategyLabel(s.strategy)}</small><br/>#{i+1}</td>
-                <td><Link href={'/stock-flow?code='+encodeURIComponent(p.code)} className={styles.stockName}>{p.name}</Link><small className={styles.code}>{p.code} · {p.market.toUpperCase()}</small></td>
+                <td><Link href={'/stock-flow?code='+encodeURIComponent(p.code)} className={styles.stockName}>{p.name}</Link><small className={styles.code}>{p.code} · {p.market.toUpperCase()}</small>{p.positive_sessions_5!==undefined&&<small className={styles.code}>동반매수 {p.positive_sessions_5}/5일 · 상대 {fixed(p.relative_flow_ratio??null,2)}배</small>}</td>
                 <td className={styles.foreign}>{fixed(p.foreign,1)}</td>
                 <td className={styles.institution}>{fixed(p.institution,1)}</td>
                 <td>{fixed(p.score,1)}</td>
