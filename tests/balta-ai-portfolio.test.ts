@@ -89,7 +89,7 @@ test('consecutive net losing close days pause only future entries, never hindsig
  for(const date of dates){
   for(const code of ['000001','000002','000003','000004']){
    const b=edits[date+':'+code];
-   if(b&&date>=dates[2])b.close=95; // later session losses
+   if(b&&date>=dates[2]){b.close=95;b.high=Math.max(b.open,b.close)+1;b.low=Math.min(b.open,b.close)-1;} // valid daily OHLC losses
   }
  }
  const r=run(s,Object.values(edits),{horizon:1,roundTripCostPct:0,lossPauseDays:2,drawdownBrakePct:30},dates[5]);
