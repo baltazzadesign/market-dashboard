@@ -4,10 +4,12 @@ on:
     paths:
       - "lib/balta-ai-model.ts"
       - "lib/balta-ai-evaluation.ts"
+      - "lib/balta-ai-reliability.ts"
       - "scripts/balta-ai-research.ts"
       - "scripts/balta-ai-preflight.ts"
       - "tests/balta-ai-model.test.ts"
       - "tests/balta-ai-evaluation.test.ts"
+      - "tests/balta-ai-reliability.test.ts"
       - ".github/workflows/balta-ai-paper-daily.yml"
       - "supabase/migrations/20261014_balta_ai_research.sql"
       - ".github/workflows/balta-ai-tests.yml"
@@ -25,7 +27,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts
+      - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts
       - run: npm run typecheck
   connectivity:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository

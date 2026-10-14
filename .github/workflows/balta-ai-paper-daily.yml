@@ -3,8 +3,12 @@ on:
   schedule:
     # UTC 22:37 Sunday-Thursday = KST 07:37 Monday-Friday.
     - cron: "37 22 * * 0-4"
+    # Retry window UTC 23:27 Sunday-Thursday = 08:27 KST (before market open).
+    - cron: "27 23 * * 0-4"
     # UTC 08:17 Monday-Friday = KST 17:17 Monday-Friday.
     - cron: "17 8 * * 1-5"
+    # Retry late KIS-close prices at 18:47 KST, without repeating settled outcomes.
+    - cron: "47 9 * * 1-5"
   workflow_dispatch:
     inputs:
       phase:
@@ -57,9 +61,9 @@ jobs:
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             phase="${MANUAL_PHASE}"
-          elif [ "${SCHEDULE_EXPR}" = "37 22 * * 0-4" ]; then
+          elif [ "${SCHEDULE_EXPR}" = "37 22 * * 0-4" ] || [ "${SCHEDULE_EXPR}" = "27 23 * * 0-4" ]; then
             phase=morning
-          elif [ "${SCHEDULE_EXPR}" = "17 8 * * 1-5" ]; then
+          elif [ "${SCHEDULE_EXPR}" = "17 8 * * 1-5" ] || [ "${SCHEDULE_EXPR}" = "47 9 * * 1-5" ]; then
             phase=close
           else
             echo "::error::Unknown schedule"; exit 1
