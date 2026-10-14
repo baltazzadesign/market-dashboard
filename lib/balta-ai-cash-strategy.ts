@@ -10,7 +10,7 @@ export type CashFlowPick=PersistentFlowPick&{
  cash_score:number;cash_regime:CashRegime;cash_momentum:'improving'|'stable_or_mixed';
  cash_operating_eok:number;cash_fcf_eok:number;cash_conversion_pct:number|null;
  cash_year:number;cash_basis:'CFS'|'OFS';cash_receipts:string[];
- cash_observed_at:string;feature_version:typeof CASH_FEATURE_VERSION;
+ cash_observed_at:string;cash_feature_version:typeof CASH_FEATURE_VERSION;
 };
 export type CashFlowAssessment={status:'qualified';pick:CashFlowPick}|
  {status:'excluded';reason:string};
@@ -73,7 +73,7 @@ export function assessCashFlow(
   cash_operating_eok:amount(op),cash_fcf_eok:amount(fcf),
   cash_conversion_pct:finite(last.conversion)?round(last.conversion):null,
   cash_year:last.year,cash_basis:response.basis,cash_receipts:receipts,
-  cash_observed_at:observedAt,feature_version:CASH_FEATURE_VERSION,
+  cash_observed_at:observedAt,cash_feature_version:CASH_FEATURE_VERSION,
   reason:'수급 지속 '+FLOW_PERSIST_V1+' + 발표 완료 연간 현금흐름 '+regime+' (별도 미검증 연구)'
  }};
 }
