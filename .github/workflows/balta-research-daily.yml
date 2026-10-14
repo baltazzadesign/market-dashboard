@@ -1,0 +1,43 @@
+name: BALTA RESEARCH daily draft publication
+on:
+  schedule:
+    # 19:10 / 21:20 KST Mon-Fri. The collector must finish beforehand.
+    - cron: "10 10 * * 1-5"
+    - cron: "20 12 * * 1-5"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: balta-research-daily-draft
+  cancel-in-progress: false
+jobs:
+  generate-draft:
+    if: github.repository == 'baltazzadesign/market-dashboard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 23
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      KIS_APPKEY: ${{ secrets.KIS_APPKEY }}
+      KIS_APPSECRET: ${{ secrets.KIS_APPSECRET }}
+      KIS_BASE: ${{ secrets.KIS_BASE }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_RESEARCH_MODEL: ${{ vars.OPENAI_RESEARCH_MODEL }}
+      MARKET_HOLIDAYS: ${{ vars.MARKET_HOLIDAYS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install fixed PDF tooling and Korean font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-nanum
+          python -m pip install --disable-pip-version-check "reportlab==4.4.4"
+      - run: npm ci
+      - name: Prepare daily verified analyst draft
+        run: node --import tsx scripts/balta-research-daily.ts
