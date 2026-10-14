@@ -8,7 +8,8 @@ import styles from './AiResearchInsights.module.css';
 
 const labels:Record<string,string>={
  FLOW_V1:'동반 순매수',FLOW_ACCEL_V1:'순매수 가속',
- FLOW_PERSIST_V1:'5일 수급 지속',FLOW_LIQUID_V1:'거래대금 보정'
+ FLOW_PERSIST_V1:'5일 수급 지속',FLOW_LIQUID_V1:'거래대금 보정',
+ FLOW_CASH_V1:'수급 + 현금흐름'
 };
 const ratio=(v:number|null)=>v===null?'—':(v>0?'+':'')+v.toFixed(2)+'%p';
 export default function AiResearchInsights({data,horizon}:{data:AiResearchPayload;horizon:AiHorizon}){
