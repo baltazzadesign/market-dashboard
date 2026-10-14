@@ -7,6 +7,7 @@ import {
   aiStrategies,cohortPerformance,dailyPerformance,latestRunForPhase,
   makeOutcomeMap,outcomeKey,signalDays,type AiHorizon,type AiResearchPayload,type AiRun,type AiStrategy
 } from '@/lib/balta-ai-dashboard';
+import { matchedOutcomes,excessSummary,excessDaily,validBenchmarks,benchmarkKey } from '@/lib/balta-ai-benchmark';
 import styles from './AiResearchWorkspace.module.css';
 
 const periods=[7,30,60,90] as const;
@@ -62,6 +63,7 @@ export default function AiResearchWorkspace(){
 
   const signals=data?.signals??[];
   const outcomes=data?.outcomes??[];
+  const benchmarks=data?.benchmarks??[];
   const runs=data?.runs??[];
   const dates=useMemo(()=>signalDays(signals),[signals]);
   const selectedDate=dates.includes(requestedDate)?requestedDate:dates[0]??'';
@@ -74,6 +76,14 @@ export default function AiResearchWorkspace(){
     acceleration:x.acceleration===null?null:Number(x.acceleration.toFixed(2))
   })),[signals,outcomes,horizon]);
   const outcomeMap=useMemo(()=>makeOutcomeMap(outcomes),[outcomes]);
+  const benchmarkMap=useMemo(()=>validBenchmarks(benchmarks),[benchmarks]);
+  const matched=useMemo(()=>matchedOutcomes(allFiltered,outcomes,benchmarks,horizon),[allFiltered,outcomes,benchmarks,horizon]);
+  const alpha=useMemo(()=>excessSummary(matched),[matched]);
+  const alphaChart=useMemo(()=>excessDaily(matched).map(v=>({
+    date:v.date.slice(5),stock:v.stock===null?null:Number(v.stock.toFixed(3)),
+    market:v.market===null?null:Number(v.market.toFixed(3)),
+    excess:v.excess===null?null:Number(v.excess.toFixed(3))
+  })),[matched]);
   const morning=useMemo(()=>latestRunForPhase(runs,'morning'),[runs]);
   const close=useMemo(()=>latestRunForPhase(runs,'close'),[runs]);
   const candidateCount=allFiltered.reduce((sum,s)=>sum+s.picks.length,0);
@@ -144,6 +154,38 @@ export default function AiResearchWorkspace(){
       <div className={styles.legend}><span><i style={{background:'#d6b36c'}}/>동반 순매수 (FLOW_V1)</span><span><i style={{background:'#76bdac'}}/>순매수 가속 (FLOW_ACCEL_V1)</span><span>차트 공백 = 미검증</span></div>
     </section>
 
+    <section className={styles.panel} style={{marginTop:17}}>
+      <div className={styles.panelHead}>
+        <div><h2>시장 대비 초과수익 검증</h2><p>같은 날 시가 진입·같은 거래일 종가 청산 · KOSPI 종목은 KOSPI, KOSDAQ 종목은 KOSDAQ 지수와 비교</p></div>
+        <span className={styles.panelMeta}>{horizons.find(x=>x[0]===horizon)?.[1]} · 지수 매칭 {alpha.count}건</span>
+      </div>
+      <div className={styles.metricGrid} style={{padding:'16px 18px 0',marginBottom:0}}>
+        <div className={styles.metric}><span>동일 표본 AI 평균</span><strong className={tone(alpha.meanStock)}>{pct(alpha.meanStock)}</strong><p>비교 가능한 종목에 한정</p></div>
+        <div className={styles.metric}><span>대응 지수 평균</span><strong className={tone(alpha.meanBenchmark)}>{pct(alpha.meanBenchmark)}</strong><p>종목별 소속 시장에 맞춘 지수</p></div>
+        <div className={styles.metric}><span>평균 초과수익</span><strong className={tone(alpha.meanExcess)}>{alpha.meanExcess===null?'—':(alpha.meanExcess>0?'+':'')+fixed(alpha.meanExcess)+'%p'}</strong><p>종목 수익률 − 대응 지수 수익률</p></div>
+        <div className={styles.metric}><span>지수 초과 비율</span><strong>{alpha.beatRate===null?'—':fixed(alpha.beatRate,1)+'%'}</strong><p>초과수익 +인 종목 · 매칭 {alpha.count}건</p></div>
+      </div>
+      <div className={styles.chart}>
+        {!alphaChart.length||loading||error?<div className={styles.chartEmpty}>동일 날짜에 확정된 지수·종목 수익률이 쌓이면 비교 차트가 표시됩니다.</div>:
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={alphaChart} margin={{top:22,right:24,left:2,bottom:3}}>
+            <CartesianGrid vertical={false} stroke="#2c332c" strokeDasharray="2 5"/>
+            <XAxis dataKey="date" stroke="#9ca697" fontSize={11} tickLine={false} axisLine={false} minTickGap={18}/>
+            <YAxis stroke="#9ca697" fontSize={11} tickLine={false} axisLine={false} width={54} tickFormatter={v=>v+'%'}/>
+            <Tooltip contentStyle={{background:'#101610',color:'#f0e3c1',border:'1px solid #5a4b31',borderRadius:7}} labelStyle={{color:'#e6c585'}} formatter={(value,name)=>{
+              const v=typeof value==='number'?value:Number(value);
+              return [Number.isFinite(v)?pct(v):'—',String(name)];
+            }}/>
+            <ReferenceLine y={0} stroke="#665d4a" strokeDasharray="3 5"/>
+            <Line name="AI 선정 종목 평균" dataKey="stock" stroke="#d6b36c" type="monotone" strokeWidth={2} connectNulls={false} dot={{r:2}}/>
+            <Line name="대응 시장 지수 평균" dataKey="market" stroke="#78aefe" type="monotone" strokeWidth={2} connectNulls={false} dot={{r:2}}/>
+          </LineChart>
+        </ResponsiveContainer>}
+      </div>
+      <div className={styles.legend}><span><i style={{background:'#d6b36c'}}/>AI 선정 종목</span><span><i style={{background:'#78aefe'}}/>동일 종목군 가중 지수</span><span>거래일별 평균 · 누적 복리 아님</span></div>
+      <p className={styles.tableNote}>초과수익은 정확히 같은 진입일과 청산일을 가진 종목·지수 자료에서만 계산됩니다. 미수집·거래정지·미확정일은 제외하며 실거래 비용과 세금은 미반영입니다.</p>
+    </section>
+
     <div className={styles.lowerGrid}>
       <section className={styles.panel}>
         <div className={styles.panelHead}>
@@ -155,10 +197,14 @@ export default function AiResearchWorkspace(){
         </div>
         <div className={styles.tableScroll}>
           <table className={styles.table}><thead><tr>
-            <th>전략·순위</th><th>종목</th><th>외국인</th><th>기관</th><th>평가 점수</th><th>당일</th><th>1일</th><th>3일</th><th>5일</th>
+            <th>전략·순위</th><th>종목</th><th>외국인</th><th>기관</th><th>평가 점수</th><th>당일</th><th>1일</th><th>3일</th><th>5일</th><th>시장 초과</th>
           </tr></thead><tbody>
             {selected.flatMap(s=>s.picks.map((p,i)=>{
               const result=(h:number)=>outcomeMap.get(outcomeKey(s.trade_date,s.strategy,p.code,h))?.return_pct??null;
+              const stock=outcomeMap.get(outcomeKey(s.trade_date,s.strategy,p.code,horizon));
+              const index=benchmarkMap.get(benchmarkKey(s.trade_date,p.market,horizon));
+              const excess=stock&&index&&stock.entry_date===index.entry_date&&stock.exit_date===index.exit_date?
+                stock.return_pct-index.return_pct:null;
               return <tr key={[s.trade_date,s.strategy,p.code].join(':')}>
                 <td><small className={styles.strategy}>{strategyLabel(s.strategy)}</small><br/>#{i+1}</td>
                 <td><Link href={'/stock-flow?code='+encodeURIComponent(p.code)} className={styles.stockName}>{p.name}</Link><small className={styles.code}>{p.code} · {p.market.toUpperCase()}</small></td>
@@ -166,11 +212,12 @@ export default function AiResearchWorkspace(){
                 <td className={styles.institution}>{fixed(p.institution,1)}</td>
                 <td>{fixed(p.score,1)}</td>
                 {[0,1,3,5].map(h=><td key={h} className={tone(result(h))}>{pct(result(h))}</td>)}
+                <td className={tone(excess)}>{excess===null?'—':(excess>0?'+':'')+fixed(excess)+'%p'}</td>
               </tr>;
-            }))}{!selected.some(s=>s.picks.length)&&<tr><td colSpan={9} className={styles.noRows}>선택한 날짜와 전략에 저장된 후보가 없습니다.</td></tr>}
+            }))}{!selected.some(s=>s.picks.length)&&<tr><td colSpan={10} className={styles.noRows}>선택한 날짜와 전략에 저장된 후보가 없습니다.</td></tr>}
           </tbody></table>
         </div>
-        <div className={styles.tableNote}>금액·점수 단위: 억원. 수익률은 저장된 KIS 수정주가 기반 모의 평가이며, 빈 값은 수익률 0%가 아니라 미검증을 의미합니다.</div>
+        <div className={styles.tableNote}>금액·점수 단위: 억원. 수익률은 저장된 KIS 수정주가 기반 모의 평가이며, 빈 값은 수익률 0%가 아니라 미검증을 의미합니다. 시장 초과는 위에서 선택한 보유 기간에 대한 값입니다.</div>
       </section>
 
       <aside className={styles.sideColumn}>
