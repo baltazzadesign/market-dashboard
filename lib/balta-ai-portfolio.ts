@@ -79,7 +79,7 @@ export function replayPortfolio(
  let duplicates=0,missing=0,blocked=0,unknown=0,stoppedAt:string|null=null;
  const halfFee=config.roundTripCostPct/200;
  for(let idx=0;idx<dates.length;idx++){
-  const date=dates[idx],signal=byDate.get(date),prevDate=idx?dates[idx-1]:null;
+  const date=dates[idx],signal=byDate.get(date);
   // The previous calendar session must be explicitly present for ex-ante regime validation.
   const priorExchangeDate=sessions[sessions.indexOf(date)-1]??null;
   const regime=signal&&signal.source_date===priorExchangeDate?classifyFrozenSignal(signal).regime:'unknown';
