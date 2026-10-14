@@ -31,6 +31,7 @@ test('valid candidate signal and runner status are healthy; close remains pendin
  const x=status('2026-10-15T01:00:00Z',[run('morning','complete')],[example]);
  assert.equal(x.morning.state,'healthy');
  assert.equal(x.signals,1);assert.equal(x.candidates,0);
+ assert.equal(x.sourceFreshness,'current');
 });
 test('close phase becomes missing only after second retry time',()=>{
  assert.equal(status('2026-10-15T09:00:00Z').close.state,'waiting'); // 18:00 KST
@@ -47,4 +48,14 @@ test('additional exchange holiday prevents false missing-run alarms',()=>{
  const x=researchHealth({nowIso:'2026-10-16T06:00:00Z',
   signals:[],runs:[],outcomes:[],benchmarks:[],holidays:['2026-10-16']});
  assert.equal(x.latestTradingDate,'2026-10-15');
+});
+
+test('a stale investor snapshot is diagnosed separately from a valid runner',()=>{
+ const example:AiSignal={trade_date:'2026-10-15',strategy:'FLOW_V1',
+  source_date:'2026-10-13',source_observed_at:'2026-10-13T06:30:00Z',
+  generated_at:'2026-10-14T23:37:00Z',picks:[]};
+ const x=status('2026-10-15T01:00:00Z',[run('morning','complete')],[example]);
+ assert.equal(x.sourceFreshness,'stale');
+ assert.equal(x.expectedSourceDate,'2026-10-14');
+ assert.equal(x.sourceDate,'2026-10-13');
 });
