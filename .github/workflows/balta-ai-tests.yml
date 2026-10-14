@@ -5,6 +5,7 @@ on:
       - "lib/balta-ai-model.ts"
       - "lib/balta-ai-evaluation.ts"
       - "scripts/balta-ai-research.ts"
+      - "scripts/balta-ai-preflight.ts"
       - "tests/balta-ai-model.test.ts"
       - "tests/balta-ai-evaluation.test.ts"
       - ".github/workflows/balta-ai-paper-daily.yml"
@@ -26,3 +27,21 @@ jobs:
       - run: npm ci
       - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts
       - run: npm run typecheck
+  connectivity:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      KIS_APPKEY: ${{ secrets.KIS_APPKEY }}
+      KIS_APPSECRET: ${{ secrets.KIS_APPSECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Read-only source and credentials check
+        run: node --import tsx scripts/balta-ai-preflight.ts
