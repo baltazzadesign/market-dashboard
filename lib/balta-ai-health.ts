@@ -1,7 +1,8 @@
 // Observational status only: never claim to know server runner state
 // just because the site has no data. Missing first-run records are pending.
 import { marketClosedReason } from './market-calendar';
-import type { AiSignal,AiRun,AiOutcome,AiBenchmark } from './balta-ai-dashboard';
+import type { AiSignal,AiRun,AiOutcome } from './balta-ai-dashboard';
+import type { AiBenchmark } from './balta-ai-benchmark';
 export type CheckState='waiting'|'healthy'|'partial'|'missed'|'closed';
 export type PhaseCheck={phase:'morning'|'close';date:string;state:CheckState;label:string;detail:string;
  expectedAfterKst:string;latestRun:string|null};
