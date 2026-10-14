@@ -15,6 +15,7 @@ async function read<T>(resource:string):Promise<T>{
   if(!res.ok)throw Error('Supabase API read failed HTTP '+res.status);
   return await res.json() as T;
 }
+async function main(){
 try{
   const tables=['balta_ai_signals','balta_ai_outcomes','balta_ai_run_log'] as const;
   for(const t of tables){
@@ -49,3 +50,6 @@ if(failures.length){
   for(const failure of failures)console.error('::error::'+failure);
   process.exitCode=1;
 }else console.log('[BALTA PREFLIGHT] PASS — read-only credentials/connectivity validated; live paper worker not yet run');
+
+}
+main().catch(()=>{console.error('::error::BALTA preflight crashed before completion');process.exitCode=1;});
