@@ -37,6 +37,10 @@ test('future observed snapshot is rejected and no intervening trading date may b
   assert.throws(()=>selectResearchCandidates(rows,'2026-10-14','2026-10-13T12:00:00Z'),/Future/);
   assert.throws(()=>selectResearchCandidates(rows,'2026-10-15','2026-10-15T00:00:00Z'),/missing prior session/);
 });
+test('acceleration requires an actual preceding trading session, not a gap',()=>{
+  const rows=[date('2026-10-13',vector(40,20,5)),date('2026-10-08',vector(10,5,4))];
+  assert.throws(()=>selectResearchCandidates(rows,'2026-10-14','2026-10-14T00:00:00.000Z'),/missing prior session/);
+});
 test('Friday to Monday rollover is accepted, exchange holiday skipped',()=>{
   assert.doesNotThrow(()=>checkPriorSession('2026-10-16','2026-10-19'));
   assert.doesNotThrow(()=>checkPriorSession('2026-10-08','2026-10-12'));
