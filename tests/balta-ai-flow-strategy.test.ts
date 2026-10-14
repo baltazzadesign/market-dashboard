@@ -56,7 +56,7 @@ test('negative latest dual flow is never a buy candidate',()=>{
 });
 test('a date beyond latest session cannot leak into the five-day signal',()=>{
  const rows=dataset();
- rows[0].snapshot.calendar.push('2026-10-14');
+ rows[4].snapshot.calendar.push('2026-10-14');
  const r=fiveDayPersistentFlow(rows,'2026-10-14T00:00:00Z');
  assert.equal(r.status,'ready');
  assert.equal(r.sourceDates.at(-1),'2026-10-13');
