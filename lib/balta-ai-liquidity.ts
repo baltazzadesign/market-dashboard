@@ -6,7 +6,7 @@ import { stockDate, stockNumber } from './stock-flow-model';
 import type { PersistentFlowPick } from './balta-ai-flow-strategy';
 
 export const FLOW_LIQUID_V1='FLOW_LIQUID_V1' as const;
-export type LiquidityPick=PersistentFlowPick & {
+export type LiquidityPick=Omit<PersistentFlowPick, 'feature_version'> & {
   avg_turnover_20_eok:number;market_cap_eok:number;net_to_turnover_pct:number;
   net_to_market_cap_pct:number;quote_captured_at:string;feature_version:'flow_liquidity_20session_v1';
 };
