@@ -1,0 +1,25 @@
+.root{border:1px solid #484332;background:#131a14;border-radius:9px;margin:17px 0;color:#e6e7d9;overflow:hidden}
+.header{padding:20px 21px;display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;border-bottom:1px solid #333e33}
+.eyebrow{font-size:10px;letter-spacing:.16em;color:#cdb17a;font-weight:650}
+.header h2{font-size:18px;color:#ebce8c;font-weight:650;margin:5px 0}
+.header p,.range{color:#a4b2a5;font-size:11px;line-height:1.7}
+.columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;padding:17px}
+.panel{background:#1a241b;border:1px solid #344434;border-radius:8px;padding:17px;min-width:0}
+.panel h3{font-size:14px;color:#edd9a7;font-weight:650;margin-bottom:13px}
+.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:13px}
+.controls label{font-size:11px;color:#aebbad;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.controls select{font-size:11px;color:#ecd69d;background:#121b13;border:1px solid #63563d;border-radius:5px;padding:8px 9px;min-width:90px;max-width:100%}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.stats>div{background:#111b13;border:1px solid #354235;border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:7px;min-width:0}
+.stats small{font-size:11px;color:#a2b4a5}
+.stats strong{font-size:clamp(18px,2.3vw,25px);color:#e6e6d7;font-variant-numeric:tabular-nums}
+.stats span{font-size:10px;line-height:1.55;color:#879b8c}
+.up{color:#f38b96!important}.down{color:#8db4f1!important}.muted{color:#a7b2a9!important}
+.tradeBreakdown{display:flex;flex-wrap:wrap;gap:6px;padding-top:13px}
+.tradeBreakdown span{padding:6px 8px;font-size:10px;background:#263026;color:#a6b7a7;border-radius:5px}
+.tradeBreakdown b{color:#eddda9;margin-left:3px;font-variant-numeric:tabular-nums}
+.foot{font-size:11px;color:#99ad9a;line-height:1.8;margin-top:14px}
+.disclosure{border-top:1px solid #344134;padding:15px 21px;color:#94a496;font-size:11px;line-height:1.8}
+.disclosure strong{color:#cdb77f;margin-right:9px}
+@media(max-width:960px){.columns{grid-template-columns:1fr}}
+@media(max-width:570px){.columns{padding:11px}.panel{padding:12px}.header{padding:14px}.disclosure{padding:13px}.stats>div{padding:10px}.stats strong{font-size:20px}}
