@@ -70,16 +70,17 @@ async function close(date:string){
   const cache=new Map<string,ReturnType<typeof parseStockBars>>();
   for(const signal of signals){
     for(const pick of signal.picks){
-      if(!cache.has(pick.code)){
+      const cacheKey=pick.code+':'+signal.trade_date;
+      if(!cache.has(cacheKey)){
         try{
           const body=await kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice','FHKST03010100',{
             FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:pick.code,FID_INPUT_DATE_1:signal.trade_date.replaceAll('-',''),
             FID_INPUT_DATE_2:date.replaceAll('-',''),FID_PERIOD_DIV_CODE:'D',FID_ORG_ADJ_PRC:'1'
           },0);
-          cache.set(pick.code,parseStockBars(outputRows(body.output2)));
-        }catch{cache.set(pick.code,[]);}
+          cache.set(cacheKey,parseStockBars(outputRows(body.output2)));
+        }catch{cache.set(cacheKey,[]);}
       }
-      const bars=cache.get(pick.code)!.filter(x=>x.date>=signal.trade_date&&x.date<=date);
+      const bars=cache.get(cacheKey)!.filter(x=>x.date>=signal.trade_date&&x.date<=date);
       const entry=bars.find(b=>b.date===signal.trade_date);
       if(!entry){pending+=4;continue;}
       for(const horizon of [0,1,3,5]){
