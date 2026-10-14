@@ -110,7 +110,6 @@ export default function AiResearchWorkspace(){
       <span className={styles.emptyGlyph}>◎</span>
       <strong>아직 저장된 AI 매수 후보가 없습니다.</strong>
       <p>평일 아침 후보 선정이 성공하고 Supabase에 기록되면 이곳에 나타납니다. 후보가 없을 때 임의 종목이나 수익률을 표시하지 않습니다.</p>
-      <a href="https://github.com/baltazzadesign/market-dashboard/actions/workflows/balta-ai-paper-daily.yml" target="_blank" rel="noopener noreferrer">자동 실행 기록 확인 ↗</a>
     </div>}
 
     <div className={styles.metricGrid} aria-label="연구 성과 지표">
@@ -177,13 +176,13 @@ export default function AiResearchWorkspace(){
 
       <aside className={styles.sideColumn}>
         <section className={styles.panel}>
-          <div className={styles.panelHead}><div><h2>수집·검증 실행 상태</h2><p>GitHub Actions에서 Supabase에 저장한 기록</p></div></div>
+          <div className={styles.panelHead}><div><h2>수집·검증 실행 상태</h2><p>자동 실행 시스템에서 저장한 연구 기록</p></div></div>
           <div className={styles.runList}>
             {([{key:'morning',title:'오전 후보 선정',value:morning},{key:'close',title:'오후 성과 검증',value:close}] as const).map(v=>
               <div key={v.key} className={styles.run}><div><strong>{v.title}</strong><span>{runInfo(v.value)}</span></div>
                 <b className={v.value?.result==='complete'?styles.runOk:v.value?.result==='incomplete'?styles.runWarn:styles.runNeutral}>{runLabel(v.value)}</b></div>)}
           </div>
-          <p className={styles.sideNote}>실행 기록이 없다고 오류로 단정하지 않습니다. GitHub Actions 실행 및 DB 저장 여부를 확인해야 합니다.</p>
+          <p className={styles.sideNote}>실행 기록이 없다고 오류로 단정하지 않습니다. 자동 실행과 DB 저장 상태를 확인해야 합니다.</p>
         </section>
         <section className={styles.panel}>
           <div className={styles.panelHead}><div><h2>전략별 검증 통계</h2><p>선택 보유 기간 · 실제 완료된 표본</p></div></div>
