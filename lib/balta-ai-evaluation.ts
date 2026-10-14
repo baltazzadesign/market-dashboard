@@ -28,9 +28,9 @@ export function comparePairedDailyReturns(rows:OutcomeForScorecard[],minTraining
   }
   const dates=[...new Set([...buckets.keys()].map(k=>k.split('|')[0]))].sort();
   const paired:DayPair[]=dates.flatMap(date=>{
-    const baseline=buckets.get(date+'|FLOW_V1'),alternative=buckets.get(date+'|'+alternative);
-    if(!baseline?.length||!alternative?.length)return [];
-    const b=average(baseline),a=average(alternative);
+    const baseline=buckets.get(date+'|FLOW_V1'),alternativeValues=buckets.get(date+'|'+alternative);
+    if(!baseline?.length||!alternativeValues?.length)return [];
+    const b=average(baseline),a=average(alternativeValues);
     return [{date,baseline:b,alternative:a,diff:a-b}];
   });
   const insufficient=(msg:string):ResearchComparison=>({
