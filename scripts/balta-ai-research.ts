@@ -456,7 +456,7 @@ async function archivePortfolioBars(
 
 async function close(date:string){
   const prior=earliestDate(25,date);
-  const signals=await db<Signal[]>('balta_ai_signals?select=trade_date,strategy,source_date,generated_at,picks&trade_date=gte.'+prior+'&trade_date=lte.'+date+'&order=trade_date.desc&limit=90');
+  const signals=await db<Signal[]>('balta_ai_signals?select=trade_date,strategy,source_date,generated_at,picks&trade_date=gte.'+prior+'&trade_date=lte.'+date+'&order=trade_date.desc&limit=160');
   // First activation may occur after the morning selection window has passed.
   // A missing prior signal is not evidence of a 0% return.
   if(!signals.length){
