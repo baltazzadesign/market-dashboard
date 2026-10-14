@@ -165,6 +165,7 @@ async function morning(date:string){
   const preference=comparePairedDailyReturns(pastOutcomes);
   const persistentPreference=comparePairedDailyReturns(pastOutcomes,30,10,FLOW_PERSIST_V1);
   const liquidityPreference=comparePairedDailyReturns(pastOutcomes,30,10,FLOW_LIQUID_V1);
+  const cashPreference=comparePairedDailyReturns(pastOutcomes,30,10,FLOW_CASH_V1);
   // Freeze the established three strategies BEFORE any additional KIS data calls.
   for(const strategy of allStrategies)if(strategy!==FLOW_LIQUID_V1&&!existing.some(s=>s.strategy===strategy)){
     if(strategy===FLOW_PERSIST_V1&&experimental.status!=='ready')continue;
@@ -172,7 +173,7 @@ async function morning(date:string){
       source_observed_at:source.observed_at,source_snapshot:{
         rows:sourceRows.map(r=>({date:r.date,universe_date:r.universe_date,observed_at:r.observed_at})),
         feature_contract:'foreign/institution/pension daily net in eok_krw; prior values fixed in picks',
-        universe:coverage.universe,qualified:coverage.qualified,preference,persistentPreference,liquidityPreference,
+        universe:coverage.universe,qualified:coverage.qualified,preference,persistentPreference,liquidityPreference,cashPreference,
         experiment:strategy===FLOW_PERSIST_V1?{status:experimental.status,reason:experimental.reason,
           sourceDates:experimental.sourceDates,coverage:experimental.coverage,
           normalization:'5-session own mean absolute foreign+institution net flow (floor 1eok); not turnover-adjusted'}:null
@@ -222,12 +223,12 @@ async function morning(date:string){
   const cashRecorded=existing.some(s=>s.strategy===FLOW_CASH_V1)||
    (cash?.status==='ready'&&kstParts().date===date&&kstParts().time<'09:00');
   await runLog(date,'morning',experimental.status==='ready'&&liquidRecorded&&cashRecorded?'complete':'incomplete',{
-    source_date:source.date,coverage,preference,persistentPreference,liquidityPreference,
+    source_date:source.date,coverage,preference,persistentPreference,liquidityPreference,cashPreference,
     liquidity:liquidity?.stats??null,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage,picks:cash.picks.length}:null,
     experimental:{status:experimental.status,reason:experimental.reason,coverage:experimental.coverage},
     per_strategy:Object.fromEntries([...allStrategies,FLOW_CASH_V1].map(s=>[s,s===FLOW_CASH_V1?(cashRecorded?(cash?.picks.length??null):null):s===FLOW_LIQUID_V1?(liquidRecorded?(liquidity?.picks.length??null):null):(s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length)]))
   });
-  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,persistentPreference,experimentStatus:experimental.status,liquidity:liquidity?.stats??null,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage}:null,signals:selections},null,2));
+  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,persistentPreference,experimentStatus:experimental.status,liquidity:liquidity?.stats??null,cashPreference,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage}:null,signals:selections},null,2));
 }
 async function tradingCalendar(date:string):Promise<string[]>{
   // KIS caches failed responses for 10 seconds; retry once after its cooldown.
@@ -562,6 +563,7 @@ async function close(date:string){
   const preference=comparePairedDailyReturns(priorResults);
   const persistentPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_PERSIST_V1);
   const liquidityPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_LIQUID_V1);
+  const cashPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_CASH_V1);
   const comparison=Object.fromEntries([...scoredStrategies,FLOW_CASH_V1].map(strategy=>[strategy,[0,1,3,5].map(horizon=>{
     const r=summary.filter(s=>s.strategy===strategy&&s.horizon===horizon);
     const avg=r.length?r.reduce((a,b)=>a+Number(b.return_pct),0)/r.length:null;
@@ -569,8 +571,8 @@ async function close(date:string){
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
   await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||followupUnavailable||missingPortfolioMarks||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
-    preference,persistentPreference,liquidityPreference,caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
-  console.log(JSON.stringify({date,phase:'close',attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference},null,2));
+    preference,persistentPreference,liquidityPreference,cashPreference,caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
+  console.log(JSON.stringify({date,phase:'close',attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference,cashPreference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
