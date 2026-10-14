@@ -10,6 +10,9 @@ on:
       - "lib/balta-ai-regime.ts"
       - "lib/balta-ai-health.ts"
       - "lib/balta-ai-exits.ts"
+      - "lib/balta-ai-stop-policy.ts"
+      - "components/dashboard/AiResearchDefensiveStudy.tsx"
+      - "components/dashboard/AiResearchDefensiveStudy.module.css"
       - "components/dashboard/AiResearchSimulator.tsx"
       - "components/dashboard/AiResearchSimulator.module.css"
       - "components/dashboard/AiResearchInsights.tsx"
@@ -32,6 +35,7 @@ on:
       - "tests/balta-ai-regime.test.ts"
       - "tests/balta-ai-health.test.ts"
       - "tests/balta-ai-exits.test.ts"
+      - "tests/balta-ai-stop-policy.test.ts"
       - "tests/balta-ai-dashboard-api.test.ts"
       - "tests/balta-ai-evaluation.test.ts"
       - "tests/balta-ai-reliability.test.ts"
@@ -41,6 +45,7 @@ on:
       - "supabase/migrations/20261014_balta_ai_flow_persist_v1.sql"
       - "supabase/migrations/20261014_balta_ai_liquid_v1.sql"
       - "supabase/migrations/20261014_balta_ai_exit_simulations.sql"
+      - "supabase/migrations/20261014_balta_ai_stop_followups.sql"
       - ".github/workflows/balta-ai-tests.yml"
   workflow_dispatch:
 permissions:
@@ -56,7 +61,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts tests/balta-ai-dashboard.test.ts tests/balta-ai-benchmark.test.ts tests/balta-ai-flow-strategy.test.ts tests/balta-ai-liquidity.test.ts tests/balta-ai-regime.test.ts tests/balta-ai-health.test.ts tests/balta-ai-exits.test.ts tests/balta-ai-dashboard-api.test.ts
+      - run: node --import tsx --test tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts tests/balta-ai-dashboard.test.ts tests/balta-ai-benchmark.test.ts tests/balta-ai-flow-strategy.test.ts tests/balta-ai-liquidity.test.ts tests/balta-ai-regime.test.ts tests/balta-ai-health.test.ts tests/balta-ai-exits.test.ts tests/balta-ai-stop-policy.test.ts tests/balta-ai-dashboard-api.test.ts
       - run: npm run typecheck
       - run: npm run build
   connectivity:
