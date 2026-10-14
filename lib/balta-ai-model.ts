@@ -43,6 +43,7 @@ export function selectResearchCandidates(rows:ResearchHistoryRow[],tradeDate:str
   const [latest,previous]=ordered;
   if(latest.date===previous.date||latest.universe_date!==latest.date)throw Error('Invalid latest market universe');
   checkPriorSession(latest.date,tradeDate,holidays);
+  checkPriorSession(previous.date,latest.date,holidays);
   const cutoff=Date.parse(asOf);
   if(!Number.isFinite(cutoff)||ordered.some(r=>!Number.isFinite(Date.parse(r.observed_at))||Date.parse(r.observed_at)>cutoff))throw Error('Future or invalid observation timestamp');
   const stocks=latest.snapshot?.stocks,previousStocks=previous.snapshot?.stocks;
