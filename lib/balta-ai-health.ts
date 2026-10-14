@@ -68,7 +68,10 @@ export function researchHealth(input:{
     Number.isFinite(Date.parse(s.generated_at))&&
     Date.parse(s.source_observed_at)<=Date.parse(s.generated_at))?'current':'stale';
  // Zero-day mark counts are observations, NOT a completeness or failure claim.
- return {morning:observedPhase(day,'morning',now,sorted,input.signals,holidays),
+ const recordedMorning=observedPhase(day,'morning',now,sorted,input.signals,holidays);
+ const morning:PhaseCheck=sourceFreshness==='stale'&&recordedMorning.state==='healthy'?
+  {...recordedMorning,state:'partial',label:'수급 원천 날짜 확인',detail:'선정일 이전 거래일 수급 기록이 불일치하거나 관측 시점이 잘못됐습니다.'}:recordedMorning;
+ return {morning,
    close:observedPhase(day,'close',now,sorted,input.signals,holidays),
    signals:sameSignals.length,candidates:picks,
    zeroDayMarks:input.outcomes.filter(x=>x.trade_date===day&&x.horizon===0).length,
