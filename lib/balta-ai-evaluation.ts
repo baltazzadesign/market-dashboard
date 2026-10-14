@@ -1,7 +1,6 @@
 // BALTA AI: chronological paired-day research scorecard.
 // The default strategy remains FLOW_V1 unless substantial walk-forward evidence exists.
 // This is descriptive paper-trade research, NOT a trained model or a fillable trading recommendation.
-import type { ResearchStrategy } from './balta-ai-model';
 import type { AiStrategy } from './balta-ai-dashboard';
 export type OutcomeForScorecard={
   trade_date:string;strategy:string;horizon:number;return_pct:number|string|null
