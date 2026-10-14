@@ -9,6 +9,7 @@ import { comparePairedDailyReturns, type OutcomeForScorecard } from '../lib/balt
 import { kisTerminal, outputRows } from '../lib/kis-terminal';
 import { parseStockBars, stockDate, stockNumber, type StockBar } from '../lib/stock-flow-model';
 import { retryResearch, RetryableResearchError, failureReason } from '../lib/balta-ai-reliability';
+import { parseIndexBars, benchmarkKey, type AiMarket, type AiBenchmark } from '../lib/balta-ai-benchmark';
 
 type Signal={trade_date:string;strategy:string;source_date:string;generated_at:string;picks:ResearchPick[]};
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
@@ -115,6 +116,21 @@ async function getBars(code:string,tradeDate:string,date:string):Promise<StockBa
 function earliestDate(days:number,date:string){
   const d=new Date(date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-days);return d.toISOString().slice(0,10);
 }
+async function fetchIndexBars(market:AiMarket,date:string):Promise<StockBar[]>{
+ return retryResearch(async()=>{
+  let body:Awaited<ReturnType<typeof kisTerminal>>;
+  try{
+   body=await kisTerminal('/uapi/domestic-stock/v1/quotations/inquire-index-daily-price','FHPUP02120000',{
+    FID_PERIOD_DIV_CODE:'D',FID_COND_MRKT_DIV_CODE:'U',
+    FID_INPUT_ISCD:market==='kospi'?'0001':'1001',FID_INPUT_DATE_1:date.replaceAll('-','')
+   },0);
+  }catch{throw new RetryableResearchError('KIS index benchmark temporarily unavailable');}
+  const bars=parseIndexBars(outputRows(body.output2));
+  if(!bars.some(b=>b.date===date))
+   throw new RetryableResearchError('Latest index benchmark OHLC not confirmed');
+  return bars;
+ },{attempts:2,delayMs:11000});
+}
 type SavedOutcomeKey={trade_date:string;strategy:string;stock_code:string;horizon:number};
 async function savedOutcomeKeys(from:string):Promise<Set<string>>{
   const all=new Set<string>();
@@ -129,6 +145,50 @@ async function savedOutcomeKeys(from:string):Promise<Set<string>>{
     if(page.length<500)return all;
   }
   throw Error('Outcome ledger exceeded query window');
+}
+async function saveMarketBenchmarks(signals:Signal[],calendar:string[],date:string){
+ const from=earliestDate(25,date);
+ const previous=await db<Pick<AiBenchmark,'trade_date'|'market'|'horizon'>[]>(
+   'balta_ai_benchmarks?select=trade_date,market,horizon&trade_date=gte.'+from+
+   '&order=trade_date.asc,market.asc,horizon.asc&limit=500');
+ const completed=new Set(previous.map(b=>benchmarkKey(b.trade_date,b.market,b.horizon)));
+ const targets=new Map<string,{date:string;market:AiMarket}>();
+ for(const s of signals){
+  if(Date.parse(s.generated_at)>=Date.parse(s.trade_date+'T09:00:00+09:00'))continue;
+  for(const pick of s.picks){
+   if(pick.market!=='kospi'&&pick.market!=='kosdaq')continue;
+   targets.set(s.trade_date+':'+pick.market,{date:s.trade_date,market:pick.market});
+  }
+ }
+ const caches=new Map<AiMarket,Promise<StockBar[]>>();
+ let recorded=0,missing=0,pending=0;
+ for(const target of targets.values()){
+  const first=calendar.indexOf(target.date);
+  if(first<0){missing++;continue;}
+  const horizons=[0,1,3,5] as const;
+  const due=horizons.filter(h=>calendar[first+h]&&!completed.has(benchmarkKey(target.date,target.market,h)));
+  pending+=horizons.filter(h=>!calendar[first+h]).length;
+  if(!due.length)continue;
+  if(!caches.has(target.market))caches.set(target.market,fetchIndexBars(target.market,date));
+  let indexBars:StockBar[];
+  try{indexBars=await caches.get(target.market)!;}catch{missing+=due.length; caches.delete(target.market);continue;}
+  const marks=markResearchOutcomes(target.date,calendar,indexBars,date);
+  for(const mark of marks){
+   if(mark.status!=='ready'){
+    if(mark.status==='unavailable'&&due.includes(mark.horizon))missing++;
+    continue;
+   }
+   const v=mark.value;
+   if(!due.includes(v.horizon))continue;
+   await insertImmutable('balta_ai_benchmarks',{
+    trade_date:target.date,market:target.market,horizon:v.horizon,
+    entry_date:v.entry_date,exit_date:v.exit_date,entry_open:v.entry_open,
+    exit_close:v.exit_close,return_pct:v.return_pct,source:'KIS_INDEX_DAILY'
+   },'trade_date,market,horizon');
+   completed.add(benchmarkKey(target.date,target.market,v.horizon)); recorded++;
+  }
+ }
+ return {targetMarkets:targets.size,recorded,missing,pending};
 }
 async function close(date:string){
   const prior=earliestDate(25,date);
@@ -181,6 +241,9 @@ async function close(date:string){
       }
     }
   }
+  // Benchmarks are independently archived and compared only on exact stock entry/exit dates.
+  // One failed KOSPI/KOSDAQ source never becomes a fabricated 0% index return.
+  const benchmark=await saveMarketBenchmarks(signals,calendar,date);
   const summary=await loadOutcomeRows(prior);
   const preference=comparePairedDailyReturns(await loadOutcomeRows(earliestDate(120,date),1));
   const comparison=Object.fromEntries(researchStrategies.map(strategy=>[strategy,[0,1,3,5].map(horizon=>{
@@ -189,9 +252,9 @@ async function close(date:string){
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
-  await runLog(date,'close',sourceErrors||unavailable?'incomplete':'complete',{signals:signals.length,attempted,alreadyRecorded,pending,unavailable,sourceErrors,comparison,
-    preference,caution:'No trading costs, slippage, benchmark adjustment or completed real-money out-of-sample optimization'});
-  console.log(JSON.stringify({date,phase:'close',attempted,alreadyRecorded,pending,unavailable,sourceErrors,comparison,preference},null,2));
+  await runLog(date,'close',sourceErrors||unavailable||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
+    preference,caution:'Benchmark comparisons require same entry/exit dates. No trading costs, slippage or validated real-money alpha.'});
+  console.log(JSON.stringify({date,phase:'close',attempted,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference},null,2));
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
