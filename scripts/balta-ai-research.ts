@@ -237,8 +237,13 @@ async function morning(date:string){
   const persisted=await db<FrozenSignalRow[]>(
     'balta_ai_signals?select=trade_date,strategy,source_date,source_observed_at,generated_at,picks&trade_date=eq.'+date);
   const storageVerification=auditFrozenSignals(persisted,date,researchStrategies,source.date);
-  const fullResearchComplete=storageVerification.ok&&experimental.status==='ready'&&liquidRecorded&&cashRecorded;
-  await runLog(date,'morning',fullResearchComplete?'complete':'incomplete',{storageVerification,
+  // FLOW_V1 and FLOW_ACCEL_V1 are the required audit contract. Optional
+  // experimental strategies may be unavailable without invalidating the two
+  // fully frozen baselines; their readiness remains separately visible.
+  const baselineVerified=storageVerification.ok;
+  await runLog(date,'morning',baselineVerified?'complete':'incomplete',{storageVerification,
+    optionalResearch:{persistent:experimental.status,liquidity:liquidRecorded?'recorded':'unavailable',
+      cash:cashRecorded?'recorded':'unavailable'},
     source_date:source.date,coverage,preference,persistentPreference,liquidityPreference,cashPreference,
     liquidity:liquidity?.stats??null,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage,picks:cash.picks.length}:null,
     experimental:{status:experimental.status,reason:experimental.reason,coverage:experimental.coverage},
