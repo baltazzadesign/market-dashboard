@@ -6,6 +6,7 @@ import { marketClosedReason, parseAdditionalHolidays } from '../lib/market-calen
 import type { ResearchHistoryRow, ResearchPick } from '../lib/balta-ai-model';
 import { researchStrategies, selectResearchCandidates, markResearchOutcomes } from '../lib/balta-ai-model';
 import { comparePairedDailyReturns, type OutcomeForScorecard } from '../lib/balta-ai-evaluation';
+import { auditFrozenSignals, type FrozenSignalRow } from '../lib/balta-ai-persistence-audit';
 import { kisTerminal, outputRows } from '../lib/kis-terminal';
 import { parseStockBars, stockDate, stockNumber, type StockBar } from '../lib/stock-flow-model';
 import { retryResearch, RetryableResearchError, failureReason } from '../lib/balta-ai-reliability';
@@ -150,9 +151,17 @@ async function preOpenCashCandidates(
 }
 
 async function morning(date:string){
-  const existing=await db<Pick<Signal,'strategy'>[]>('balta_ai_signals?select=strategy&trade_date=eq.'+date);
+  const existing=await db<FrozenSignalRow[]>('balta_ai_signals?select=trade_date,strategy,source_date,source_observed_at,generated_at,picks&trade_date=eq.'+date);
   const allStrategies=scoredStrategies;
-  if([...allStrategies,FLOW_CASH_V1].every(strategy=>existing.some(s=>s.strategy===strategy))){console.log('Morning signals already frozen for',date);return;}
+  if([...allStrategies,FLOW_CASH_V1].every(strategy=>existing.some(s=>s.strategy===strategy))){
+    const verified=auditFrozenSignals(existing,date,researchStrategies);
+    await runLog(date,'morning',verified.ok?'complete':'incomplete',{
+      alreadyRecorded:true,storageVerification:verified
+    });
+    if(!verified.ok){console.error('[balta-ai] Existing signal persistence audit failed',verified);process.exitCode=1;}
+    else console.log('[balta-ai] All morning signals confirmed in Supabase',date,verified.stored_per_strategy);
+    return;
+  }
   const sourceRows=await db<ResearchHistoryRow[]>('investor_flow_history?select=date,universe_date,observed_at,snapshot&date=lt.'+date+'&order=date.desc&limit=6');
   const observedAt=new Date().toISOString();
   const {source,picks:baselinePicks,coverage}=selectResearchCandidates(sourceRows,date,observedAt,holidays);
@@ -169,6 +178,7 @@ async function morning(date:string){
   // Freeze the established three strategies BEFORE any additional KIS data calls.
   for(const strategy of allStrategies)if(strategy!==FLOW_LIQUID_V1&&!existing.some(s=>s.strategy===strategy)){
     if(strategy===FLOW_PERSIST_V1&&experimental.status!=='ready')continue;
+    if(kstParts().date!==date||kstParts().time>='09:00')throw Error('Morning write cutoff reached before saving core research signals');
     await insertImmutable('balta_ai_signals',{trade_date:date,strategy,source_date:source.date,
       source_observed_at:source.observed_at,source_snapshot:{
         rows:sourceRows.map(r=>({date:r.date,universe_date:r.universe_date,observed_at:r.observed_at})),
@@ -222,13 +232,23 @@ async function morning(date:string){
   }
   const cashRecorded=existing.some(s=>s.strategy===FLOW_CASH_V1)||
    (cash?.status==='ready'&&kstParts().date===date&&kstParts().time<'09:00');
-  await runLog(date,'morning',experimental.status==='ready'&&liquidRecorded&&cashRecorded?'complete':'incomplete',{
+  // An ignored duplicate can return a successful HTTP status. Confirm the
+  // immutable signals via a separate database read before claiming storage.
+  const persisted=await db<FrozenSignalRow[]>(
+    'balta_ai_signals?select=trade_date,strategy,source_date,source_observed_at,generated_at,picks&trade_date=eq.'+date);
+  const storageVerification=auditFrozenSignals(persisted,date,researchStrategies,source.date);
+  const fullResearchComplete=storageVerification.ok&&experimental.status==='ready'&&liquidRecorded&&cashRecorded;
+  await runLog(date,'morning',fullResearchComplete?'complete':'incomplete',{storageVerification,
     source_date:source.date,coverage,preference,persistentPreference,liquidityPreference,cashPreference,
     liquidity:liquidity?.stats??null,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage,picks:cash.picks.length}:null,
     experimental:{status:experimental.status,reason:experimental.reason,coverage:experimental.coverage},
     per_strategy:Object.fromEntries([...allStrategies,FLOW_CASH_V1].map(s=>[s,s===FLOW_CASH_V1?(cashRecorded?(cash?.picks.length??null):null):s===FLOW_LIQUID_V1?(liquidRecorded?(liquidity?.picks.length??null):null):(s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length)]))
   });
-  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,preference,persistentPreference,experimentStatus:experimental.status,liquidity:liquidity?.stats??null,cashPreference,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage}:null,signals:selections},null,2));
+  console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,storageVerification,preference,persistentPreference,experimentStatus:experimental.status,liquidity:liquidity?.stats??null,cashPreference,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage}:null,signals:selections},null,2));
+  if(!storageVerification.ok){
+    console.error('[balta-ai] Research signals NOT confirmed in storage',storageVerification);
+    process.exitCode=1;
+  }
 }
 async function tradingCalendar(date:string):Promise<string[]>{
   // KIS caches failed responses for 10 seconds; retry once after its cooldown.
@@ -475,6 +495,7 @@ async function close(date:string){
   const completedFollowups=await savedStopFollowupKeys(prior);
   const pastSimulationRows=await existingSimulationRows(prior);
   let attempted=0,pending=0,unavailable=0,sourceErrors=0,alreadyRecorded=0;
+  const newlyWrittenOutcomeKeys=new Set<string>();
   let simulationsRecorded=0,simulationUnavailable=0,stopFollowupsRecorded=0,followupUnavailable=0;
   const cache=new Map<string,Promise<StockBar[]>>();
   for(const signal of signals){
@@ -528,6 +549,7 @@ async function close(date:string){
             entry_open:result.entry_open,exit_close:result.exit_close,return_pct:result.return_pct,
             source:'KIS_DAILY_ADJUSTED'},'trade_date,strategy,stock_code,horizon');
           attempted++;
+          newlyWrittenOutcomeKeys.add(recordKey);
           completed.add(recordKey);
         }
         if(!completedSims.has(recordKey)){
@@ -558,6 +580,9 @@ async function close(date:string){
   // Benchmarks are independently archived and compared only on exact stock entry/exit dates.
   // One failed KOSPI/KOSDAQ source never becomes a fabricated 0% index return.
   const benchmark=await saveMarketBenchmarks(signals,calendar,date);
+  // Confirm outcomes with a DB read, not merely an insert-if-absent HTTP response.
+  const confirmedOutcomes=await savedOutcomeKeys(prior);
+  const missingOutcomeKeys=[...newlyWrittenOutcomeKeys].filter(k=>!confirmedOutcomes.has(k));
   const summary=await loadOutcomeRows(prior);
   const priorResults=await loadOutcomeRows(earliestDate(120,date),1);
   const preference=comparePairedDailyReturns(priorResults);
@@ -570,9 +595,13 @@ async function close(date:string){
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
-  await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||followupUnavailable||missingPortfolioMarks||benchmark.missing?'incomplete':'complete',{signals:signals.length,attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
+  await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||followupUnavailable||missingPortfolioMarks||benchmark.missing||missingOutcomeKeys.length?'incomplete':'complete',{signals:signals.length,attempted,confirmedOutcomeWrites:attempted-missingOutcomeKeys.length,unconfirmedOutcomeWrites:missingOutcomeKeys.length,priceStatus:kstParts().time<'18:30'?'provisional':'vendor_daily_unofficial',simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
     preference,persistentPreference,liquidityPreference,cashPreference,caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
-  console.log(JSON.stringify({date,phase:'close',attempted,simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference,cashPreference},null,2));
+  console.log(JSON.stringify({date,phase:'close',attempted,confirmedOutcomeWrites:attempted-missingOutcomeKeys.length,unconfirmedOutcomeWrites:missingOutcomeKeys.length,priceStatus:kstParts().time<'18:30'?'provisional':'vendor_daily_unofficial',simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference,cashPreference},null,2));
+  if(missingOutcomeKeys.length){
+    console.error('[balta-ai] Some paper outcomes could not be verified in persistent storage');
+    process.exitCode=1;
+  }
 }
 async function main(){
   const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
