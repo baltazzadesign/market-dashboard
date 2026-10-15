@@ -44,8 +44,9 @@ jobs:
           if [ -n "${SUPABASE_URL}" ] && [ -n "${SUPABASE_SERVICE_ROLE_KEY}" ] && [ -n "${KIS_APPKEY}" ] && [ -n "${KIS_APPSECRET}" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::BALTA AI secrets are not configured; no research run performed"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::error::BALTA AI required Actions secrets missing. Configure SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, KIS_APPKEY and KIS_APPSECRET in repository Settings."
+            echo "BALTA AI research NOT executed: required secrets missing." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
       - uses: actions/setup-node@v4
         if: steps.guard.outputs.ready == 'true'
