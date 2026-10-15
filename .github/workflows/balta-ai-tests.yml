@@ -34,6 +34,7 @@ on:
       - "scripts/balta-ai-preflight.ts"
       - "scripts/balta-ai-liquidity-preflight.ts"
       - "tests/balta-ai-model.test.ts"
+      - "tests/balta-ai-supabase-cron.test.ts"
       - "tests/balta-ai-persistence-audit.test.ts"
       - "tests/balta-ai-dashboard.test.ts"
       - "tests/balta-ai-benchmark.test.ts"
@@ -57,6 +58,8 @@ on:
       - "supabase/migrations/20261014_balta_ai_stop_followups.sql"
       - "supabase/migrations/20261014_balta_ai_portfolio_bars.sql"
       - "supabase/migrations/20261014_balta_ai_flow_cash_v1.sql"
+      - "supabase/migrations/20261015_balta_ai_supabase_primary.sql"
+      - "supabase/migrations/20261015_balta_ai_supabase_cron_jobs.sql"
       - ".github/workflows/balta-ai-tests.yml"
   workflow_dispatch:
 permissions:
@@ -72,7 +75,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: node --import tsx --test tests/balta-ai-persistence-audit.test.ts tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts tests/balta-ai-dashboard.test.ts tests/balta-ai-benchmark.test.ts tests/balta-ai-flow-strategy.test.ts tests/balta-ai-liquidity.test.ts tests/balta-ai-regime.test.ts tests/balta-ai-health.test.ts tests/balta-ai-exits.test.ts tests/balta-ai-stop-policy.test.ts tests/balta-ai-portfolio.test.ts tests/balta-ai-cash-strategy.test.ts tests/balta-ai-dashboard-api.test.ts
+      - run: node --import tsx --test tests/balta-ai-supabase-cron.test.ts tests/balta-ai-persistence-audit.test.ts tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts tests/balta-ai-dashboard.test.ts tests/balta-ai-benchmark.test.ts tests/balta-ai-flow-strategy.test.ts tests/balta-ai-liquidity.test.ts tests/balta-ai-regime.test.ts tests/balta-ai-health.test.ts tests/balta-ai-exits.test.ts tests/balta-ai-stop-policy.test.ts tests/balta-ai-portfolio.test.ts tests/balta-ai-cash-strategy.test.ts tests/balta-ai-dashboard-api.test.ts
       - run: npm run typecheck
       - run: npm run build
   connectivity:

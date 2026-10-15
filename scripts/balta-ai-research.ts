@@ -614,7 +614,20 @@ async function main(){
   if(phase!=='morning'&&phase!=='close')throw Error('Use --phase=morning or --phase=close');
   const closed=marketClosedReason(now.date,holidays);
   if(closed){console.log('[balta-ai] KRX closed; skipped');return;}
-  if(phase==='morning'&&now.time>='09:00')throw Error('Morning signal cutoff is 09:00 KST');
+  if(phase==='morning'&&now.time>='09:00'){
+    // A delayed GitHub Actions backup is not permitted to create a retrospective
+    // pre-open pick. The independent Supabase pg_cron may have already saved
+    // both frozen baseline rows: verify those committed records before failing.
+    const records=await db<FrozenSignalRow[]>(
+      'balta_ai_signals?select=trade_date,strategy,source_date,source_observed_at,generated_at,picks&trade_date=eq.'+now.date);
+    const verification=auditFrozenSignals(records,now.date,researchStrategies);
+    if(verification.ok){
+      console.log('[balta-ai] Scheduled GitHub morning backup was late; Supabase primary already persisted both FLOW baselines',
+        now.date,verification.stored_per_strategy);
+      return;
+    }
+    throw Error('Morning signal cutoff is 09:00 KST; no verified ex-ante record to recover');
+  }
   if(phase==='close'&&now.time<'16:30')throw Error('Closing evaluation begins at 16:30 KST');
   try{
     if(phase==='morning')await morning(now.date);else await close(now.date);
