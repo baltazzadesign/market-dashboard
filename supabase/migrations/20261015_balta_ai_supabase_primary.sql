@@ -215,9 +215,9 @@ begin
       and s.generated_at < (v_day::timestamp + time '09:00') at time zone 'Asia/Seoul'
       and jsonb_typeof(s.picks)='array' and jsonb_array_length(s.picks)<=10;
 
-    select coalesce(jsonb_agg(key),'[]'::jsonb) into v_missing
-    from unnest(array['FLOW_V1','FLOW_ACCEL_V1']) key
-    where not (v_stored_per_strategy ? key);
+    select coalesce(jsonb_agg(wanted.strategy),'[]'::jsonb) into v_missing
+    from unnest(array['FLOW_V1','FLOW_ACCEL_V1']) as wanted(strategy)
+    where not (v_stored_per_strategy ? wanted.strategy);
 
     if v_stored <> 2 then
       raise exception 'MISSING_OR_INVALID_FROZEN_BASELINE';
