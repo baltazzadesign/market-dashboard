@@ -242,12 +242,13 @@ async function morning(date:string){
   // fully frozen baselines; their readiness remains separately visible.
   const baselineVerified=storageVerification.ok;
   await runLog(date,'morning',baselineVerified?'complete':'incomplete',{storageVerification,
-    optionalResearch:{persistent:experimental.status,liquidity:liquidRecorded?'recorded':'unavailable',
-      cash:cashRecorded?'recorded':'unavailable'},
+    optionalResearch:{persistent:experimental.status,
+      liquidity:Object.hasOwn(storageVerification.stored_per_strategy,FLOW_LIQUID_V1)?'recorded':'unavailable',
+      cash:Object.hasOwn(storageVerification.stored_per_strategy,FLOW_CASH_V1)?'recorded':'unavailable'},
     source_date:source.date,coverage,preference,persistentPreference,liquidityPreference,cashPreference,
     liquidity:liquidity?.stats??null,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage,picks:cash.picks.length}:null,
     experimental:{status:experimental.status,reason:experimental.reason,coverage:experimental.coverage},
-    per_strategy:Object.fromEntries([...allStrategies,FLOW_CASH_V1].map(s=>[s,s===FLOW_CASH_V1?(cashRecorded?(cash?.picks.length??null):null):s===FLOW_LIQUID_V1?(liquidRecorded?(liquidity?.picks.length??null):null):(s===FLOW_PERSIST_V1&&experimental.status!=='ready'?null:selections[s].length)]))
+    per_strategy:Object.fromEntries([...allStrategies,FLOW_CASH_V1].map(s=>[s,storageVerification.stored_per_strategy[s]??null]))
   });
   console.log(JSON.stringify({date,phase:'morning',sourceDate:source.date,coverage,storageVerification,preference,persistentPreference,experimentStatus:experimental.status,liquidity:liquidity?.stats??null,cashPreference,cash:cash?{status:cash.status,reason:cash.reason,coverage:cash.coverage}:null,signals:selections},null,2));
   if(!storageVerification.ok){
