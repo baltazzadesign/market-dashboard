@@ -62,3 +62,118 @@
   .dropdownLinks a { padding: 10px 12px; font-size: 13px; }
   .closeDropdown { position: absolute; right: 0; top: 8px; }
 }
+
+/* Keep the full menu independent of the header's 2-row search grid. */
+.menuDialog.menuDialog {
+  width: min(560px, calc(100vw - 20px));
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+}
+.menuDialog.menuDialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.menuDialog :global(.modal-title) {
+  flex: 0 0 auto;
+  padding: 14px 18px;
+}
+.menuDialog :global(.modal-title button) {
+  width: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  height: 38px;
+  padding: 0;
+}
+.menuContent.menuContent {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  gap: 16px;
+  padding: 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.menuContent > :global(.terminal-search) {
+  flex: 0 0 auto;
+  grid-column: auto;
+  grid-row: auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  height: 44px;
+}
+.menuGroups.menuGroups {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+}
+.quickLinks.quickLinks {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.quickLinks a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 46px;
+  padding: 10px;
+  text-align: center;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.menuGroup {
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.menuGroup h3 { margin: 0 0 9px; font-size: 13px; }
+.menuGroup > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.menuGroup a {
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--raised);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.menuGroup a[aria-current] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.logout.logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 2px;
+}
+@media (max-width: 620px) {
+  .menuDialog.menuDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .menuContent.menuContent { gap: 14px; padding: 14px; }
+  .menuGroup > div { gap: 6px; }
+  .menuGroup a { padding: 10px; font-size: 12px; }
+}
+@media (max-width: 350px) {
+  .menuGroup > div { grid-template-columns: minmax(0, 1fr); }
+}
