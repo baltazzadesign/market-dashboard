@@ -110,15 +110,15 @@ export default function TerminalHeader() {
         </nav>
       </div>)}
     </header>
-    <Modal open={menu} onClose={() => setMenu(false)} title="발타툴 메뉴">
-      <div className="terminal-menu-content">
+    <Modal open={menu} onClose={() => setMenu(false)} title="발타툴 메뉴" className={styles.menuDialog}>
+      <div className={"terminal-menu-content " + styles.menuContent}>
         <form className="terminal-search" onSubmit={search}><input aria-label="메뉴 종목 검색" value={query} onChange={e => setQuery(e.target.value)} placeholder="종목명 또는 코드" maxLength={60}/><button aria-label="검색"><Icon name="search"/></button></form>
         <nav aria-label="전체 메뉴" className={styles.menuGroups}>
           <div className={styles.quickLinks}>{pageLink({ href: '/', label: '대시보드' })}{pageLink({ href: '/history', label: '캘린더' })}</div>
           {groups.map(group => <section key={group.id} className={styles.menuGroup}><h3>{group.label}</h3><div>{group.links.map(pageLink)}</div></section>)}
           <section className={styles.menuGroup}><h3>개인 도구 · 더보기</h3><div>{utilityLinks.map(link => link.href.endsWith('.html') ? <a key={link.href} href={link.href}>{link.label}</a> : pageLink(link))}</div></section>
         </nav>
-        <button className="button" onClick={logout}><Icon name="logout"/>로그아웃</button>{message && <p role="alert">{message}</p>}
+        <button className={"button " + styles.logout} onClick={logout}><Icon name="logout"/>로그아웃</button>{message && <p role="alert">{message}</p>}
       </div>
     </Modal>
   </>;
