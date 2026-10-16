@@ -86,3 +86,21 @@ body{background:var(--background);color:var(--foreground)}
   .terminal-header-inner { gap: 22px; }
   .terminal-navigation { gap: 20px; }
 }
+
+
+/* Mobile dashboard: give the KOSPI/KOSDAQ (and futures) plot more usable area. */
+@media (max-width: 620px) {
+  .terminal-dashboard .terminal-price-panel {
+    width: calc(100% + 16px);
+    margin-inline: -8px;
+    padding-inline: 5px;
+  }
+
+  .terminal-dashboard .terminal-price-panel .terminal-candles {
+    height: 240px;
+  }
+
+  .terminal-dashboard .terminal-price-panel .terminal-price-empty {
+    min-height: 240px;
+  }
+}
