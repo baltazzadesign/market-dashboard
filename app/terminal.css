@@ -88,19 +88,11 @@ body{background:var(--background);color:var(--foreground)}
 }
 
 
-/* Mobile dashboard: give the KOSPI/KOSDAQ (and futures) plot more usable area. */
+/* Mobile dashboard: wider main chart without altering expanded modal sizing. */
 @media (max-width: 620px) {
   .terminal-dashboard .terminal-price-panel {
     width: calc(100% + 16px);
     margin-inline: -8px;
-    padding-inline: 5px;
-  }
-
-  .terminal-dashboard .terminal-price-panel .terminal-candles {
-    height: 240px;
-  }
-
-  .terminal-dashboard .terminal-price-panel .terminal-price-empty {
-    min-height: 240px;
+    padding-inline: 4px;
   }
 }
