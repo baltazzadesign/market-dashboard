@@ -2,6 +2,9 @@
 .markets.markets { display: grid; grid-template-columns: .7fr .7fr 1.3fr 1.3fr; width: 100%; margin-bottom: 9px; }
 .markets.markets button { padding: 6px 5px; font-size: 11px; min-height: 32px; }
 .tools.tools { flex-wrap: wrap; }
+.toolActions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.toolActions select { margin-left: 0; }
+.plotArea { width: 100%; min-width: 0; }
 .futures { min-width: 0; }
 .contract { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin: 12px 0 8px; }
 .contract strong { color: #ebce90; font-size: 12px; }
@@ -20,12 +23,24 @@
 .notes summary {cursor:pointer; color:#b7aa8d;}
 .notes p {margin:5px 0;}
 @media (max-width: 640px) {
-  .panel.panel { min-height: 300px; }
-  .markets.markets button {font-size:10px; padding-inline:3px; white-space:normal;}
-  .tools .periods.periods { order: 2; flex: 1 0 100%; justify-content: flex-start; gap: 5px; }
-  .tools .periods button:nth-child(n) { display: inline-block; flex: 1; min-height: 32px; font-size: 11px; }
-  .tools.tools select {display:block; min-width:0;}
-  .tools.tools > button {margin-left:auto;}
+  .panel.panel { min-height: 335px; }
+  .markets.markets button { font-size: 10px; padding-inline: 3px; white-space: normal; }
+  /* Keep all five ranges, chart type and expand action on one row. */
+  .tools.tools { flex-wrap: nowrap; gap: 5px; }
+  .tools .periods.periods { order: 0; flex: 1 1 auto; min-width: 0; justify-content: space-between; gap: 2px; }
+  .tools .periods.periods button:nth-child(n) {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 1 1 0; min-width: 0; min-height: 33px; padding: 0 2px; font-size: 11px;
+  }
+  .toolActions { gap: 3px; flex: 0 0 auto; }
+  .tools.tools .toolActions select {
+    display: block; width: 66px; min-width: 0; max-width: none;
+    height: 33px; padding: 3px 2px; margin-left: 0; font-size: 11px;
+  }
+  .toolActions > button { width: 31px; min-width: 31px; height: 33px; }
+  /* Main chart only: do not resize the separate expanded modal chart. */
+  .plotArea :global(.terminal-candles) { height: 246px; }
+  .plotArea :global(.terminal-price-empty) { min-height: 246px; }
   .metrics {grid-template-columns:repeat(2,minmax(0,1fr));}
   .contract {align-items:flex-start;}
 }
