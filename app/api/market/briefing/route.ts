@@ -10,7 +10,7 @@ export const maxDuration = 30;
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 
 export async function GET(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401, headers });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401, headers });
   try {
     const now = new Date(), today = kstParts(now).date, date = requestedDate(request);
     if (date > today || date < '2000-01-01') throw new MarketDataError('오늘 이전의 유효한 날짜를 선택해 주세요.', 400);

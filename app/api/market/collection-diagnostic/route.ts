@@ -7,7 +7,7 @@ export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const headers = { "Cache-Control": "private, no-store" };
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: "로그인이 필요합니다." }, { status: 401, headers });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: "로그인이 필요합니다." }, { status: 401, headers });
   try {
     const date = requestedDate(request), now = kstParts();
     const closed = marketClosedReason(date, parseAdditionalHolidays(process.env.MARKET_HOLIDAYS));

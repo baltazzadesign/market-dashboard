@@ -1,3 +1,10 @@
 
 *.zip
 .env*
+
+.runtime/
+node_modules/
+.next/
+*.db*
+*.tsbuildinfo
+.baltagyeong-backup-*/

@@ -4,7 +4,7 @@ import { kstParts,moveDate,normalizeRow } from '@/lib/balta-model';
 import { marketClosedReason,parseAdditionalHolidays } from '@/lib/market-calendar';
 export const dynamic='force-dynamic';
 export async function GET(request:Request){
- if(!hasDashboardAccess(request))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401});
+ if(!(await hasDashboardAccess(request)))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401});
  try{
   const date=requestedDate(request),time=new URL(request.url).searchParams.get('time')??'';
   if(date>kstParts().date||!/^\d{2}:\d{2}$/.test(time)||time<'09:00'||time>'15:30'||Number(time.slice(3))>59)throw new MarketDataError('조회 날짜와 시간을 확인하세요.',400);

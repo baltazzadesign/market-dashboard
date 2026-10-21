@@ -8,10 +8,10 @@ function json(data:unknown,status=200){
  return Response.json(data,{status,headers:{'Cache-Control':'private,no-store'}});
 }
 export async function GET(request:Request){
- if(!hasDashboardAccess(request))return json({error:'접근 권한이 필요합니다.'},401);
+ if(!(await hasDashboardAccess(request)))return json({error:'접근 권한이 필요합니다.'},401);
  const u=new URL(request.url),admin=u.searchParams.get('admin')==='1',
   date=u.searchParams.get('date')??'';
- if(admin&&!researchAdmin(request))return json({error:'운영자 인증이 필요합니다.'},403);
+ if(admin&&!(await researchAdmin(request)))return json({error:'운영자 인증이 필요합니다.'},403);
  if(date&&!dateValid(date))return json({error:'날짜를 확인하세요.'},400);
  const query=new URLSearchParams({
   select:'trade_date,status,version,generated_at,approved_at,model,narrative,evidence',
@@ -24,7 +24,7 @@ export async function GET(request:Request){
  }catch(e){return marketError(e);}
 }
 export async function POST(request:Request){
- if(!researchAdmin(request))return json({error:'운영자 인증이 필요합니다.'},403);
+ if(!(await researchAdmin(request)))return json({error:'운영자 인증이 필요합니다.'},403);
  try{
   const value=await request.json() as {date?:string;action?:string};
   if(!value||!value.date||!dateValid(value.date)||value.action!=='publish')

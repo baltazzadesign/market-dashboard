@@ -30,7 +30,7 @@ async function feed(): Promise<NewsFeed> {
   return pending;
 }
 export async function GET(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   try { return Response.json(await feed(), { headers: { 'Cache-Control': 'private, no-store' } }); }
   catch { return Response.json({ ok: false, items: [], error: '뉴스 제공처 연결이 지연되고 있습니다. 잠시 후 다시 조회해 주세요.' }, { status: 503 }); }
 }

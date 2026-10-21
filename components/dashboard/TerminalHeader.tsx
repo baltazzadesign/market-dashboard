@@ -5,6 +5,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Brand, Icon } from './Icon';
 import { Modal } from './Modal';
 import OnlinePresence from './OnlinePresence';
+import MemberHeaderStatus from './MemberHeaderStatus';
+import type {Member} from '@/lib/member-ranks';
 import styles from './TerminalHeader.module.css';
 
 type NavigationLink = { href: string; label: string };
@@ -25,7 +27,8 @@ const groups = [
   ] },
 ];
 const utilityLinks: NavigationLink[] = [
-  { href: '/notes', label: '내 메모' }, { href: '/replay', label: '시장 복기' },
+  {href:'/mypage',label:'마이페이지'}, {href:'/mypage#watchlist',label:'관심 종목'},
+  { href: '/board', label: '게시판' }, { href: '/replay', label: '시장 복기' },
   { href: '/baltagyeong.html', label: '발타경' }, { href: '/balta-jungyong', label: '발타 중용' },
   { href: '/disclaimer', label: '책임면책 고지' },
 ];
@@ -69,7 +72,11 @@ export default function TerminalHeader() {
     };
   }, [expanded]);
 
-  if (path === '/login' || path.startsWith('/balta-jungyong')) return null;
+  const [member,setMember]=useState<Member|null>(null);
+  const memberRole=member?.role??'';
+  useEffect(()=>{if(path==='/login'||path==='/setup'){setMember(null);return;}const controller=new AbortController();const refresh=()=>{fetch('/api/auth/me',{cache:'no-store',signal:controller.signal}).then(r=>r.ok?r.json():null).then(j=>{if(!controller.signal.aborted)setMember(j?.member??null);}).catch(()=>{if(!controller.signal.aborted)setMember(null);});};refresh();window.addEventListener('focus',refresh);window.addEventListener('balta:member-updated',refresh);return()=>{controller.abort();window.removeEventListener('focus',refresh);window.removeEventListener('balta:member-updated',refresh);};},[path]);
+  const accountLinks = memberRole==='owner'||memberRole==='admin'?[...utilityLinks,{href:'/admin',label:'회원 관리'}]:utilityLinks;
+  if (path === '/setup' || path === '/login' || path.startsWith('/balta-jungyong')) return null;
   function closeNavigation() { setMenu(false); setExpanded(null); }
   function search(event: FormEvent) { event.preventDefault(); router.push('/stock-flow' + (query.trim() ? '?q=' + encodeURIComponent(query.trim()) : '')); closeNavigation(); }
   function theme() { const next = !soft; setSoft(next); document.documentElement.dataset.terminalContrast = next ? 'soft' : 'black'; try { localStorage.setItem('balta.soft-dark', next ? '1' : '0'); } catch {} }
@@ -94,13 +101,15 @@ export default function TerminalHeader() {
         </nav>
         <form className="terminal-search" role="search" onSubmit={search}><input aria-label="종목명 또는 코드 검색" value={query} onChange={e => setQuery(e.target.value)} placeholder="종목명 또는 코드 검색..." maxLength={60}/><button aria-label="검색"><Icon name="search" size={17}/></button></form>
         <div className="terminal-header-actions">
-          <Link href="/notes" className={styles.notes} aria-label="내 메모" aria-current={isCurrent(path, '/notes') ? 'page' : undefined} onClick={closeNavigation}><Icon name="book" size={18}/><span>내 메모</span></Link>
+          <Link href="/board" className={styles.notes} aria-label="게시판" aria-current={isCurrent(path, '/board') ? 'page' : undefined} onClick={closeNavigation}><Icon name="book" size={18}/><span>게시판</span></Link>
+          <Link href="/mypage" className={styles.notes+" "+styles.accountLink} aria-label="마이페이지" onClick={closeNavigation}>마이페이지</Link>
           <OnlinePresence/>
           <button className="terminal-icon-button terminal-mobile-search" aria-label="종목 검색" onClick={() => { closeNavigation(); router.push('/stock-flow'); }}><Icon name="search"/></button>
           <button className="terminal-icon-button terminal-theme-button" onClick={theme} aria-label="화면 밝기 변경" aria-pressed={soft}><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M20.8 14.4A9.1 9.1 0 0 1 9.6 3.2a9.2 9.2 0 1 0 11.2 11.2Z"/></svg></button>
           <button className="terminal-icon-button terminal-menu-button" onClick={() => { setExpanded(null); setMenu(true); }} aria-label="전체 메뉴 및 계정" aria-expanded={menu}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         </div>
       </div>
+      {member && <MemberHeaderStatus member={member}/> }
       {activeGroup && <div className={styles.subbar}><div className={styles.subbarInner}><span className={styles.sectionLabel}>{activeGroup.label}</span><nav ref={subnavigation} className={styles.subnavigation} aria-label={activeGroup.label + ' 세부 메뉴'}>{activeGroup.links.map(pageLink)}</nav></div></div>}
       {groups.map(group => <div key={group.id} id={'nav-panel-' + group.id} className={styles.dropdown} hidden={expanded !== group.id}>
         <nav className={styles.dropdownInner} aria-labelledby={'nav-trigger-' + group.id}>
@@ -116,7 +125,7 @@ export default function TerminalHeader() {
         <nav aria-label="전체 메뉴" className={styles.menuGroups}>
           <div className={styles.quickLinks}>{pageLink({ href: '/', label: '대시보드' })}{pageLink({ href: '/history', label: '캘린더' })}</div>
           {groups.map(group => <section key={group.id} className={styles.menuGroup}><h3>{group.label}</h3><div>{group.links.map(pageLink)}</div></section>)}
-          <section className={styles.menuGroup}><h3>개인 도구 · 더보기</h3><div>{utilityLinks.map(link => link.href.endsWith('.html') ? <a key={link.href} href={link.href}>{link.label}</a> : pageLink(link))}</div></section>
+          <section className={styles.menuGroup}><h3>개인 도구 · 더보기</h3><div>{accountLinks.map(link => link.href.endsWith('.html') ? <a key={link.href} href={link.href}>{link.label}</a> : pageLink(link))}</div></section>
         </nav>
         <button className={"button " + styles.logout} onClick={logout}><Icon name="logout"/>로그아웃</button>{message && <p role="alert">{message}</p>}
       </div>

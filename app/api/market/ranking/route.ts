@@ -4,7 +4,7 @@ import { finite, signedChange, type Quote } from '@/lib/terminal-model';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   const url = new URL(request.url), sort = url.searchParams.get('sort') || 'up';
   if (!['up', 'down', 'turnover', 'volume'].includes(sort)) return Response.json({ ok: false, error: '정렬 기준을 확인해 주세요.' }, { status: 400 });
   const market = url.searchParams.get('market') || 'all';

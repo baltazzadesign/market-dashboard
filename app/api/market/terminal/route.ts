@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   const asOf = new Date().toISOString();
   const quotes: Quote[] = [], indicators: Quote[] = [], warnings: string[] = [];
   const jobs = [

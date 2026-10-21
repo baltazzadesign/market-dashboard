@@ -8,7 +8,7 @@ import {signalPerformance} from '@/lib/market-diagnostics';
 export const dynamic='force-dynamic';
 export const maxDuration=60;
 export async function GET(request:Request){
- if(!hasDashboardAccess(request))return Response.json({error:'로그인이 필요합니다.'},{status:401});
+ if(!(await hasDashboardAccess(request)))return Response.json({error:'로그인이 필요합니다.'},{status:401});
  try{const q=new URL(request.url).searchParams,start=q.get('start')??'',end=q.get('end')??'',market=q.get('market')??'kospi',h=q.get('horizon')??'30';
  if(!isValidDate(start)||!isValidDate(end)||end<start||end>kstParts().date||(Date.parse(end)-Date.parse(start))/86400000>6||!['kospi','kosdaq'].includes(market)||!['30','60','close'].includes(h))throw new MarketDataError('기간은 최대 7일이며 날짜·평가 기준을 확인하세요.',400);
  const grouped=new Map<string,Record<string,unknown>[]>(),holidays=parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);

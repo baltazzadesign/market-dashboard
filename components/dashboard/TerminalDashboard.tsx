@@ -54,7 +54,7 @@ export default function TerminalDashboard() {
   const shortcuts: { title: string; description: string; icon: IconName; href?: string; click?: () => void; art: string }[] = [
     { title: '시장 캘린더', description: '과거를 보면\n오늘이 보입니다.', icon: 'calendar', href: '/history', art: 'calendar' },
     { title: '시장리서치', description: '지금 시장을 이끄는\n주도 섹터는?', icon: 'layers', href: '/research', art: 'sector' },
-    { title: '내 메모', description: '시장의 순간을\n기록으로 남기세요.', icon: 'book', href: '/notes', art: 'notes' },
+    { title: '게시판', description: '시장의 생각을\n함께 나누세요.', icon: 'book', href: '/board', art: 'notes' },
     { title: '차트 전체보기', description: '더 넓은 시야로\n시장을 바라보세요.', icon: 'chart', click: () => { setHoverMinute(null); setModal('board'); }, art: 'charts' },
   ];
   return <main className="terminal-dashboard" id="main-content"><section className="terminal-hero"><div><h1>시장을 읽는<br/><strong>발바닥의 감각</strong></h1><p>데이터로 더 나은 판단을, 발타툴과 함께.</p><small>GOOD DATA. BETTER DECISIONS.</small></div><div className="terminal-hero-quote">흔들리지 않는 시선이<br/>기회를 만든다.<b>發</b></div></section>

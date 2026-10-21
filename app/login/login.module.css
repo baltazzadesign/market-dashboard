@@ -69,3 +69,5 @@
 }
 @media(max-width:370px){.header{padding-inline:16px}.stage{padding-inline:16px}.brand{width:130px}.headerNote{font-size:8px}.visual{height:285px}.art{height:610px;top:-135px}.card{padding:22px 18px}.introduction h1{font-size:27px}.foot{font-size:9px}}
 @media(prefers-reduced-motion:reduce){.artGlow{animation:none}.submit,.passwordField{transition:none}}
+
+.fields{border:0;padding:0;margin:0;min-width:0}.fields>.label:not(:first-child){margin-top:16px}.fields .label .passwordField{margin-top:9px}.switchMode{display:block;width:100%;border:0;background:none;color:#c4ad7e;min-height:44px;font-size:12px;margin-top:8px;cursor:pointer}.switchMode:hover{color:#f0d79e}.fields:disabled{opacity:.65}

@@ -2,7 +2,7 @@ import { hasDashboardAccess } from '@/lib/balta-access';
 import { stockDirectory } from '@/lib/kis-directory';
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   const q = (new URL(request.url).searchParams.get('q') || '').trim().slice(0, 60).toLocaleLowerCase();
   const market = new URL(request.url).searchParams.get('market') || 'all';
   if (!q) return Response.json({ ok: true, rows: [] });

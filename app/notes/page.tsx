@@ -1,3 +1,2 @@
-import TerminalNotes from '@/components/dashboard/TerminalNotes';
-export const metadata = { title: '내 메모' };
-export default function Page() { return <TerminalNotes/>; }
+import {redirect} from 'next/navigation';
+export default function Page(){redirect('/board');}

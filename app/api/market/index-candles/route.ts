@@ -4,7 +4,7 @@ import { finite, type Candle } from '@/lib/terminal-model';
 import { isValidDate, kstParts } from '@/lib/balta-model';
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   const url = new URL(request.url), date = url.searchParams.get('date') || kstParts().date, market = url.searchParams.get('market') || 'kospi', range = url.searchParams.get('range') || '1M';
   if (!isValidDate(date) || date > kstParts().date || !['kospi', 'kosdaq'].includes(market) || !['1W', '1M', '3M', '1Y'].includes(range)) return Response.json({ ok: false, error: '조회 범위를 확인해 주세요.' }, { status: 400 });
   try {

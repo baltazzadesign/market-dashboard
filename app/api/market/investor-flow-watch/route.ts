@@ -9,7 +9,7 @@ export const runtime='nodejs';
 export const maxDuration=60;
 const headers={'Cache-Control':'private, no-store',Vary:'Cookie'};
 export async function GET(request:Request){
-  if(!hasDashboardAccess(request))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401,headers});
+  if(!(await hasDashboardAccess(request)))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401,headers});
   const p=new URL(request.url).searchParams,today=kstParts().date,month=p.get('month')||today.slice(0,7),date=p.get('date')||undefined;
   const investor=(p.get('investor')||'pension') as StockInvestor,market=(p.get('market')||'all') as RankingMarket;
   const criteria={minimumDays:Number(p.get('days')??defaultFlowWatchCriteria.minimumDays),reentryWindow:Number(p.get('window')??defaultFlowWatchCriteria.reentryWindow),minimumAmount:Number(p.get('amount')??defaultFlowWatchCriteria.minimumAmount)};

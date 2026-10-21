@@ -6,7 +6,7 @@ export const runtime='nodejs';
 export const maxDuration=60;
 const headers={'Cache-Control':'private, no-store',Vary:'Cookie'};
 export async function GET(request:Request){
-  if(!hasDashboardAccess(request))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401,headers});
+  if(!(await hasDashboardAccess(request)))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401,headers});
   const code=new URL(request.url).searchParams.get('code')??'';
   if(!/^\d{6}$/.test(code))return Response.json({ok:false,error:'6자리 종목코드를 입력해 주세요.'},{status:400,headers});
   try{return Response.json(await cachedCashTimeline(code),{headers});}

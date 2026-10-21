@@ -7,7 +7,7 @@ export const dynamic='force-dynamic';
 export const maxDuration=60;
 const cache=new Map<string,{until:number;pending:Promise<FuturesResponse>}>();
 export async function GET(request:Request) {
-  if(!hasDashboardAccess(request))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401});
+  if(!(await hasDashboardAccess(request)))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401});
   const query=new URL(request.url).searchParams,product=query.get('product')??'kospi200',mode=query.get('session')??'DAY',range=query.get('range')??'1D',series=query.get('series')??'current';
   if(!Object.hasOwn(FUTURE_PRODUCTS,product)||!['DAY','NIGHT','ALL'].includes(mode)||!Object.hasOwn(rangeDays,range)||!['current','continuous'].includes(series))return Response.json({ok:false,error:'선물 조회 조건을 확인해 주세요.'},{status:400});
   const key=[product,mode,range,series].join('|');let entry=cache.get(key);

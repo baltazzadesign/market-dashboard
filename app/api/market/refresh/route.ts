@@ -6,7 +6,7 @@ export const maxDuration = 60;
 let pending: Promise<{ body: Record<string, unknown>; status: number }> | null = null;
 let cached: { body: Record<string, unknown>; status: number; at: number } | null = null;
 export async function POST(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: "로그인이 필요합니다." }, { status: 401 });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: "로그인이 필요합니다." }, { status: 401 });
   if (!sameOrigin(request)) return Response.json({ ok: false, error: "요청 출처를 확인해 주세요." }, { status: 403 });
   if (cached && Date.now() - cached.at < 30000) return Response.json(cached.body, { status: cached.status });
   if (!pending) {

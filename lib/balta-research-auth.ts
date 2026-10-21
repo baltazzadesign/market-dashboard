@@ -1,8 +1,8 @@
 import {timingSafeEqual} from 'node:crypto';
 import {hasDashboardAccess,sameOrigin} from './balta-access';
 
-export function researchAdmin(request:Request):boolean{
- if(!hasDashboardAccess(request)||!sameOrigin(request))return false;
+export async function researchAdmin(request:Request):Promise<boolean>{
+ if(!(await hasDashboardAccess(request))||!sameOrigin(request))return false;
  const configured=process.env.BALTA_RESEARCH_ADMIN_KEY;
  const submitted=request.headers.get('x-balta-research-admin-key');
  if(!configured||configured.length<20||!submitted)return false;

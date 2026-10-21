@@ -9,7 +9,7 @@ const headers = { "Cache-Control": "private, no-store, max-age=0", Vary: "Cookie
 
 export async function POST(request: Request) {
   if (!sameOrigin(request) || request.headers.get("sec-fetch-site") === "cross-site") return NextResponse.json({ ok: false, count: null, error: "FORBIDDEN" }, { status: 403, headers });
-  if (!hasDashboardAccess(request)) return NextResponse.json({ ok: false, count: null, error: "UNAUTHORIZED" }, { status: 401, headers });
+  if (!(await hasDashboardAccess(request))) return NextResponse.json({ ok: false, count: null, error: "UNAUTHORIZED" }, { status: 401, headers });
   let token: string | undefined;
   let response: NextResponse;
   try {

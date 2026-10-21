@@ -4,7 +4,7 @@ import { GET as readSectorSnapshot } from '../sectors/route';
 import { calculateMarketPulse } from '@/lib/market-pulse';
 export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   try {
     const date = requestedDate(request);
     // Reuse the web endpoint's market normalization, deduplication and per-market times.

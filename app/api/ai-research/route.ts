@@ -39,7 +39,7 @@ async function allRows(
 }
 
 export async function GET(request:Request){
-  if(!hasDashboardAccess(request))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401});
+  if(!(await hasDashboardAccess(request)))return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401});
   try{
     const raw=new URL(request.url).searchParams.get('days')??'30';
     if(!['7','30','60','90'].includes(raw))throw new MarketDataError('조회 기간을 확인해 주세요.',400);

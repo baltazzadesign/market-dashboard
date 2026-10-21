@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 const headers = {'Cache-Control':'private, no-store',Vary:'Cookie'};
 export async function GET(request: Request) {
-  if (!hasDashboardAccess(request)) return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401,headers});
+  if (!(await hasDashboardAccess(request))) return Response.json({ok:false,error:'로그인이 필요합니다.'},{status:401,headers});
   const p = new URL(request.url).searchParams, stage = p.get('stage')||'universe';
   if (!['universe','quotes','detail'].includes(stage)) return Response.json({ok:false,error:'조회 단계를 확인해 주세요.'},{status:400,headers});
   const codes = (p.get('codes')??'').split(',');

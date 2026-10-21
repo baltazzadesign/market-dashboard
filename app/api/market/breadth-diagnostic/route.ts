@@ -164,7 +164,7 @@ async function probe(token: string, code: "0001" | "1001", api: "063" | "066") {
 
 export async function GET(request: Request) {
   const headers = { "Cache-Control": "private, no-store" };
-  if (!hasDashboardAccess(request)) return Response.json({ ok: false, error: "로그인이 필요합니다." }, { status: 401, headers });
+  if (!(await hasDashboardAccess(request))) return Response.json({ ok: false, error: "로그인이 필요합니다." }, { status: 401, headers });
   if (!process.env.KIS_APPKEY || !process.env.KIS_APPSECRET) return Response.json({ ok: false, error: "KIS 앱 설정이 없습니다." }, { status: 503, headers });
   let token: string;
   try { token = await getStoredKisToken(); }
