@@ -40,7 +40,10 @@ async function db<T>(resource:string,options:RequestInit={}):Promise<T>{
     if(!response.ok){
       if([408,429].includes(response.status)||response.status>=500)
         throw new RetryableResearchError('Supabase temporarily unavailable','http',response.status);
-      throw new Error('BALTA storage HTTP '+response.status);
+      // Keep failures actionable without exposing URLs, query params, headers or DB bodies.
+      const operation=(options.method??'GET').toUpperCase();
+      const table=resource.split('?')[0];
+      throw new Error('BALTA storage '+operation+' '+table+' HTTP '+response.status);
     }
     const raw=await response.text();return (raw?JSON.parse(raw):null) as T;
   },{attempts:3,delayMs:1500});
@@ -633,10 +636,13 @@ async function main(){
     if(phase==='morning')await morning(now.date);else await close(now.date);
   }catch(error){
     const reason=failureReason(error);
-    // Safe metadata only: no response bodies or credentials in logs/database.
-    try{await runLog(now.date,phase,'incomplete',{reason,recoverable:reason!=='unknown'});}
+    // Record only method + table + HTTP status. Never log Supabase body, URL or credentials.
+    const operation=error instanceof Error &&
+      /^BALTA storage (GET|POST|PUT|PATCH|DELETE) [a-z_]+ HTTP [0-9]{3}$/.test(error.message)
+      ?error.message:null;
+    try{await runLog(now.date,phase,'incomplete',{reason,recoverable:reason!=='unknown',operation});}
     catch{console.error('[balta-ai] Run failure could not be saved to database');}
-    console.error('[balta-ai] Phase failed',phase,reason);
+    console.error('[balta-ai] Phase failed',phase,reason,operation??'');
     process.exitCode=1;
   }
 }

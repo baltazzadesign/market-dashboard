@@ -36,6 +36,13 @@ test('post-stop high uses ONLY forward sessions (not unknown same-day high)',()=
  assert.equal(x.value.recovered_entry_by_high,false);
  assert.equal(x.value.recovered_entry_by_close,false);
  assert.equal(x.value.exit_date,days[2]);
+ assert.deepEqual(Object.keys(x.value).sort(),[
+  'trade_date','strategy','stock_code','scenario','stop_date','followup_horizon',
+  'stop_price','entry_open','exit_date','exit_close','post_stop_return_pct',
+  'recovered_entry_by_high','recovered_entry_by_close','worst_post_stop_pct','source_version'
+ ].sort(),'persisted stop follow-up must exactly match Supabase schema');
+ assert.equal(Object.hasOwn(x.value,'gross_stop_return_pct'),false,
+  'stop event diagnostics must not leak into PostgREST insert payload');
  assert.equal(x.value.worst_post_stop_pct,Number(((93/97-1)*100).toFixed(6)));
  const y=assessStopFollowup(event,3,days,bars,days[4]);
  assert.equal(y.status,'ready');
