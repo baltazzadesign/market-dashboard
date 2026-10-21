@@ -60,7 +60,13 @@ export function assessStopFollowup(event:StopEvent,followup:FollowupHorizon,
  const samples=path as StockBar[];
  const latest=samples.at(-1)!;
  return {status:'ready',value:{
-  ...event,followup_horizon:followup,
+  // StopEvent has gross_stop_return_pct for internal research, but the
+  // balta_ai_stop_followups table does not have that column.
+  // Build a schema-exact immutable row instead of spreading StopEvent.
+  trade_date:event.trade_date,strategy:event.strategy,stock_code:event.stock_code,
+  scenario:event.scenario,stop_date:event.stop_date,
+  stop_price:event.stop_price,entry_open:event.entry_open,
+  followup_horizon:followup,
   exit_date:latest.date,exit_close:latest.close,
   post_stop_return_pct:pct(latest.close,event.stop_price),
   recovered_entry_by_high:samples.some(b=>b.high>=event.entry_open),
