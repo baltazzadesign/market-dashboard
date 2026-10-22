@@ -11,8 +11,8 @@ import styles from './TerminalPriceChart.module.css';
 const ranges:FutureRange[]=['1D','1W','1M','3M','1Y'];
 const modes:Record<SessionMode,string>={DAY:'주간',NIGHT:'야간',ALL:'통합'};
 const dateTime=(s:string)=>new Date(s).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
-export function FuturesPriceChart({product}:{product:FutureProduct}) {
-  const [mode,setMode]=useState<SessionMode>('DAY'),[range,setRange]=useState<FutureRange>('1D'),[series,setSeries]=useState<FutureSeries>('current'),[line,setLine]=useState(false),[expanded,setExpanded]=useState(false);
+export function FuturesPriceChart({product,initialMode='DAY'}:{product:FutureProduct;initialMode?:SessionMode}) {
+  const [mode,setMode]=useState<SessionMode>(initialMode),[range,setRange]=useState<FutureRange>('1D'),[series,setSeries]=useState<FutureSeries>('current'),[line,setLine]=useState(false),[expanded,setExpanded]=useState(false);
   const url='/api/market/futures?'+new URLSearchParams({product,session:mode,range,series});
   const feed=useTerminalData<FuturesResponse>(url,10000),data=feed.data,q=data?.quote;
   const name=mode==='NIGHT'?FUTURE_PRODUCTS[product].replace(' 선물',' 야간선물'):FUTURE_PRODUCTS[product];

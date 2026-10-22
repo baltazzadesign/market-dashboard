@@ -12,7 +12,7 @@ import styles from './TerminalHeader.module.css';
 type NavigationLink = { href: string; label: string };
 const groups = [
   { id: 'market', label: '시장 분석', links: [
-    { href: '/briefing', label: '시장 브리핑' }, { href: '/daily', label: '일별 분석' },
+    { href: '/premarket', label: '장전 체크' }, { href: '/briefing', label: '시장 브리핑' }, { href: '/daily', label: '일별 분석' },
     { href: '/breadth', label: '시장폭' }, { href: '/pulse', label: 'Market Pulse' },
   ] },
   { id: 'flow', label: '수급 분석', links: [
