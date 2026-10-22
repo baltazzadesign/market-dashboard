@@ -1,3 +1,4 @@
+import {yuanCross} from '@/lib/premarket-extra-model';
 import {hasDashboardAccess} from '@/lib/balta-access';
 import {kisTerminal} from '@/lib/kis-terminal';
 import {kstParts,moveDate} from '@/lib/balta-model';
@@ -22,5 +23,6 @@ export async function GET(request:Request){
    }catch{return {...parseMorningSeries(id,name,category,unit??'USD',[]),note:'제공처 조회 실패 · 다시 조회해 주세요.'};}
   }));rows.push(...batch);
  }
+ if(group==='global'){const krw=rows.find(r=>r.id==='FX@KRW'),cny=rows.find(r=>r.id==='FX@CNY');if(krw&&cny)rows.push(yuanCross(krw,cny));}
  return Response.json({ok:true,rows,fetchedAt:new Date().toISOString()},{headers});
 }
