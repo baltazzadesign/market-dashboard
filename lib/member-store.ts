@@ -16,7 +16,7 @@ export async function currentMember(request:Request):Promise<Member|null>{
   const token=cookieToken(request);if(!token)return null;
   const sessions=await db<{member_id:string}[]>('balta_sessions?token_hash=eq.'+digest(token)+'&expires_at=gt.'+encodeURIComponent(new Date().toISOString())+'&select=member_id');
   if(!sessions[0])return null;
-  const members=await db<Member[]>('balta_members?id=eq.'+sessions[0].member_id+'&select=id,username,nickname,rank,role,status,created_at,auto_rank');
+  const members=await db<Member[]>('balta_members?id=eq.'+sessions[0].member_id+'&select=id,username,nickname,rank,role,status,created_at,auto_rank,activity_points');
   return members[0]?.status==='active'?withMembershipRank(members[0]):null;
 }
 export async function requireMember(request:Request,admin=false){

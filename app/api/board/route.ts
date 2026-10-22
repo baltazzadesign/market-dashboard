@@ -1,16 +1,16 @@
 import {withMembershipRank,type Member} from '@/lib/member-ranks';
-type BoardAuthor = Pick<Member,'nickname'|'rank'|'role'|'status'|'created_at'|'auto_rank'>;
+type BoardAuthor = Pick<Member,'nickname'|'rank'|'role'|'status'|'created_at'|'auto_rank'|'activity_points'>;
 type Authored = {author:BoardAuthor|null;[key:string]:unknown};
 function ranked<T extends Authored>(row:T){const author=row.author;if(!author)return row;const {nickname,rank,role}=withMembershipRank(author);return {...row,author:{nickname,rank,role}};}
 import {db,failure,input,output,requireMember,text,throttle,uuid,MemberError} from '@/lib/member-store';
 export async function GET(request:Request){try{
  await requireMember(request);const params=new URL(request.url).searchParams,id=params.get('id');
- if(id){const posts=await db<Authored[]>('balta_posts?id=eq.'+uuid(id)+'&select=*,author:balta_members!author_id(nickname,rank,role,status,created_at,auto_rank)');
+ if(id){const posts=await db<Authored[]>('balta_posts?id=eq.'+uuid(id)+'&select=*,author:balta_members!author_id(nickname,rank,role,status,created_at,auto_rank,activity_points)');
  if(!posts[0])throw new MemberError('게시글을 찾을 수 없습니다.',404);
- const comments=await db<Authored[]>('balta_comments?post_id=eq.'+id+'&select=*,author:balta_members!author_id(nickname,rank,role,status,created_at,auto_rank)&order=created_at.asc&limit=200');
+ const comments=await db<Authored[]>('balta_comments?post_id=eq.'+id+'&select=*,author:balta_members!author_id(nickname,rank,role,status,created_at,auto_rank,activity_points)&order=created_at.asc&limit=200');
  return output({post:ranked(posts[0]),comments:comments.map(ranked)});}
  const page=Math.max(0,Math.floor(Number(params.get('page'))||0)),q=(params.get('q')??'').replace(/[*,().%\\]/g,'').slice(0,80);
- const posts=await db<Authored[]>('balta_posts?select=id,title,category,author_id,created_at,author:balta_members!author_id(nickname,rank,role,status,created_at,auto_rank)&order=created_at.desc&limit=21&offset='+Math.min(page,100000)*20+(q?'&title=ilike.*'+encodeURIComponent(q)+'*':'')+(params.get('category')==='notice'?'&category=eq.notice':''));
+ const posts=await db<Authored[]>('balta_posts?select=id,title,category,author_id,created_at,author:balta_members!author_id(nickname,rank,role,status,created_at,auto_rank,activity_points)&order=created_at.desc&limit=21&offset='+Math.min(page,100000)*20+(q?'&title=ilike.*'+encodeURIComponent(q)+'*':'')+(params.get('category')==='notice'?'&category=eq.notice':''));
  return output({posts:posts.slice(0,20).map(ranked),hasMore:posts.length>20});
 }catch(e){return failure(e);}}
 export async function POST(request:Request){try{

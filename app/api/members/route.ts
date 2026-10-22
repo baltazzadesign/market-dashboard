@@ -3,7 +3,7 @@ import {RANKS,withMembershipRank,type Member} from '@/lib/member-ranks';
 export async function GET(request:Request){try{
  await requireMember(request,true);const p=new URL(request.url).searchParams;
  const page=Math.max(0,Math.min(100000,Number(p.get('page'))||0)),q=(p.get('q')??'').replace(/[^a-zA-Z0-9_]/g,'').slice(0,24);
- const members=await db<Member[]>('balta_members?select=id,username,nickname,rank,role,status,created_at,auto_rank&order=created_at.desc&limit=51&offset='+Math.floor(page)*50+(q?'&username=ilike.*'+q+'*':''));
+ const members=await db<Member[]>('balta_members?select=id,username,nickname,rank,role,status,created_at,auto_rank,activity_points&order=created_at.desc&limit=51&offset='+Math.floor(page)*50+(q?'&username=ilike.*'+q+'*':''));
  return output({members:members.slice(0,50).map(m=>withMembershipRank(m)),hasMore:members.length>50});
 }catch(e){return failure(e);}}
 export async function PATCH(request:Request){try{

@@ -49,3 +49,5 @@
 .activityExcerpt { white-space:pre-wrap; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; color:var(--muted); margin-top:8px; }
 @media(max-width:900px) { .watchGrid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:640px) { .profileGrid,.watchGrid { grid-template-columns:1fr; } .profileGrid { gap:0; } }
+
+.rewardSummary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:24px 0}.rewardSummary>div{display:flex;flex-direction:column;gap:8px;padding:18px;border:1px solid #6e542f66;border-radius:7px;background:#b58b3308}.rewardSummary small,.rewardSummary span{font-size:12px;color:var(--muted)}.rewardSummary strong{font-size:24px;color:#e9cb88}.rewardCredit{color:#e9cb88}.rewardDeduction{color:#eea08f}@media(max-width:640px){.rewardSummary{grid-template-columns:1fr;gap:8px}.rewardSummary>div{padding:14px}.rewardSummary strong{font-size:20px}}
