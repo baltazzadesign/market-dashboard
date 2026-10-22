@@ -1,14 +1,15 @@
 // Server-only. Reuse the collector's stored token and the existing KIS request queue.
 import { kisTerminal } from './kis-terminal';
 import { kstParts } from './balta-model';
-import { mergeStockRows, parseStockBars, parseStockFlows, previousStockDate, stockDate, stockNumber, stockRangeStart, stockRows, type StockBar, type StockFlowDay, type StockFlowResponse, type StockRange } from './stock-flow-model';
+import { stockWeekday, mergeStockRows, parseStockBars, parseStockFlows, previousStockDate, stockDate, stockNumber, stockRangeStart, stockRows, type StockBar, type StockFlowDay, type StockFlowResponse, type StockRange } from './stock-flow-model';
 
 type Query = typeof kisTerminal;
 const cache = new Map<string,{until:number;promise:Promise<StockFlowResponse>}>();
 export async function loadStockFlow(code: string, range: StockRange, end: string, query: Query = kisTerminal, now = new Date()): Promise<StockFlowResponse> {
+  const requestedEnd = end; end = stockWeekday(end);
   const start = stockRangeStart(end,range), warnings: string[] = [], today = kstParts(now);
   const beforeDaily = end === today.date && today.time < '15:40';
-  const flowEnd = beforeDaily ? previousStockDate(end) : end;
+  const flowEnd = beforeDaily ? stockWeekday(previousStockDate(end)) : end;
   const deadline = Date.now() + 38_000;
   const bars = new Map<string,StockBar>(), flows = new Map<string,StockFlowDay>();
   let priceSummary: Record<string,unknown> = {}, flowSummary: Record<string,unknown> = {};
@@ -42,11 +43,13 @@ export async function loadStockFlow(code: string, range: StockRange, end: string
     if (!earliest || earliest <= start) flowComplete = true;
     else { const next = previousStockDate(earliest); if (next >= flowCursor) flowComplete = true; else flowCursor = next; }
   }
+  if(requestedEnd !== end) warnings.push('주말에는 최근 거래일 데이터를 표시합니다. 실제 주가·수급 기준일을 확인해 주세요.');
   const first = await Promise.allSettled([prices(),investors()]);
   priceError = first[0].status === 'rejected'; flowError = first[1].status === 'rejected';
   // Today's settlement can be delayed. Fall back to a dated previous-day request.
-  if (flowError && flowCursor === today.date && Date.now() < deadline - 9000) {
-    flowCursor = previousStockDate(flowCursor);
+  if ((flowError || !flows.size) && Date.now() < deadline - 9000) {
+    flowCursor = stockWeekday(previousStockDate(flowCursor));
+    flowComplete = false;
     try { await investors(); flowError = false; } catch { /* keep unavailable */ }
   }
   while (Date.now() < deadline - 9000) {

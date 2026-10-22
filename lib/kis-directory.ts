@@ -5,7 +5,7 @@ const cache = new Map<string, { expires: number; data: Promise<string> }>();
 export async function readKisMaster(file: 'kospi_code' | 'kosdaq_code' | 'ffcode') {
   const hit = cache.get(file); if (hit && hit.expires > Date.now()) return hit.data;
   const data = (async () => {
-    const response = await fetch(masterBase + file + '.mst.zip', { signal: AbortSignal.timeout(12000), cache: 'no-store' });
+    const response = await fetch(masterBase + file + '.mst.zip', { signal: AbortSignal.timeout(12000), cache: 'force-cache', next: { revalidate: 86400 } });
     if (!response.ok) throw new Error('종목 목록을 읽지 못했습니다.');
     const buffer = new Uint8Array(await response.arrayBuffer());
     if (buffer.byteLength > 8_000_000) throw new Error('종목 목록 크기를 확인해 주세요.');

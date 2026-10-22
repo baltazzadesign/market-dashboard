@@ -94,3 +94,9 @@ export function stockFlowCSV(data: StockFlowResponse): string {
   const safeName = /^[=+\-@\t\r]/.test(data.name) ? "'" + data.name : data.name;
   return '\uFEFF'+[header,...data.rows.map(r=>[data.code,safeName,data.market,r.date,r.open,r.high,r.low,r.close,r.volume,...stockInvestors.map(c=>r.money[c.key] === null ? '' : Number(r.money[c.key]!.toFixed(2))),...stockInvestors.map(c=>r.quantity[c.key])])].map(r=>r.map(escape).join(',')).join('\r\n');
 }
+
+// Calendar dates are interpreted in KST by callers, independently of server timezone.
+export function stockWeekday(date:string){
+  while([0,6].includes(new Date(date+'T00:00:00Z').getUTCDay()))date=previousStockDate(date);
+  return date;
+}

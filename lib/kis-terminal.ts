@@ -7,6 +7,7 @@ const cache = new Map<string, CacheEntry>();
 let queue: Promise<unknown> = Promise.resolve();
 let tokenValue = '', tokenUntil = 0;
 let tokenPromise: Promise<string> | null = null;
+let tokenRetryAfter = 0;
 
 async function storedToken(): Promise<string> {
   if (tokenValue && Date.now() < tokenUntil) return tokenValue;
@@ -22,7 +23,27 @@ async function storedToken(): Promise<string> {
     const rows = await response.json();
     const row = record(Array.isArray(rows) ? rows[0] : null);
     const expires = Date.parse(String(row.expires_at ?? ''));
-    if (typeof row.access_token !== 'string' || !row.access_token || (Number.isFinite(expires) && expires <= Date.now() + 60_000)) throw new Error('시장 조회 인증 갱신을 기다리고 있습니다.');
+    if (typeof row.access_token !== 'string' || !row.access_token || !Number.isFinite(expires) || expires <= Date.now() + 60_000) {
+      if (Date.now() < tokenRetryAfter) throw new Error('시장 조회 인증 갱신 중입니다. 1분 후 다시 조회해 주세요.');
+      tokenRetryAfter = Date.now() + 70_000;
+      const issued = await fetch((process.env.KIS_BASE || 'https://openapi.koreainvestment.com:9443') + '/oauth2/tokenP', {
+        method:'POST', headers:{'content-type':'application/json'}, cache:'no-store', signal:AbortSignal.timeout(8000),
+        body:JSON.stringify({grant_type:'client_credentials',appkey:process.env.KIS_APPKEY,appsecret:process.env.KIS_APPSECRET}),
+      });
+      const body = record(await issued.json());
+      if (!issued.ok || typeof body.access_token !== 'string' || !body.access_token) throw new Error('시장 조회 인증을 갱신하지 못했습니다. 1분 후 다시 조회해 주세요.');
+      const seconds = Number(body.expires_in);
+      if (!Number.isFinite(seconds) || seconds <= 60) throw new Error('시장 조회 인증 유효기간을 확인하지 못했습니다.');
+      const until = Date.now() + seconds * 1000;
+      const saved = await fetch(base + '/rest/v1/kis_tokens?on_conflict=id', {
+        method:'POST', headers:{apikey:key,authorization:'Bearer '+key,'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'},
+        body:JSON.stringify({id:'default',access_token:body.access_token,expires_at:new Date(until).toISOString(),updated_at:new Date().toISOString()}),
+        cache:'no-store',signal:AbortSignal.timeout(8000),
+      });
+      if (!saved.ok) throw new Error('시장 조회 인증을 저장하지 못했습니다. 잠시 후 다시 조회해 주세요.');
+      tokenValue=body.access_token;tokenUntil=Math.min(Date.now()+60_000,until-60_000);
+      return tokenValue;
+    }
     tokenValue = row.access_token;
     tokenUntil = Math.min(Date.now() + 60_000, Number.isFinite(expires) ? expires - 60_000 : Infinity);
     return tokenValue;
