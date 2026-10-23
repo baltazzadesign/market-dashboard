@@ -5,7 +5,7 @@ import {downloadChartPNG} from './chart-image';
 import s from './PremarketWorkspace.module.css';
 import buttonStyle from './ChartImageButton.module.css';
 
-const scopes=[['all','전체 화면'],['futures','국내 선물'],['korea','한국 관련 해외종목'],['global','글로벌 지표·환율'],['domestic','국내 지수·교차환율'],['heatmap','종목 히트맵']] as const;
+const scopes=[['all','전체 화면'],['futures','국내 선물'],['korea','한국 관련 해외종목'],['etf','ETF 수급 TOP10'],['global','글로벌 지표·환율'],['domestic','국내 지수·교차환율'],['heatmap','종목 히트맵']] as const;
 
 // Freeze the actual rendered DOM, including SVG paths, before feeds can refresh.
 function snapshot(root:HTMLElement,scope:string){

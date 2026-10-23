@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useState,useRef} from 'react';
 import Link from 'next/link';
+import EtfRanking from './EtfRanking';
 import PremarketImageButton from './PremarketImageButton';
 import {FuturesPriceChart} from './FuturesPriceChart';
 import type {MorningQuote} from '@/lib/premarket-model';
@@ -25,10 +26,11 @@ export default function PremarketWorkspace(){
  const loading=global.loading||stocks.loading||extra.loading;
  return <main ref={root} className={s.page}><header className={s.hero}><div><span className={s.eyebrow}>BALTATOOL · BEFORE THE OPEN</span><h1>장전 체크</h1><p>밤사이 움직임을 모아, 오늘 시장을 준비합니다.</p></div><button onClick={()=>setVersion(v=>v+1)} disabled={loading}>{loading?'조회 중…':'전체 새로고침'}</button></header>
  <PremarketImageButton root={root} disabled={loading||terminal.loading}/>
- <nav className={s.nav} aria-label="장전 체크 섹션">{[['futures','국내 야간선물'],['korea','한국 관련 해외종목'],['global','글로벌 지표'],['heatmap','히트맵']].map(([id,name])=><a key={id} href={'#'+id}>{name}</a>)}</nav>
+ <nav className={s.nav} aria-label="장전 체크 섹션">{[['futures','국내 야간선물'],['korea','한국 관련 해외종목'],['etf','ETF 수급 TOP10'],['global','글로벌 지표'],['heatmap','히트맵']].map(([id,name])=><a key={id} href={'#'+id}>{name}</a>)}</nav>
  <p className={s.notice}>해외 일별 시세와 국내 선물의 기준일·세션을 확인하세요. 장중 값은 변할 수 있으며, 지연 시세가 포함될 수 있습니다. 이 화면은 지표 모음이며 다음 날 상승·하락 확률을 산출하지 않습니다.</p>
  <section data-premarket-export="futures" id="futures" className={s.section}><div className={s.heading}><h2>국내 야간선물</h2><span>주간·야간 전환 가능</span></div><div className={s.futures}><FuturesPriceChart product="kospi200" initialMode="NIGHT"/><FuturesPriceChart product="kosdaq150" initialMode="NIGHT"/></div></section>
  <section data-premarket-export="korea" id="korea" className={s.section}><h2>한국 관련 해외종목</h2><p className={s.note}>미국 정규장 일별 시세 · 시간외 가격 미포함 · KORU는 레버리지 상품으로 별도 표시</p><Status {...stocks}/><div className={s.cards}>{stocks.data?.rows?.filter(q=>q.group==='한국 관련').map(q=><Card key={q.id} q={q}/>)}</div></section>
+ <EtfRanking version={version}/>
  <div id="global"><Status {...global}/><Status {...extra}/>{['해외 선물','주요 지수','금리·위험','원자재','원자재·대체자산','환율','증시 자금'].map(group=><section data-premarket-export="global" className={s.section} key={group}><h2>{group}</h2><div className={s.cards}>{globalRows.filter(q=>q.group===group).map(q=><Card key={q.id} q={q}/>)}</div></section>)}</div>
  <section data-premarket-export="domestic" className={s.section}><h2>국내 지수 · 원화 교차환율</h2><Status {...terminal}/><div className={s.cards}>{[...(terminal.data?.quotes.filter(q=>['0001','1001'].includes(q.code))??[]),...(terminal.data?.indicators.filter(q=>['fx-eur','fx-jpy'].includes(q.code))??[])].map(q=><article className={s.card} key={q.code}><h3>{q.name}</h3><div className={s.value}><strong>{number(q.price)}</strong><b className={tone(q.rate)}>{percent(q.rate)}</b></div><p>{q.asOf?new Date(q.asOf).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}):'기준 시각 미제공'} · 조회/산출 시각</p></article>)}</div></section>
  <section data-premarket-export="heatmap" id="heatmap" className={s.section}><h2>미국 주요 종목 히트맵</h2><p className={s.note}>반도체·대형 기술주 12개 선정 · 동일 크기 타일 · 나스닥 전체 구성종목 아님</p><div className={s.heatmap}>{stocks.data?.rows?.filter(q=>q.group==='미국 주요 종목').map(q=><div key={q.id} className={s.tile} style={{background:heatColor(q.rate)}}><strong>{q.id}</strong><span>{q.name}</span><b>{percent(q.rate)}</b><small>{q.date??'미제공'}</small></div>)}</div></section>
