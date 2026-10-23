@@ -1786,3 +1786,11 @@ body{
      Data warnings remain available on the daily view and through the status/data panels. */
   .workspace-overview .main-content>.notice{display:none!important}
 }
+
+/* Signed calendar Pulse, shared scale with PNG export. */
+.history-workspace .calendar-pulse>span:first-child{min-width:78px;white-space:nowrap}
+.calendar-pulse-scale{flex:1;min-width:0;padding-top:9px}
+.calendar-pulse-scale .pulse-track{position:relative;height:6px;overflow:visible;background:#35422c}
+.calendar-pulse-scale .pulse-track::after{content:'';position:absolute;left:50%;top:-3px;height:12px;width:1px;background:#c2b9a3}
+.calendar-pulse-ticks{display:flex;justify-content:space-between;font-size:9px;margin-top:5px;color:var(--muted)}
+.history-workspace .calendar-day.has-data:hover{filter:brightness(1.15)}

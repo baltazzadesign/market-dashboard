@@ -1,4 +1,5 @@
 'use client';
+import {calendarPulse,calendarTone,calendarBackground} from '@/lib/calendar-presentation';
 import { marketClosedReason, monthWeekdaySlots } from '@/lib/market-calendar';
 import { formatNumber as n } from '@/lib/balta-model';
 import { investors, investorNames, type DailyMarket } from '@/lib/market-history-model';
@@ -16,9 +17,9 @@ function CalendarPlot({month,today,days,closedDates}:Props){
   return <svg data-market-calendar-image-chart xmlns="http://www.w3.org/2000/svg" width={WIDTH} height={height} viewBox={`0 0 ${WIDTH} ${height}`}>
     {['월','화','수','목','금'].map((d,i)=><text key={d} x={i*STEP+CELL/2} y={25} textAnchor="middle" fontSize={17} fill="#a9b899">{d}</text>)}
     {slots.map((date,i)=>{
-      const closure=date?(closedDates[date]??marketClosedReason(date)):null,day=!date||closure?undefined:byDate.get(date),future=Boolean(date&&date>today);
+      const closure=date?(closedDates[date]??marketClosedReason(date)):null,day=!date||closure?undefined:byDate.get(date),future=Boolean(date&&date>today),pulse=calendarPulse(day?.pulse??null);
       return <g key={date||i} transform={`translate(${i%5*STEP},${42+Math.floor(i/5)*ROW})`}>
-        <rect x={1} y={1} width={CELL-2} height={ROW-14} rx={7} fill={day?'#162011':'#10170d'} stroke={date&&date===today?'#d8ba79':'#34432c'}/>
+        <rect x={1} y={1} width={CELL-2} height={ROW-14} rx={7} fill={day?calendarBackground[calendarTone(day.kospi.changePct,day.kosdaq.changePct)]:'#10170d'} stroke={date&&date===today?'#d8ba79':'#34432c'}/>
         {date&&<><text x={15} y={30} fontSize={22} fontWeight={600} fill="#e1e6d5">{Number(date.slice(-2))}</text>
           <text x={CELL-15} y={28} textAnchor="end" fontSize={12} fill={day&&!day.finalized?'#d8ba79':'#8e9f7c'}>{closure?'휴장':day?(day.finalized?'마감 기록':day.time+' 미완료'):future?'예정':'기록 없음'}</text>
           {day?<>
@@ -28,9 +29,11 @@ function CalendarPlot({month,today,days,closedDates}:Props){
             <text x={15} y={151} fontSize={13} fill="#a7b797">시장폭</text><text x={CELL-15} y={151} textAnchor="end" fontSize={15} fill={tone(day.breadth)}>{n(day.breadth,0,true)}</text>
             {investors.map((key,j)=><g key={key}><text x={15} y={181+j*24} fontSize={14} fill={colors[key]}>{investorNames[key]}</text><text x={CELL-15} y={181+j*24} textAnchor="end" fontSize={16} fill="#e1e6d5">{money(day.flows[key])}</text></g>)}
             <text x={15} y={256} fontSize={13} fill="#a7b797">거래대금</text><text x={CELL-15} y={256} textAnchor="end" fontSize={14} fill="#d5deca">{money(day.turnover)}</text>
-            <text x={15} y={281} fontSize={13} fill="#a7b797">Pulse <tspan fill="#e1e6d5">{n(day.pulse)}</tspan></text>
+            <text x={15} y={281} fontSize={13} fill="#a7b797">Pulse <tspan fill="#e1e6d5">{n(pulse,0,true)}</tspan></text>
             <rect x={110} y={273} width={CELL-125} height={6} rx={3} fill="#35422c"/>
-            {day.pulse!==null&&<rect x={110} y={273} width={(CELL-125)*Math.max(0,Math.min(100,day.pulse))/100} height={6} rx={3} fill={day.pulse>=50?'#ff545f':'#5294ff'}/>}
+            {pulse!==null&&<rect x={110+(CELL-125)*(0.5+Math.min(0,pulse)/200)} y={273} width={(CELL-125)*Math.abs(pulse)/200} height={6} rx={3} fill={pulse>=0?'#ff545f':'#5294ff'}/>}
+            <path d={`M${110+(CELL-125)/2} 270v12`} stroke="#c2b9a3"/>
+            <text x={110} y={296} fontSize={10} fill="#a7b797">−100</text><text x={110+(CELL-125)/2} y={296} textAnchor="middle" fontSize={10} fill="#a7b797">0</text><text x={CELL-15} y={296} textAnchor="end" fontSize={10} fill="#a7b797">+100</text>
           </>:<text x={15} y={85} fontSize={14} fill="#819271" textLength={closure&&closure.length>17?CELL-30:undefined} lengthAdjust="spacingAndGlyphs">{closure??(future?'—':'미수집')}</text>}
         </>}
       </g>;
@@ -44,7 +47,7 @@ export default function MarketCalendarImageButton(props:Props){
       const plot=snapshotPlot(root.querySelector('svg[data-market-calendar-image-chart]'));if(!plot)throw Error('시장 캘린더 이미지가 준비되지 않았습니다.');
       return {title:'시장 캘린더',subtitle:[`${label} · KOSPI / KOSDAQ · 수급·시장폭·거래대금: 양 시장 합계`,`${snapshot.days.length}일 기록 · 조회 기준 ${snapshot.asOf||'미기록'} KST`],
         panels:[{title:label,subtitle:'월~금 · 금색 테두리는 오늘 · 미완료 기록은 해당 시각 기준',metrics:[],wide:true,plot}],
-        notes:['등락률은 전일 대비입니다. 금액은 억원 / 조원 단위이며, —는 결측값입니다.','Pulse는 시장점수(−100~100)를 0~100으로 환산한 값입니다. 빨강 50 이상 / 파랑 50 미만.','주말은 숨기고 평일 휴장일은 날짜와 휴장명만 표시합니다. 미수집·예정은 거래량이나 수급 0을 뜻하지 않습니다.',...(snapshot.month.slice(0,4)!=='2026'?['2026년 외의 기간은 주말·고정 휴일만 기본 반영됩니다. 추가 휴장일 설정 여부를 확인하세요.']:[])]};
+        notes:['등락률은 전일 대비입니다. 금액은 억원 / 조원 단위이며, —는 결측값입니다.','Pulse: −100~+100 · 0 중심, 왼쪽 하락 / 오른쪽 상승 우위.','배경: 두 지수 상승 빨강 · 혼조 주황 · 두 지수 하락 파랑 · 보합/결측 기본색.','주말은 숨기고 평일 휴장일은 날짜와 휴장명만 표시합니다. 미수집·예정은 거래량이나 수급 0을 뜻하지 않습니다.',...(snapshot.month.slice(0,4)!=='2026'?['2026년 외의 기간은 주말·고정 휴일만 기본 반영됩니다. 추가 휴장일 설정 여부를 확인하세요.']:[])]};
     }};
   }}/>;
 }
