@@ -2,3 +2,5 @@
 @media(max-width:480px){.cards{grid-template-columns:1fr}.section{scroll-margin-top:290px}.hero{flex-wrap:wrap}.heatmap{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .card a{color:#d5bb80;text-decoration:underline;text-underline-offset:3px}
+
+.exportControls{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-top:18px}.exportControls select{max-width:100%;min-height:38px;background:#13170f;color:#e5c47c;border:1px solid #806236;border-radius:5px;padding:8px 12px;font:inherit;font-size:12px}.exportControls select:focus-visible{outline:2px solid #f0d192;outline-offset:3px}
