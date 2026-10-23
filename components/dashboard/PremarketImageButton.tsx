@@ -1,45 +1,60 @@
 'use client';
-import {useState, type RefObject} from 'react';
-import ChartImageButton from './ChartImageButton';
-import {snapshotPlot, type ChartImageReport} from './chart-image';
+import {useEffect,useRef,useState,type RefObject} from 'react';
+import {Icon} from './Icon';
+import {downloadChartPNG} from './chart-image';
 import s from './PremarketWorkspace.module.css';
-import f from './TerminalPriceChart.module.css';
+import buttonStyle from './ChartImageButton.module.css';
 
 const scopes=[['all','전체 화면'],['futures','국내 선물'],['korea','한국 관련 해외종목'],['global','글로벌 지표·환율'],['domestic','국내 지수·교차환율'],['heatmap','종목 히트맵']] as const;
-const text=(node:Element|null|undefined)=>node?.textContent?.trim()||'—';
 
-// Capture the displayed values and SVGs synchronously before any feeds refresh.
-export function capturePremarketReport(root:HTMLElement,scope:string):ChartImageReport {
-  const report:ChartImageReport={title:`장전 체크 · ${scopes.find(([id])=>id===scope)?.[1]??'전체 화면'}`,subtitle:[`저장 ${new Date().toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})} KST`, '표시 중인 조회 결과 · 지표별 기준일과 출처가 다릅니다.'],panels:[],tables:[],notes:['지연 시세 포함 · 장중 값은 변동할 수 있습니다.','종목 목록은 동일 크기 히트맵의 수치이며 시가총액 비중이 아닙니다.','자료: 한국투자증권 · 금융투자협회 · 미 재무부 · 업비트 · Yahoo Finance']};
-  for(const section of root.querySelectorAll<HTMLElement>('[data-premarket-export]')){
-    if(scope!=='all'&&section.dataset.premarketExport!==scope)continue;
-    const title=text(section.querySelector('h2'));
-    if(section.dataset.premarketExport==='futures'){
-      for(const chart of section.querySelectorAll<HTMLElement>(`.${s.futures}>div`)){
-        const plot=snapshotPlot(chart.querySelector<SVGSVGElement>('svg.terminal-candles'));
-        report.panels.push({title:text(chart.querySelector(`.${f.contract} strong`)),subtitle:[text(chart.querySelector(`.${f.contract} span`)),...Array.from(chart.querySelectorAll('button[aria-pressed="true"]')).map(text),...Array.from(chart.querySelectorAll('select')).map(el=>(el as HTMLSelectElement).selectedOptions[0]?.text??''),Array.from(chart.querySelectorAll('.terminal-chart-caption span')).map(text).join(' · ')].join(' · '),
-          metrics:[{label:'표시 가격',value:text(chart.querySelector('.terminal-price-readout strong')),color:'#edd192'},{label:'등락',value:text(chart.querySelector('.terminal-price-readout span')),color:'#d5dbce'},...Array.from(chart.querySelectorAll('dl>div')).map(el=>({label:text(el.querySelector('dt')),value:text(el.querySelector('dd')),color:'#d5dbce'}))],plot,empty:text(chart.querySelector('.terminal-empty')),
-          notes:Array.from(chart.querySelectorAll(`.${f.observed}, .${f.warning}, .${f.notes} p`)).map(text)});
-      }
-      continue;
-    }
-    const cards=Array.from(section.querySelectorAll(`.${s.card}`));
-    const tiles=Array.from(section.querySelectorAll(`.${s.tile}`));
-    const status=Array.from(section.querySelectorAll('[role="alert"], [role="status"]')).map(text);
-    if(cards.length)report.tables!.push({title,subtitle:status.join(' · ')||'화면에 표시된 최근값 · 금리 등락은 bp',columns:[{label:'지표',weight:2},{label:'값 / 단위',weight:2},{label:'등락',weight:1.3},{label:'기준일 · 출처 · 안내',weight:4}],rows:cards.map(card=>[text(card.querySelector('h3')),`${text(card.querySelector(`.${s.value} strong`))} ${card.querySelector(`.${s.cardTop}>span`)?.textContent??''}`,text(card.querySelector(`.${s.value} b`)),Array.from(card.querySelectorAll('p')).map(text).join(' · ')])});
-    else if(tiles.length)report.tables!.push({title,subtitle:Array.from(section.querySelectorAll(`.${s.note}`)).map(text).concat(status).join(' · '),columns:[{label:'종목',weight:2},{label:'등락'},{label:'기준일 / 거래대금',weight:2}],rows:tiles.map(tile=>[text(tile.querySelector('strong'))+(tile.querySelector('span')?' · '+text(tile.querySelector('span')):''),text(tile.querySelector('b')),text(tile.querySelector('small'))])});
-    else report.notes.push(`${title}: ${status.join(' · ')||'표시할 데이터가 없습니다.'}`);
+// Freeze the actual rendered DOM, including SVG paths, before feeds can refresh.
+function snapshot(root:HTMLElement,scope:string){
+  const clone=root.cloneNode(true) as HTMLElement;
+  const selects=clone.querySelectorAll('select');
+  root.querySelectorAll('select').forEach((select,i)=>{selects[i].value=select.value;});
+  clone.querySelectorAll(`.${s.exportControls}, .${s.nav}, .${s.hero} button`).forEach(node=>node.remove());
+  // SVG foreignObject rounds shrink-to-fit text widths differently. Use the
+  // existing available space so centered labels keep their screen line breaks.
+  clone.querySelectorAll<HTMLElement>(`.${s.tile}>*`).forEach(node=>{node.style.width='100%';});
+  const heroText=clone.querySelector<HTMLElement>(`.${s.hero}>div`);
+  if(heroText)heroText.style.flex='1';
+  clone.querySelectorAll<HTMLElement>(`.${s.cardTop} h3`).forEach(node=>{node.style.flex='1';});
+  if(scope!=='all'){
+    clone.querySelectorAll<HTMLElement>('[data-premarket-export]').forEach(section=>{if(section.dataset.premarketExport!==scope)section.remove();});
+    clone.querySelectorAll(`.${s.switch}`).forEach(node=>node.remove());
   }
-  const errors=Array.from(root.querySelectorAll(`.${s.error}`)).map(text);
-  if(errors.length)report.notes.push(...errors.map(error=>'조회 안내: '+error));
-  return report;
+  clone.removeAttribute('id');clone.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));
+  clone.setAttribute('aria-hidden','true');clone.inert=true;
+  Object.assign(clone.style,{width:`${root.getBoundingClientRect().width}px`,maxWidth:'none',margin:'0',padding:'20px',boxSizing:'content-box',background:'#080c09'});
+  const stamp=document.createElement('p');stamp.className=s.note;
+  stamp.textContent=`${scopes.find(([id])=>id===scope)?.[1]} · 저장 ${new Date().toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})} KST · baltatool.com`;
+  clone.querySelector('header')?.after(stamp);
+  const stage=document.createElement('div');
+  Object.assign(stage.style,{position:'fixed',left:'-100000px',top:'0',pointerEvents:'none'});
+  stage.append(clone);document.body.append(stage);
+  return {clone,stage};
 }
 
 export default function PremarketImageButton({root,disabled}:{root:RefObject<HTMLElement|null>;disabled:boolean}){
-  const [scope,setScope]=useState('all');
-  return <div className={s.exportControls}><select aria-label="PNG 저장 범위" value={scope} onChange={e=>setScope(e.target.value)}>{scopes.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select><ChartImageButton label="PNG 저장" title="현재 표시된 선물 차트와 지표·종목 수치를 이미지로 저장합니다. 구역별 저장도 가능합니다." disabled={disabled} createJob={()=>{
-    if(!root.current)throw Error('화면이 준비되지 않았습니다.');
-    const report=capturePremarketReport(root.current,scope);
-    return {plots:0,content:null,filename:`baltatool-premarket-${scope}-${new Date().toISOString().replace(/[:.]/g,'-')}.png`,report:()=>report};
-  }}/></div>;
+  const [scope,setScope]=useState('all'),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[failed,setFailed]=useState(false);
+  const lock=useRef(false),mounted=useRef(true);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{if(!message)return;const timer=setTimeout(()=>setMessage(''),9000);return()=>clearTimeout(timer);},[message]);
+  async function save(){
+    if(lock.current||!root.current)return;
+    lock.current=true;setBusy(true);setMessage('');setFailed(false);
+    let stage:HTMLElement|undefined;
+    try{
+      const frozen=snapshot(root.current,scope);stage=frozen.stage;
+      const {toBlob}=await import('html-to-image');
+      await document.fonts.ready;
+      const width=Math.ceil(frozen.clone.getBoundingClientRect().width),height=Math.ceil(frozen.clone.scrollHeight);
+      const pixelRatio=Math.min(2,Math.sqrt(16_000_000/(width*height)),16000/height,16000/width);
+      const blob=await toBlob(frozen.clone,{backgroundColor:'#080c09',width,height,pixelRatio,preferredFontFormat:'woff2'});
+      if(!blob)throw Error('이미지를 만들지 못했습니다. 구역을 선택해 다시 저장해 주세요.');
+      if(mounted.current){downloadChartPNG(blob,`baltatool-premarket-${scope}-${new Date().toISOString().replace(/[:.]/g,'-')}.png`);setMessage('화면의 그래프와 카드가 포함된 PNG를 저장했습니다.');}
+    }catch(error){if(mounted.current){setFailed(true);setMessage(error instanceof Error?error.message:'이미지 저장에 실패했습니다. 다시 시도해 주세요.');}}
+    finally{stage?.remove();lock.current=false;if(mounted.current)setBusy(false);}
+  }
+  return <div className={s.exportControls}><select aria-label="PNG 저장 범위" value={scope} disabled={busy} onChange={e=>setScope(e.target.value)}>{scopes.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select><div className={buttonStyle.control}><button type="button" className={buttonStyle.button} title="현재 화면의 그래프·카드·히트맵 배치를 그대로 PNG로 저장합니다." disabled={disabled||busy} aria-busy={busy} onClick={save}><Icon name="download" size={15}/>{busy?'이미지 만드는 중…':'PNG 저장'}</button>{message&&<span className={buttonStyle.message} role={failed?'alert':'status'}>{message}</span>}</div></div>;
 }
