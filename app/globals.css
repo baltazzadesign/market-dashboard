@@ -1794,3 +1794,19 @@ body{
 .calendar-pulse-scale .pulse-track::after{content:'';position:absolute;left:50%;top:-3px;height:12px;width:1px;background:#c2b9a3}
 .calendar-pulse-ticks{display:flex;justify-content:space-between;font-size:9px;margin-top:5px;color:var(--muted)}
 .history-workspace .calendar-day.has-data:hover{filter:brightness(1.15)}
+
+/* Match the exported calendar's separated cards and weekday alignment. */
+.history-workspace .calendar-scroll{padding:0 20px 20px}
+.history-workspace .market-calendar .calendar-week,.history-workspace .market-calendar .calendar-days{gap:14px}
+.history-workspace .market-calendar .calendar-week{margin-bottom:12px}
+.history-workspace .market-calendar .calendar-week>div{text-align:center;border:0;padding:10px 0}
+.history-workspace .market-calendar .calendar-day,.history-workspace .market-calendar .calendar-blank{min-height:304px;border:1px solid #34432c;border-radius:7px;background:#10170d}
+.history-workspace .market-calendar .calendar-day{padding:14px;gap:7px;line-height:1.4}
+.history-workspace .market-calendar .calendar-day.is-today{border-color:#d8ba79;box-shadow:inset 0 0 0 1px #d8ba7940}
+.history-workspace .market-calendar .calendar-day:disabled{opacity:1}
+.history-workspace .market-calendar .calendar-date{margin-bottom:6px}
+.history-workspace .market-calendar .calendar-date strong{font-size:20px}
+.history-workspace .market-calendar .calendar-no-data{margin:20px 0 0;text-align:left}
+.history-workspace .market-calendar .calendar-breadth>span:last-child{display:flex;justify-content:space-between;gap:8px}
+.history-workspace .market-calendar .calendar-flows{gap:4px}
+@media(max-width:760px){.history-workspace .calendar-scroll{padding:0 12px 16px}.history-workspace .market-calendar{min-width:1120px}}
