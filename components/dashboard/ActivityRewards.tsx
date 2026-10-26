@@ -4,7 +4,7 @@ import {api} from './member-client';
 import s from './MemberArea.module.css';
 type History={id:string;kind:string;points:number;created_at:string};
 type Rewards={points:number;checked:boolean;streak:number;day:string;elapsedDays:number;bonusDays:number;effectiveDays:number;history:History[];hasMore:boolean};
-const labels:Record<string,string>={prediction_kospi:'코스피 방향 적중',prediction_kosdaq:'코스닥 방향 적중',attendance:'출석 체크',streak:'7일 연속 출석 보너스',post:'게시글 작성',comment:'댓글 작성',post_removed:'게시글 삭제 · 적립 회수',comment_removed:'댓글 삭제 · 적립 회수'};
+const labels:Record<string,string>={prediction_stock:'종목 양봉·음봉 적중',prediction_kospi:'코스피 방향 적중',prediction_kosdaq:'코스닥 방향 적중',attendance:'출석 체크',streak:'7일 연속 출석 보너스',post:'게시글 작성',comment:'댓글 작성',post_removed:'게시글 삭제 · 적립 회수',comment_removed:'댓글 삭제 · 적립 회수'};
 export default function ActivityRewards(){
  const [data,setData]=useState<Rewards|null>(null),[page,setPage]=useState(0),[reload,setReload]=useState(0),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
  useEffect(()=>{let active=true;setLoading(true);const refresh=()=>api('/api/activity?page='+page).then(j=>{if(active){setData(j);setError('');}}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setLoading(false);});void refresh();window.addEventListener('focus',refresh);const timer=setInterval(refresh,60000);return()=>{active=false;clearInterval(timer);window.removeEventListener('focus',refresh);};},[page,reload]);
