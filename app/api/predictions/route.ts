@@ -9,8 +9,8 @@ export async function GET(request:Request){try{
  let warning='';try{await settlePredictions();}catch{warning='종가 확인이 지연되어 미판정 결과는 대기 중입니다.';}
  const state=predictionWindow(new Date(),parseAdditionalHolidays(process.env.MARKET_HOLIDAYS));
  const history=await db<{day:string;market:string;[key:string]:unknown}[]>('balta_predictions?member_id=eq.'+member.id+'&order=day.desc,market.asc&limit=60');
- const [poll,results]=await Promise.all([db('rpc/balta_prediction_poll','POST',{p_member:member.id,p_day:state.day}),history.length?db<{day:string;market:string;close:number;previous_close:number}[]>('balta_prediction_results?day=gte.'+history[history.length-1].day+'&select=day,market,close,previous_close'):Promise.resolve([])]);
- return output({...state,serverNow:Date.now(),poll,history:history.map(r=>({...r,...results.find(x=>x.day===r.day&&x.market===r.market)})),warning});
+ const [stats,poll,results]=await Promise.all([db('rpc/balta_prediction_stats','POST',{p_member:member.id}),db('rpc/balta_prediction_poll','POST',{p_member:member.id,p_day:state.day}),history.length?db<{day:string;market:string;close:number;previous_close:number}[]>('balta_prediction_results?day=gte.'+history[history.length-1].day+'&select=day,market,close,previous_close'):Promise.resolve([])]);
+ return output({...state,serverNow:Date.now(),stats,poll,history:history.map(r=>({...r,...results.find(x=>x.day===r.day&&x.market===r.market)})),warning});
 }catch(e){return failure(e);}}
 export async function POST(request:Request){try{
  const member=await requireMember(request),body=await input(request);

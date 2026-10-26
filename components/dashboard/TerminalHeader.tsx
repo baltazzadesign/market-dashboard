@@ -1,4 +1,5 @@
 "use client";
+import PredictionNotifications from './PredictionNotifications';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
@@ -129,6 +130,6 @@ export default function TerminalHeader() {
         </nav>
         <button className={"button " + styles.logout} onClick={logout}><Icon name="logout"/>로그아웃</button>{message && <p role="alert">{message}</p>}
       </div>
-    </Modal>
+    </Modal>{member&&<PredictionNotifications key={member.id}/>}
   </>;
 }
