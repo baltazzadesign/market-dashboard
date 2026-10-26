@@ -10,6 +10,8 @@ export default function StockPredictionGame(){
  const [data,setData]=useState<State|null>(null),[query,setQuery]=useState(''),[stocks,setStocks]=useState<Stock[]>([]),[selected,setSelected]=useState<Stock|null>(null);
  const [error,setError]=useState(''),[searchError,setSearchError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[searching,setSearching]=useState(false),[clock,setClock]=useState(0);
  const load=useCallback(async()=>{try{const response=await fetch('/api/predictions/stocks',{cache:'no-store'}),body=await response.json();if(!response.ok)throw Error(body.error);setData(body);setClock(body.serverNow);setError('');}catch(e){setError(e instanceof Error?e.message:'조회 실패');}},[]);
+ // Initial server fetch updates state only after the asynchronous response.
+ // eslint-disable-next-line react-hooks/set-state-in-effect
  useEffect(()=>{void load();const id=setInterval(()=>{if(!document.hidden)void load();},30000);return()=>clearInterval(id);},[load]);
  useEffect(()=>{const id=setInterval(()=>setClock(n=>n+1000),1000);return()=>clearInterval(id);},[]);
  useEffect(()=>{
