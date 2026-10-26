@@ -1,5 +1,9 @@
-import { GET as collectMarket } from "../market/live/route";
-export const dynamic = "force-dynamic";
-export const maxDuration = 60;
-// The collector validates CRON_SECRET itself. No public self-fetch or lost Authorization header.
-export async function GET(request: Request) { return collectMarket(request); }
+import { GET as collectMarket } from '../market/live/route';
+import {settlePredictions} from '@/lib/prediction-service';
+export const dynamic='force-dynamic';
+export const maxDuration=60;
+export async function GET(request:Request){
+ if(!process.env.CRON_SECRET||request.headers.get('authorization')!=='Bearer '+process.env.CRON_SECRET)return new Response('Unauthorized',{status:401});
+ const [response]=await Promise.all([collectMarket(request),settlePredictions().catch(error=>{console.error('Prediction settlement deferred',error instanceof Error?error.message:'unknown');})]);
+ return response;
+}

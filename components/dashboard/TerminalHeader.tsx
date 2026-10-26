@@ -13,7 +13,7 @@ type NavigationLink = { href: string; label: string };
 const groups = [
   { id: 'market', label: '시장 분석', links: [
     { href: '/premarket', label: '장전 체크' }, { href: '/briefing', label: '시장 브리핑' }, { href: '/daily', label: '일별 분석' },
-    { href: '/breadth', label: '시장폭' }, { href: '/pulse', label: 'Market Pulse' },
+    { href: '/breadth', label: '시장폭' }, { href: '/pulse', label: 'Market Pulse' }, {href:'/predictions',label:'오늘의 지수 맞히기'},
   ] },
   { id: 'flow', label: '수급 분석', links: [
     { href: '/flow', label: '시장 수급' }, { href: '/stock-flow', label: '종목 수급 분석' },
@@ -27,7 +27,7 @@ const groups = [
   ] },
 ];
 const utilityLinks: NavigationLink[] = [
-  {href:'/mypage',label:'마이페이지'}, {href:'/mypage#watchlist',label:'관심 종목'},
+  {href:'/predictions',label:'오늘의 지수 맞히기'}, {href:'/mypage',label:'마이페이지'}, {href:'/mypage#watchlist',label:'관심 종목'},
   { href: '/board', label: '게시판' }, { href: '/replay', label: '시장 복기' },
   { href: '/baltagyeong.html', label: '발타경' }, { href: '/balta-jungyong', label: '발타 중용' },
   { href: '/disclaimer', label: '책임면책 고지' },
