@@ -2,8 +2,8 @@ export const RANKS = ['훈련병','이병','일병','상병','병장','하사','
 export const OWNER_USERNAME = 'KLTbaltatool';
 export type Member = {id:string;username:string;nickname:string;rank:number;role:'member'|'admin'|'owner';status:'active'|'suspended';created_at:string;auto_rank?:boolean;activity_points?:number};
 
-// Elapsed 24-hour days from registration; the final automatic rank is 원사.
-export const AUTO_RANK_DAYS = [0,7,30,60,90,180,270,365,540] as const;
+// Elapsed 24-hour days from registration; the final automatic rank is 대장.
+export const AUTO_RANK_DAYS = [0,7,30,60,90,180,270,365,540,720,900,1080,1260,1440,1620,1800,1980,2160,2340,2520] as const;
 type RankMember = Pick<Member,'rank'|'role'|'status'|'created_at'|'auto_rank'|'activity_points'>;
 export function membershipRank(member:RankMember, now=Date.now()):number {
   if(member.auto_rank!==true || member.role!=='member' || member.status!=='active') return member.rank;
@@ -21,7 +21,7 @@ export function withMembershipRank<T extends RankMember>(member:T,now=Date.now()
 export function rankProgress(member:RankMember,now=Date.now()) {
  const rank=membershipRank(member,now);
  if(member.role!=='member'||member.auto_rank!==true||member.status!=='active') return {rank,percent:0,label:'관리자 지정 계급',detail:'수동 지정 · 자동 경험치 미적용'};
- if(rank>=AUTO_RANK_DAYS.length-1) return {rank,percent:100,label:'자동 진급 최고 계급',detail:'MAX · 원사까지 자동 진급 완료'};
+ if(rank>=AUTO_RANK_DAYS.length-1) return {rank,percent:100,label:'자동 진급 최고 계급',detail:'MAX · 대장까지 자동 진급 완료'};
  const rawAge=Math.max(0,(now-Date.parse(member.created_at))/86400000);
  const {elapsedDays,bonusDays}=activityDays(member,now);
  const age=rawAge+bonusDays;
