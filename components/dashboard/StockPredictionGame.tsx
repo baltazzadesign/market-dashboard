@@ -35,7 +35,7 @@ export default function StockPredictionGame(){
  return <section id="stocks" className={`${s.panel} ${c.section}`} aria-labelledby="stock-game-title">
   <div className={s.heading}><div><small>BALTATOOL · STOCK CHALLENGE</small><h2 id="stock-game-title">종목 양봉·음봉 맞히기</h2><p>시가보다 높게 마감하면 양봉, 낮게 마감하면 음봉</p></div><span className={s.badge}>오늘 {today.length} / 3종목</span></div>
   <p>09:00~14:00 참여 · 적중당 +100 P · 하루 최대 300 P · 오답 패널티 없음</p>
-  <p className={s.note}>선택한 종목은 당일 교체·취소할 수 없으며, 방향은 오후 2시 전까지 변경할 수 있습니다. 전일 종가 대비 상승·하락과는 다릅니다.</p>
+  <details className={s.rules}><summary>참여 규칙 보기</summary><p className={s.note}>선택한 종목은 당일 교체·취소할 수 없으며, 방향은 오후 2시 전까지 변경할 수 있습니다. 전일 종가 대비 상승·하락과는 다릅니다.</p></details>
   {error&&<p role="alert">{error} <button className={s.save} onClick={()=>void load()}>다시 조회</button></p>}
   {message&&<p role="status">{message}</p>}{data?.warning&&<p role="status">{data.warning}</p>}
   {!data?<p>참여 정보를 불러오는 중…</p>:!canChoose&&<p className={s.countdown}>{data.closed?'휴장 · '+data.closed:data.time<'09:00'?'오전 9시부터 참여할 수 있습니다.':'오늘 참여가 마감되었습니다.'}</p>}
@@ -47,7 +47,7 @@ export default function StockPredictionGame(){
   </div>}
   <div className={c.picks}>{today.map(r=><article className={s.card} key={r.id}><small>{r.code}</small><h3>{r.name}</h3><p>내 선택: {r.direction==='up'?'양봉 ▲':'음봉 ▼'}</p><div className={s.choices}>{(['up','down'] as const).map(direction=><button className={direction==='up'?s.up:s.down} key={direction} aria-pressed={r.direction===direction} disabled={!canChoose||busy||Boolean(r.result)} onClick={()=>void choose(r,direction)}>{direction==='up'?'▲ 양봉':'▼ 음봉'}</button>)}</div><strong>{outcome(r)}</strong></article>)}</div>
   {data&&today.length===0&&<p>오늘 선택한 종목이 없습니다.</p>}
-  <p className={s.note}>KRX 정규장 시가·종가 기준입니다. 오후 4시 이후 이 페이지 조회와 오후 6시 예약 확인에서 판정합니다. 시가와 종가가 같으면 0 P로 종료하며, 거래정지·데이터 누락은 판정 대기로 유지합니다.</p>
+  <details className={s.rules}><summary>종목 판정 기준</summary><p className={s.note}>KRX 정규장 시가·종가 기준입니다. 오후 4시 이후 이 페이지 조회와 오후 6시 예약 확인에서 판정합니다. 시가와 종가가 같으면 0 P로 종료하며, 거래정지·데이터 누락은 판정 대기로 유지합니다.</p></details>
   <details className={c.history}><summary>종목 참여 기록 · 최근 90건</summary>{data?.history.length?data.history.map(r=><div className={s.row} key={r.id}><span>{r.day} · {r.name}<small>{r.code} · {r.direction==='up'?'양봉':'음봉'} 선택{r.opening!=null&&r.closing!=null?' · 시가 '+Number(r.opening).toLocaleString()+' → 종가 '+Number(r.closing).toLocaleString():''}</small></span><strong>{outcome(r)}</strong></div>):<p>참여 기록이 없습니다.</p>}</details>
  </section>;
 }
