@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./terminal.css";
+import {FlowMarketProvider} from '@/components/dashboard/FlowMarketContext';
 import TerminalHeader from "@/components/dashboard/TerminalHeader";
 export const metadata: Metadata = {
   title: { default: "baltatool · 시장 대시보드", template: "%s · baltatool" },
@@ -9,5 +10,5 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="ko"><body><TerminalHeader/>{children}</body></html>;
+  return <html lang="ko"><body><FlowMarketProvider><TerminalHeader/>{children}</FlowMarketProvider></body></html>;
 }

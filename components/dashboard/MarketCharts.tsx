@@ -7,6 +7,9 @@ import { breadthScoreDetails } from "@/lib/breadth-score";
 import { chartColors as colors, chartNames, MIN_WINDOW, seriesMap, chartSeriesValue, fitDomain, zoomDomain, panDomain, observedDomain, comparisonBaseline, relativeIndexValue, chartTicks, type ChartKind, type Domain, type Series } from "./chart-model";
 export type { ChartKind, Domain } from "./chart-model";
 export { chartNames, fitDomain } from "./chart-model";
+import {FlowMarketPicker,useFlowMarket} from './FlowMarketContext';
+import {selectMarketFlow,flowMarketNames} from '@/lib/market-flow-selection';
+import type {InvestorMarket} from '@/lib/investor-flow';
 import styles from "./MarketCharts.module.css";
 
 function activeMinute(event: unknown) {
@@ -34,12 +37,17 @@ function ChartTooltip({ active, payload, label, series, row, percent, baseline }
   </div>;
 }
 type ChartProps = {
+  flowMarketOverride?: InvestorMarket; flowOverlay?: boolean;
   rows: MarketRow[]; kind: ChartKind; domain: Domain; onDomainChange?: (domain: Domain) => void;
   selectedMinute?: number | null; events?: MarketEvent[]; showMarkers?: boolean; compact?: boolean; autoScale?: boolean; syncGroup?: string;
   hoverMinute?: number | null; onHoverMinute?: (minute: number | null) => void; onExpand?: () => void; onReset?: () => void; onLatest?: () => void;
   dataCaption?: string; refreshing?: boolean; hideMeta?: boolean; plotHeight?: number;
 };
-function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, events = [], showMarkers = true, compact = false, autoScale = true, syncGroup = "balta-main", hoverMinute = null, onHoverMinute, onExpand, onReset, onLatest, dataCaption = "", refreshing = false, hideMeta = false, plotHeight }: ChartProps) {
+function MarketChart({ rows:sourceRows, flowMarketOverride, flowOverlay, kind, domain, onDomainChange, selectedMinute, events = [], showMarkers = true, compact = false, autoScale = true, syncGroup = "balta-main", hoverMinute = null, onHoverMinute, onExpand, onReset, onLatest, dataCaption = "", refreshing = false, hideMeta = false, plotHeight }: ChartProps) {
+  const sharedMarket=useFlowMarket().market,market=flowMarketOverride??sharedMarket;
+  const rows=useMemo(()=>kind==='flow'?sourceRows.map(row=>selectMarketFlow(row,market)):sourceRows,[sourceRows,kind,market]);
+  const [overlay,setOverlay]=useState(true),[combinedIndex,setCombinedIndex]=useState<'kospi'|'kosdaq'>('kospi');
+  const withIndex=kind==='flow'&&(flowOverlay??overlay),flowIndex=market==='combined'?combinedIndex:market;
   const id = useId().replace(/:/g, "");
   const plot = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState<string[]>([]);
@@ -50,10 +58,10 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
   const dragBounds = useRef<{ left: number; width: number } | null>(null);
   const [plotWidth, setPlotWidth] = useState(500);
   const [indexMode, setIndexMode] = useState<"percent" | "raw">("percent");
-  const allSeries = seriesMap[kind];
+  const allSeries=useMemo<Series[]>(()=>withIndex?[...seriesMap.flow,{...seriesMap[flowIndex][0],axis:'right'}]:seriesMap[kind],[kind,withIndex,flowIndex]);
   const visible = useMemo(() => allSeries.filter(series => !hidden.includes(series.key)), [allSeries, hidden]);
   const percent = kind === "index" && indexMode === "percent";
-  const dualAxis = kind === "index" && !percent;
+  const dualAxis = kind === "index" && !percent || withIndex;
   const baseline = useMemo(() => comparisonBaseline(rows), [rows]);
   const rowByMinute = useMemo(() => new Map(rows.map(row => [row.minute, row])), [rows]);
   const valueForPlot = useCallback((row: MarketRow | undefined, series: Series) => percent
@@ -102,12 +110,12 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
     if (kind === "score") return [-110, 110];
     if (kind === "ratio") return [-3, 103];
     if (["index", "kospi", "kosdaq"].includes(kind) || autoScale) return ["auto", "auto"];
-    const max = Math.max(kind === "flow" ? 1200 : 1800, ...rows.filter(row => row.minute >= domain[0] && row.minute <= domain[1]).flatMap(row => visible.map(s => Math.abs(chartSeriesValue(row, s) ?? 0))));
+    const max = Math.max(kind === "flow" ? 1200 : 1800, ...rows.filter(row => row.minute >= domain[0] && row.minute <= domain[1]).flatMap(row => visible.filter(s => s.axis !== "right").map(s => Math.abs(chartSeriesValue(row, s) ?? 0))));
     return [-Math.ceil(max * 1.05), Math.ceil(max * 1.05)];
   }, [kind, autoScale, rows, domain, visible]);
   const ticks = chartTicks(domain, Math.max(120, plotWidth - leftInset - rightInset));
   const markerPoints = useMemo(() => {
-    if (!showMarkers || !visible.length || kind === "ratio") return [];
+    if (!showMarkers || !visible.length || kind === "ratio" || kind === "flow" && market!=="combined") return [];
     const turningType = /^(PIVOT_|BREADTH_REVERSAL_|FLOW_REVERSAL_|INDEX_FLOW_DIVERGENCE_|INTRADAY_(HIGH|LOW)_TURN)/;
     const gap = Math.max(3, Math.ceil(width / (compact ? 9 : 16)));
     const selected: { event: MarketEvent; y: number; series: Series }[] = [];
@@ -125,14 +133,15 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
       if (value !== null) selected.push({ event, y: value, series });
     }
     return selected;
-  }, [showMarkers, visible, kind, width, compact, events, domain, rowByMinute, valueForPlot]);
+  }, [showMarkers, visible, kind, width, compact, events, domain, rowByMinute, valueForPlot,market]);
   const hasData = points.some(point => visible.some(series => point[series.key] !== null && point[series.key] !== undefined));
   const unit = percent ? "%" : kind === "flow" ? "억원" : kind === "ratio" ? "%" : kind === "score" ? "점" : kind === "breadth" ? "개" : kind === "accel" ? "개" : "pt";
   const axisTick = (value: number) => Number(value).toLocaleString("ko-KR", { maximumFractionDigits: percent ? 3 : ["index", "kospi", "kosdaq"].includes(kind) ? 2 : 0 });
   const currentVisible = latest && latest.minute >= domain[0] && latest.minute <= domain[1];
   return <div className={styles.chart + " terminal-chart" + (compact ? " is-compact" : "")} data-chart-kind={kind} data-inspecting={isInspecting || undefined}>
     <div className="chart-readout">
-      <div className={"chart-readout-meta" + (hideMeta ? " " + styles.hiddenMeta : "")}><span className="num">{isInspecting ? "커서 " + minuteLabel(inspectedMinute) : "최신 " + (latest?.time ?? "—")}{isInspecting && !inspectedRow ? " · 기록 없음" : " 기준"}</span><span>{refreshing ? "갱신 중…" : dataCaption}</span></div>
+      {kind==='flow'&&<div className={styles.comparisonTools}>{flowMarketOverride===undefined&&<FlowMarketPicker label="차트 수급 시장"/>}<button className="button small" aria-pressed={withIndex} onClick={()=>setOverlay(v=>!v)}>지수 겹쳐보기 {withIndex?'켜짐':'꺼짐'}</button>{withIndex&&market==='combined'&&<select className="filter-select" aria-label="겹쳐 볼 지수" value={combinedIndex} onChange={e=>setCombinedIndex(e.target.value as 'kospi'|'kosdaq')}><option value="kospi">코스피</option><option value="kosdaq">코스닥</option></select>}<span>{flowMarketNames[market]} · 왼쪽 수급(억원){withIndex?' / 오른쪽 '+flowMarketNames[flowIndex]+' 지수(pt)':''}</span></div>}
+    <div className={"chart-readout-meta" + (hideMeta ? " " + styles.hiddenMeta : "")}><span className="num">{isInspecting ? "커서 " + minuteLabel(inspectedMinute) : "최신 " + (latest?.time ?? "—")}{isInspecting && !inspectedRow ? " · 기록 없음" : " 기준"}</span><span>{refreshing ? "갱신 중…" : dataCaption}</span></div>
       <div className="chart-values" aria-label={isInspecting ? "커서 시각 수치 및 차트 항목 표시" : "최신 수치 및 차트 항목 표시"}>
         {allSeries.map(s => <button key={s.key} className="series-card" aria-pressed={!hidden.includes(s.key)} aria-label={s.name + " " + displayValue(readoutRow, s) + ", 그래프 " + (hidden.includes(s.key) ? "표시" : "숨기기")} onClick={() => setHidden(old => old.includes(s.key) ? old.filter(x => x !== s.key) : [...old, s.key])}>
           <span className="series-name"><i style={{ background: s.color }}/>{s.name}<span className="series-visibility">{hidden.includes(s.key) ? "숨김" : ""}</span></span>
@@ -172,7 +181,7 @@ function MarketChart({ rows, kind, domain, onDomainChange, selectedMinute, event
           <Tooltip active={isInspecting} position={plotWidth < 500 ? { x: 8, y: 18 } : undefined} content={props => hideMeta ? null : <ChartTooltip active={props.active} payload={props.payload} label={props.label} series={visible} row={rowByMinute.get(Number(props.label))} percent={percent} baseline={baseline}/>} cursor={false} isAnimationActive={false} wrapperStyle={{ pointerEvents: "none", zIndex: 10 }}/>
           {domain[0] < REGULAR_CLOSE_MINUTE && domain[1] > REGULAR_CLOSE_MINUTE && <ReferenceLine yAxisId="left" x={REGULAR_CLOSE_MINUTE} stroke="#6f7782" strokeOpacity={.45} strokeDasharray="4 5" label={{ value: "정규장 마감", fill: "#8f98a6", fontSize: 10, position: "insideTopRight" }}/>}
           {(percent || !["index", "kospi", "kosdaq"].includes(kind)) && <ReferenceLine yAxisId="left" y={kind === "ratio" ? 50 : 0} stroke={kind === "accel" ? "#64d8ed" : "#717780"} strokeWidth={kind === "accel" ? 2.2 : 1} strokeOpacity={kind === "accel" ? .95 : .6} strokeDasharray={kind === "accel" ? undefined : "4 5"} ifOverflow={kind === "accel" ? "extendDomain" : "discard"} label={kind === "accel" ? { value: "0 기준", position: "insideTopRight", fill: "#8ce6f2", fontSize: 11 } : undefined}/>}
-          {visible.map(s => <Area key={s.key} yAxisId={axisFor(s)} dataKey={s.key} name={s.name} type="linear" stroke={s.color} strokeWidth={compact ? 1.8 : 2} fill={"url(#" + id + s.key + ")"} baseValue={!percent && ["index", "kospi", "kosdaq"].includes(kind) ? "dataMin" : 0} dot={false} activeDot={isInspecting ? { r: 4, stroke: "#0d0f12", strokeWidth: 2 } : false} connectNulls={false} isAnimationActive={false}/>)}
+          {visible.map(s => <Area key={s.key} yAxisId={axisFor(s)} dataKey={s.key} name={s.name} type="linear" stroke={s.color} strokeWidth={compact ? 1.8 : 2} fill={"url(#" + id + s.key + ")"} baseValue={!percent && (["index", "kospi", "kosdaq"].includes(kind)||s.axis==="right") ? "dataMin" : 0} dot={false} activeDot={isInspecting ? { r: 4, stroke: "#0d0f12", strokeWidth: 2 } : false} connectNulls={false} isAnimationActive={false}/>)}
           {markerPoints.map(({ event, y, series }) => <ReferenceDot key={event.id} yAxisId={axisFor(series)} x={event.minute} y={y} r={3.5} fill={event.direction === "up" ? colors.red : event.direction === "down" ? colors.blue : colors.yellow} stroke="#0d0f12" strokeWidth={1.5}
             shape={props => <g><title>{event.time + " · " + event.label + " · " + event.message}</title><circle cx={props.cx} cy={props.cy} r={3.5} fill={props.fill} stroke="#0d0f12" strokeWidth={1.5}/></g>}/>)}
           {currentVisible && <ReferenceLine yAxisId="left" x={latest.minute} stroke="#aeb4bf" strokeOpacity={.3} strokeDasharray="2 5"/>}

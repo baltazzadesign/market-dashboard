@@ -1,4 +1,6 @@
 "use client";
+import {useFlowMarket} from './FlowMarketContext';
+import {selectMarketFlow} from '@/lib/market-flow-selection';
 import InvestorFlowPanel from "./InvestorFlowPanel";
 import MarketChartImageButton from "./MarketChartImageButton";
 import { BaltaJungyongHeaderLink } from './BaltaJungyongHeaderLink';
@@ -84,6 +86,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
   useEffect(()=>{if(!toast)return;const id=setTimeout(()=>setToast(""),5500);return()=>clearTimeout(id);},[toast]);
   const feed=useMarketFeed(date,mode==="overview"&&date===today,settings.autoRefresh);
   const rows=feed.rows,last=rows.at(-1);
+  const {market:flowMarket}=useFlowMarket(),flowLast=last?selectMarketFlow(last,flowMarket):undefined;
   const { pulse, sectorStatus } = useMarketPulse(rows, date, feed.fetchedAt);
   // 자동 신호/정규장 리포트는 기존 정규장 데이터로만 계산합니다.
   // 상단 지표와 우측 브리핑/수급은 현재 세션의 최신 기록(last)을 사용합니다.
@@ -146,9 +149,9 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
     {label:"시장 폭", value:last?.diff, unit:"개", signed:true, tone:(last?.diff??0)>0?"positive":(last?.diff??0)<0?"negative":""},
     {label:"상승 종목", value:last?.up, unit:"개", signed:false, tone:"positive"},
     {label:"하락 종목", value:last?.down, unit:"개", signed:false, tone:"negative"},
-    {label:"외국인", value:last?.foreignFlow, unit:"억", signed:true, tone:"flow-blue"},
-    {label:"기관", value:last?.instFlow, unit:"억", signed:true, tone:"flow-red"},
-    {label:"개인", value:last?.indivFlow, unit:"억", signed:true, tone:"flow-yellow"},
+    {label:"외국인", value:flowLast?.foreignFlow, unit:"억", signed:true, tone:"flow-blue"},
+    {label:"기관", value:flowLast?.instFlow, unit:"억", signed:true, tone:"flow-red"},
+    {label:"개인", value:flowLast?.indivFlow, unit:"억", signed:true, tone:"flow-yellow"},
   ];
   const pulseMiniScore = Math.max(0, Math.min(100, pulse.score ?? 50));
   const pulseMiniAngle = Math.PI * (1 - pulseMiniScore / 100);
@@ -221,7 +224,7 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
           <aside className="overview-flow-column" aria-label="투자주체 누적 수급">
             <section className="panel overview-flow-chart">
               <div className="panel-header"><div><h2 className="panel-title">투자주체별 누적 수급</h2><p className="panel-subtitle">{last?last.time+" 기준":"기록 대기"} · 억원</p></div><button className="button icon small" onClick={()=>openChart("flow")} aria-label="수급 차트 크게 보기" disabled={!rows.length}><Icon name="expand" size={15}/></button></div>
-              <div className="overview-flow-values"><span><i className="flow-blue"/>외국인 <strong className="num flow-blue">{formatNumber(last?.foreignFlow,0,true)}</strong></span><span><i className="flow-red"/>기관 <strong className="num flow-red">{formatNumber(last?.instFlow,0,true)}</strong></span><span><i className="flow-yellow"/>개인 <strong className="num flow-yellow">{formatNumber(last?.indivFlow,0,true)}</strong></span></div>
+              <div className="overview-flow-values"><span><i className="flow-blue"/>외국인 <strong className="num flow-blue">{formatNumber(flowLast?.foreignFlow,0,true)}</strong></span><span><i className="flow-red"/>기관 <strong className="num flow-red">{formatNumber(flowLast?.instFlow,0,true)}</strong></span><span><i className="flow-yellow"/>개인 <strong className="num flow-yellow">{formatNumber(flowLast?.indivFlow,0,true)}</strong></span></div>
               {feed.loading?<div className="chart-loading compact">시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state compact">수급 기록이 없습니다.</div>:<MarketChart {...chartProps} kind="flow" compact syncGroup="balta-overview-flow" onExpand={()=>openChart("flow")}/>} 
             </section>
           </aside>

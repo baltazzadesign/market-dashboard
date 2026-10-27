@@ -8,6 +8,7 @@ export type MarketSession = "REGULAR" | "AFTER_HOURS_CLOSE" | "OLD_AFTER_HOURS_S
 export type RawRecord = Record<string, unknown>;
 export type SignalLevel = "강" | "중" | "약";
 export type MarketRow = {
+  marketFlows?: Record<"kospi"|"kosdaq",import("./market-flow-selection").MarketFlowValues>;
   id: number; date: string; time: string; minute: number; session: MarketSession;
   up: number; down: number; flat: number; diff: number; accel: number;
   upRatio: number; downRatio: number; kospi: number | null; kosdaq: number | null;
@@ -78,6 +79,7 @@ export function normalizeRow(value: unknown, date: string): MarketRow {
   const time = formatTime(r.time);
   const minute = timeToMinute(time);
   const marketData = record(r.market_data ?? r.marketData);
+  const marketFlows=Object.fromEntries((["kospi","kosdaq"] as const).map(key=>{const snapshot=record(marketData[key]),cached=record(record(r.marketFlows)[key]),source=String(snapshot.flowSource??cached.source??'EMPTY'),flows=record(snapshot.flows??cached),live=source==='LIVE';return [key,{source,foreign:live?numeric(flows.foreign):null,institution:live?numeric(flows.institution):null,individual:live?numeric(flows.individual):null}];})) as NonNullable<MarketRow['marketFlows']>;
   const investorFlows = normalizeInvestorFlows(r.investorFlows ?? marketData.investorFlows);
   const state = String(r.marketState ?? r.marketstate ?? "");
   const stateSession = state.match(/SESSION_(REGULAR|AFTER_HOURS_CLOSE|OLD_AFTER_HOURS_SINGLE_PRICE|KRX_AFTER_MARKET|CLOSED)/i)?.[1]?.toUpperCase();
@@ -105,7 +107,7 @@ export function normalizeRow(value: unknown, date: string): MarketRow {
     id: n("id") ?? 0, date, time, minute, session, up, down, flat, diff, accel: n("accel") ?? 0,
     upRatio, downRatio, kospi: (n("kospi") ?? 0) > 0 ? n("kospi") : null, kosdaq: (n("kosdaq") ?? 0) > 0 ? n("kosdaq") : null,
     priceSources: { kospi: String(record(marketData.kospi).priceSource ?? record(r.priceSources).kospi ?? 'UNKNOWN'), kosdaq: String(record(marketData.kosdaq).priceSource ?? record(r.priceSources).kosdaq ?? 'UNKNOWN') },
-    foreignFlow, instFlow, indivFlow, flowPower, flowTrend: flow(r.flowTrend ?? r.flowtrend), flowMomentum: flow(r.flowMomentum ?? r.flowmomentum),
+    marketFlows, foreignFlow, instFlow, indivFlow, flowPower, flowTrend: flow(r.flowTrend ?? r.flowtrend), flowMomentum: flow(r.flowMomentum ?? r.flowmomentum),
     flowSource, breadthSource, marketState: state, marketTone: String(r.marketTone ?? r.markettone ?? ""),
     marketScore: Math.max(-100, Math.min(100, numeric(r.marketScore ?? r.marketscore) ?? calcScore(diff, upRatio, downRatio))),
     signals: Array.isArray(r.signals) ? r.signals.map(record) : [], alert: String(r.alert ?? ""),
@@ -226,14 +228,14 @@ export function csvCell(value: unknown) {
   if (typeof value === "string" && /^[\s]*[=+\-@]/.test(text)) text = "'" + text;
   return '"' + text.replace(/"/g, '""') + '"';
 }
-export function rowsCsv(rows: MarketRow[]) {
+export function rowsCsv(rows: MarketRow[], market: InvestorMarket = "combined") {
   const headers = ["날짜","시간","세션","상승 종목","하락 종목","보합 종목","시장 폭","가속도","상승 비율(%)","하락 비율(%)","기존 신호점수","KOSPI","KOSDAQ","외국인(억원)","기관(억원)","개인(억원)","합산수급(억원)","수급상태","종목수상태","시장폭 점수(종목수 기준)"];
   const values = rows.map(r => {
     const breadthScore = calculateBreadthScore(r);
     return [r.date,r.time,r.session,r.up,r.down,r.flat,r.diff,r.accel,Number((r.upRatio*100).toFixed(2)),Number((r.downRatio*100).toFixed(2)),r.marketScore,r.kospi,r.kosdaq,r.foreignFlow,r.instFlow,r.indivFlow,r.flowPower,r.flowSource,r.breadthSource,breadthScore === null ? null : Number(breadthScore.toFixed(1))];
   });
-  headers.push(...investorCategories.map(c => c.label + " 합산(억원)"), "세부수급 합산상태", "세부수급 수집시각");
-  values.forEach((value, i) => value.push(...investorCategories.map(c => rows[i].investorFlows?.combined.values[c.key] ?? null), rows[i].investorFlows?.combined.source ?? "EMPTY", rows[i].investorFlows?.capturedAt ?? ""));
+  headers.push(...investorCategories.map(c => c.label + " " + investorMarketLabels[market] + "(억원)"), "세부수급 " + investorMarketLabels[market] + " 상태", "세부수급 수집시각");
+  values.forEach((value, i) => value.push(...investorCategories.map(c => rows[i].investorFlows?.[market].values[c.key] ?? null), rows[i].investorFlows?.[market].source ?? "EMPTY", rows[i].investorFlows?.capturedAt ?? ""));
   return "\uFEFF" + [headers,...values].map(row => row.map(csvCell).join(",")).join("\r\n");
 }
 export function investorRowsCsv(rows: MarketRow[]) {

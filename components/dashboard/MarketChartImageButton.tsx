@@ -24,7 +24,7 @@ export default function MarketChartImageButton({ rows, date, domain, events = []
     return {
       filename: `baltatool-${date}-${minuteLabel(bounds[0]).replace(':','')}-${minuteLabel(bounds[1]).replace(':','')}-all-charts.png`,
       plots: hasDetails ? 9 : 8,
-      content: <div className={s.grid}>{kinds.map(kind => <section key={kind} data-image-kind={kind}><MarketChart rows={rows} kind={kind} domain={bounds} events={events} showMarkers={markers} compact hideMeta syncGroup="balta-image-export"/></section>)}<div className={s.investors}><InvestorFlowPanel rows={rows} date={date} domain={bounds} initialSelected={investorCategories.map(c => c.key)}/></div></div>,
+      content: <div className={s.grid}>{kinds.map(kind => <section key={kind} data-image-kind={kind}><MarketChart flowMarketOverride="combined" flowOverlay={false} rows={rows} kind={kind} domain={bounds} events={events} showMarkers={markers} compact hideMeta syncGroup="balta-image-export"/></section>)}<div className={s.investors}><InvestorFlowPanel rows={rows} date={date} domain={bounds} initialSelected={investorCategories.map(c => c.key)}/></div></div>,
       report: root => {
         const panels: ImagePanel[] = kinds.map(kind => {
           const index = kind === 'index';
