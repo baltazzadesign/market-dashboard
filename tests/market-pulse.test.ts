@@ -70,3 +70,15 @@ test('stored acceleration is used only with a recent valid breadth predecessor',
  assert.equal(calculateMarketPulse([old,prev,latest]).factors[4].value,.2);
  prev.breadthSource='FALLBACK';assert.equal(calculateMarketPulse([old,prev,latest]).factors[4].value,0);
 });
+
+test('selected market ignores other market prices, sectors and aggregate signals',()=>{
+ const rows=[row(590),row(600,.5,3000,100.5)].map(r=>({...r,marketBreadth:{kospi:{up:800,down:100,flat:100},kosdaq:{up:100,down:800,flat:100}},marketFlows:{kospi:{foreign:3000,institution:3000,individual:-6000,source:'LIVE'},kosdaq:{foreign:-3000,institution:-3000,individual:6000,source:'LIVE'}}}));
+ rows[1].kosdaq=99.5;
+ const k=calculateMarketPulse(rows,sectors,'kospi'),q=calculateMarketPulse(rows,sectors,'kosdaq');assert.ok(k.score!>q.score!);assert.equal(k.market,'kospi');assert.ok(k.factors[2].value!>.99);
+ const changed=rows.map(r=>({...r,kosdaq:99999,foreignFlow:-99999,signals:[{type:'PIVOT_DOWN_CONFIRMED'}]}));
+ const single={...sectors,time:'KOSPI 10:00',sectors:sectors.sectors.filter((s:any)=>s.market==='kospi')};
+ assert.deepEqual(calculateMarketPulse(changed,single,'kospi'),{...k,factors:k.factors.map((f,i)=>i===3?{...f,detail:f.detail.replace(sectors.time,single.time)}:f)});
+});
+test('selected market missing counts and flows never falls back to aggregate',()=>{
+ const p=calculateMarketPulse([row(590),row(600)],null,'kospi');assert.equal(p.factors[0].value,null);assert.equal(p.factors[1].value,null);assert.equal(p.regime,'판정 대기');
+});

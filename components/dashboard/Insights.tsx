@@ -1,6 +1,6 @@
 "use client";
 import {useFlowMarket} from './FlowMarketContext';
-import {selectMarketFlow,flowMarketNames} from '@/lib/market-flow-selection';
+import {selectMarketFlow,selectMarketRows,flowMarketNames} from '@/lib/market-flow-selection';
 import { useId, type CSSProperties } from "react";
 import { type MarketRow, type MarketEvent, formatNumber as fmt, valueClass, marketTone, marketNarrative, sourceLabel } from "@/lib/balta-model";
 import { Icon, type IconName } from "./Icon";
@@ -8,6 +8,7 @@ import { chartColors } from "./chart-model";
 import { breadthScoreDetails } from "@/lib/breadth-score";
 function Sparkline({ values, color }: { values: (number | null)[]; color: string }) {
   const id = useId().replace(/:/g, "");
+  values=values.map(v=>v!==null&&Number.isFinite(v)?v:null);
   const data = values.filter((v): v is number => v !== null);
   if (data.length < 2) return null;
   const min = Math.min(...data), range = Math.max(...data) - min || 1;
@@ -47,7 +48,8 @@ function ScoreGauge({ value }: { value?: number | null }) {
     <div className="gauge-labels"><span>−100 하락 우위</span><span>상승 우위 +100</span></div>
   </div>;
 }
-export function Metrics({ rows, loading }: { rows: MarketRow[]; loading: boolean }) {
+export function Metrics({ rows:sourceRows, loading }: { rows: MarketRow[]; loading: boolean }) {
+  const {market}=useFlowMarket(),rows=selectMarketRows(sourceRows,market);
   const last = rows.at(-1), prev = rows.at(-2);
   function delta(current?: number | null, previous?: number | null) {
     if (current == null || previous == null || previous === 0) return <span>직전 비교 없음</span>;
@@ -57,8 +59,8 @@ export function Metrics({ rows, loading }: { rows: MarketRow[]; loading: boolean
   const cards: { name: string; value: number | null | undefined; icon: IconName; digits?: number; unit?: string; signed?: boolean; foot: React.ReactNode; series: (number | null)[]; color?: string }[] = [
     { name: "KOSPI", value: last?.kospi, digits: 2, icon: "chart", foot: delta(last?.kospi, prev?.kospi), series: rows.map(r=>r.kospi), color: chartColors.green },
     { name: "KOSDAQ", value: last?.kosdaq, digits: 2, icon: "chart", foot: delta(last?.kosdaq, prev?.kosdaq), series: rows.map(r=>r.kosdaq), color: chartColors.violet },
-    { name: "시장 폭", value: last?.diff, unit: "개", signed: true, icon: "activity", foot: <><span className="positive">상승 {fmt(last?.up)}</span><span>·</span><span className="negative">하락 {fmt(last?.down)}</span></>, series: rows.map(r=>r.diff), color: chartColors.yellow },
-    { name: "외국인 + 기관", value: last?.flowPower, unit: "억", signed: true, icon: "layers", foot: <span>{last ? sourceLabel(last.flowSource) : "수급 기록 대기"}</span>, series: rows.map(r=>r.flowPower), color: "#9ca7b8" },
+    { name: flowMarketNames[market]+" 시장 폭", value: last?.diff, unit: "개", signed: true, icon: "activity", foot: <><span className="positive">상승 {fmt(last?.up)}</span><span>·</span><span className="negative">하락 {fmt(last?.down)}</span></>, series: rows.map(r=>r.diff), color: chartColors.yellow },
+    { name: flowMarketNames[market]+" 외국인 + 기관", value: last?.flowPower, unit: "억", signed: true, icon: "layers", foot: <span>{last ? sourceLabel(last.flowSource) : "수급 기록 대기"}</span>, series: rows.map(r=>r.flowPower), color: "#9ca7b8" },
   ];
   return <div className="metric-grid">{cards.map(card => <section key={card.name} className="metric" aria-label={card.name} style={{ "--metric-color": card.color ?? "#7de2d1" } as CSSProperties}><div className="metric-label"><span>{card.name}</span><span className="metric-icon"><Icon name={card.icon} size={17}/></span></div>{loading ? <><div className="loading-line large"/><div className="loading-line"/></> : <><div className={"metric-value num " + (card.signed ? valueClass(card.value) : "")}>{fmt(card.value, card.digits ?? 0, card.signed)}{card.unit && card.value != null && <small>{card.unit}</small>}</div><div className="metric-foot">{card.foot}</div><div className="metric-trend"><Sparkline values={card.series.slice(-60)} color={card.color ?? "#7de2d1"}/></div></>}</section>)}</div>;
 }

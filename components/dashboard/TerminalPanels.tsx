@@ -1,4 +1,5 @@
 "use client";
+import {flowMarketNames} from '@/lib/market-flow-selection';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { formatNumber as n } from '@/lib/balta-model';
@@ -9,12 +10,12 @@ import { useTerminalData } from './useTerminalData';
 
 export function PulseDial({ pulse }: { pulse: MarketPulse }) {
   const score = pulse.score == null ? null : Math.max(0, Math.min(100, pulse.score));
-  return <Link href="/pulse" className="terminal-panel terminal-pulse" aria-label="Market Pulse 상세 분석"><div><h2>Market Pulse</h2><svg viewBox="0 0 160 104" className="terminal-pulse-svg" role="img" aria-label={score == null ? '점수 산출 대기' : 'Market Pulse 종합 점수 ' + score}>
+  return <Link href="/pulse" className="terminal-panel terminal-pulse" aria-label="Market Pulse 상세 분석"><div><h2>Market Pulse <small style={{fontSize:11}}>{flowMarketNames[pulse.market??'combined']}</small></h2><svg viewBox="0 0 160 104" className="terminal-pulse-svg" role="img" aria-label={score == null ? '점수 산출 대기' : 'Market Pulse 종합 점수 ' + score}>
     <defs><linearGradient id="terminal-gold-arc" x1="0" y1="1" x2="1" y2="0"><stop stopColor="#d7a339"/><stop offset=".55" stopColor="#edc567"/><stop offset="1" stopColor="#fff0c3"/></linearGradient></defs>
     <path d="M20 85 A62 62 0 1 1 140 85" fill="none" stroke="#222523" strokeWidth="13" strokeLinecap="round" pathLength="100"/>
     {score != null && <path d="M20 85 A62 62 0 1 1 140 85" fill="none" stroke="url(#terminal-gold-arc)" strokeWidth="13" strokeLinecap="round" pathLength="100" strokeDasharray={`${Math.max(.1, score)} 100`}/>}
     <text x="80" y="67" textAnchor="middle" className="terminal-dial-score">{score ?? '—'}</text><text x="80" y="91" textAnchor="middle" className="terminal-dial-label">{pulse.regime}</text>
-  </svg></div><dl className="terminal-pulse-factors">{pulse.factors.map(f => <div key={f.name} title={f.detail}><dt>{f.name.replace('외국인·기관 수급', '외인·기관').replace('시장폭 확산', '시장폭').replace('KOSPI·KOSDAQ 방향', '지수 방향').replace('장중 가속·변곡', '가속·변곡')}</dt><dd>{f.value == null ? '—' : n(50 + f.value * 50)}</dd></div>)}</dl></Link>;
+  </svg></div><dl className="terminal-pulse-factors">{pulse.factors.map(f => <div key={f.name} title={f.detail}><dt>{f.name.replace(/.* 방향$/, '지수 방향').replace('외국인·기관 수급', '외인·기관').replace('시장폭 확산', '시장폭').replace('KOSPI·KOSDAQ 방향', '지수 방향').replace('장중 가속·변곡', '가속·변곡')}</dt><dd>{f.value == null ? '—' : n(50 + f.value * 50)}</dd></div>)}</dl></Link>;
 }
 export function StockRanking({ expanded = false, initialQuery = '' }: { expanded?: boolean; initialQuery?: string }) {
   const [sort, setSort] = useState('up'), [market, setMarket] = useState('all'), [query, setQuery] = useState(initialQuery);

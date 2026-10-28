@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 // Use the project's TypeScript compiler; no extra test runtime dependency.
 const root=mkdtempSync(join(tmpdir(),'market-tests-'));
 try{
- for(const file of ['lib/market-pulse.ts','tests/market-pulse.test.ts','lib/balta-access.ts','lib/research-data.ts','app/api/market/research/route.ts','app/api/market/notes/search/route.ts','app/api/market/sectors/route.ts','tests/research-api.test.ts','lib/market-research.ts','tests/research.test.ts','lib/market-comparison.ts','tests/comparison.test.ts','lib/market-diagnostics.ts','tests/diagnostics.test.ts','lib/balta-model.ts','lib/market-calendar.ts','lib/market-history-model.ts','lib/kis-history.ts','lib/balta-data.ts','lib/market-history-data.ts','lib/market.ts','app/api/market/live/route.ts','tests/history.test.ts']){
+ for(const file of ['lib/market-flow-selection.ts','lib/market-pulse.ts','tests/market-pulse.test.ts','lib/balta-access.ts','lib/research-data.ts','app/api/market/research/route.ts','app/api/market/notes/search/route.ts','app/api/market/sectors/route.ts','tests/research-api.test.ts','lib/market-research.ts','tests/research.test.ts','lib/market-comparison.ts','tests/comparison.test.ts','lib/market-diagnostics.ts','tests/diagnostics.test.ts','lib/balta-model.ts','lib/market-calendar.ts','lib/market-history-model.ts','lib/kis-history.ts','lib/balta-data.ts','lib/market-history-data.ts','lib/market.ts','app/api/market/live/route.ts','tests/history.test.ts']){
   const target=join(root,file.replace(/\.ts$/,'.js'));mkdirSync(dirname(target),{recursive:true});
   let source=readFileSync(file,'utf8');
   if(file.startsWith('app/')) source=source.replaceAll('@/lib/','../'.repeat(file.split('/').length-1)+'lib/');

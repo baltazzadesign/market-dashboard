@@ -1,9 +1,12 @@
 "use client";
+import {useFlowMarket} from './FlowMarketContext';
+import {flowMarketNames} from '@/lib/market-flow-selection';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { type MarketRow, record, formatNumber as fmt } from '@/lib/balta-model';
 import { calculateMarketPulse, type MarketPulse, type PulseSectorSnapshot } from '@/lib/market-pulse';
 
 export function useMarketPulse(rows: MarketRow[], date: string, refreshedAt: string) {
+  const {market}=useFlowMarket();
   const [snapshot, setSnapshot] = useState<PulseSectorSnapshot | null>(null);
   const [status, setStatus] = useState({ date: '', text: '섹터 조회 대기' });
   useEffect(() => {
@@ -30,7 +33,7 @@ export function useMarketPulse(rows: MarketRow[], date: string, refreshedAt: str
     void load();
     return () => { active = false; controller.abort(); };
   }, [date, refreshedAt]);
-  const pulse = useMemo(() => calculateMarketPulse(rows.filter(r => r.date === date), snapshot?.date === date ? snapshot : null), [rows, date, snapshot]);
+  const pulse = useMemo(() => calculateMarketPulse(rows.filter(r => r.date === date), snapshot?.date === date ? snapshot : null,market), [rows, date, snapshot,market]);
   return { pulse, sectorStatus: status.date === date ? status.text : '섹터 조회 대기' };
 }
 
@@ -46,7 +49,7 @@ export default function MarketPulsePanel({ pulse, sectorStatus, warning = '' }: 
         <h2 style={{ fontSize: 13, fontWeight: 650, letterSpacing: '-.02em' }}>Market Pulse <span style={{ color: 'var(--subtle)', fontSize: 10, marginLeft: 3 }}>2.0</span></h2>
         <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center', color, fontSize: 11, fontWeight: 650, padding: '3px 8px', border: '1px solid var(--border)', borderRadius: 5, background: 'var(--raised)' }}><i aria-hidden="true" style={{ width: 5, height: 5, borderRadius: '50%', background: color }}/>{pulse.regime}</span>
       </div>
-      <p style={{ color: 'var(--subtle)', fontSize: 10, marginTop: 5 }}>{pulse.time ? '정규장 '+pulse.time+' 기준' : '정규장 기록 대기'}</p>
+      <p style={{ color: 'var(--subtle)', fontSize: 10, marginTop: 5 }}>{flowMarketNames[pulse.market??'combined']} · {pulse.time ? '정규장 '+pulse.time+' 기준' : '정규장 기록 대기'}</p>
       <div style={{ position: 'relative', maxWidth: 260, margin: '10px auto 0' }} role={score === null ? undefined : 'meter'} aria-label="Market Pulse 종합 점수" aria-valuemin={score === null ? undefined : 0} aria-valuemax={score === null ? undefined : 100} aria-valuenow={score ?? undefined}>
         <svg viewBox="0 0 240 145" fill="none" style={{ display: 'block', width: '100%' }} aria-hidden="true">
           <defs><linearGradient id={id+'-arc'} x1="22" y1="0" x2="218" y2="0" gradientUnits="userSpaceOnUse"><stop stopColor="#5294ff"/><stop offset=".48" stopColor="#667180"/><stop offset=".55" stopColor="#8b737a"/><stop offset="1" stopColor="#ff545f"/></linearGradient></defs>
