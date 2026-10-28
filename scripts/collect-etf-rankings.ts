@@ -1,5 +1,6 @@
 import {mkdir,readFile,writeFile,rename,open,unlink} from 'node:fs/promises';
 import path from 'node:path';
+import {appendFileSync} from 'node:fs';
 import {readKisMaster} from '../lib/kis-directory';
 import {kisTerminal,outputRows} from '../lib/kis-terminal';
 import {parseEtfMaster,parseEtfObservation,buildEtfSnapshot,type EtfObservation} from '../lib/etf-ranking';
@@ -43,13 +44,16 @@ async function collect(){
 }
 async function main(){
   await mkdir(dir,{recursive:true});
-  try{const h=await open(lock,'wx');await h.writeFile(String(process.pid));await h.close();}catch{throw Error('ETF 수집기 잠금이 있습니다. 실행 중 프로세스를 확인해 주세요.');}
+  for(const level of ['log','error'] as const){const original=console[level].bind(console);console[level]=(...args:unknown[])=>{try{appendFileSync(path.join(dir,'collector.log'),new Date().toISOString()+' '+args.map(v=>typeof v==='string'?v:JSON.stringify(v)).join(' ')+'\n');}catch{}original(...args);};}
+  try{const pid=Number(await readFile(lock,'utf8'));if(!Number.isInteger(pid)||pid<=0)throw Error('잠금 파일 확인 필요');try{process.kill(pid,0);throw Error('ETF 수집기가 이미 실행 중입니다.');}catch(e){if((e as NodeJS.ErrnoException).code!=='ESRCH')throw e;}await unlink(lock);}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
+  const h=await open(lock,'wx');await h.writeFile(String(process.pid));await h.close();
   try{
-    const complete=await collect();
-    if(!process.argv.includes('--watch'))return;
+    const watch=process.argv.includes('--watch');let complete=false;
+    try{complete=await collect();}catch(e){if(!watch)throw e;console.error('[ETF] 초기 수집 실패 · 30분 후 재시도');}
+    if(!watch)return;
     console.log('[ETF] 장후 자동 수집 대기 · KST 16:30 / 18:00');
-    let last=complete?(rankingCollectionSlot(new Date(),parseAdditionalHolidays(process.env.MARKET_HOLIDAYS))??''):'',retryAt=0;
-    for(;;){const slot=rankingCollectionSlot(new Date(),parseAdditionalHolidays(process.env.MARKET_HOLIDAYS));if(slot&&slot!==last&&Date.now()>=retryAt){try{if(await collect())last=slot;else retryAt=Date.now()+30*60000;}catch{retryAt=Date.now()+30*60000;console.error('[ETF] 수집 실패 · 30분 후 재시도');}}await delay(30000);}
+    let last=complete?(rankingCollectionSlot(new Date(),parseAdditionalHolidays(process.env.MARKET_HOLIDAYS))??''):'',retryAt=complete?0:Date.now()+30*60000;
+    for(;;){const slot=rankingCollectionSlot(new Date(),parseAdditionalHolidays(process.env.MARKET_HOLIDAYS));if(((slot&&slot!==last)||(!complete&&Date.now()>=retryAt))&&Date.now()>=retryAt){try{if(await collect()){complete=true;last=slot??'';retryAt=0;}else{complete=false;retryAt=Date.now()+30*60000;}}catch{retryAt=Date.now()+30*60000;console.error('[ETF] 수집 실패 · 30분 후 재시도');}}await delay(30000);}
   }finally{await unlink(lock).catch(()=>{});}
 }
 main().catch(e=>{console.error(e.message);process.exitCode=1;});

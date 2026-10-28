@@ -19,3 +19,5 @@ Runtime folder `.runtime/etf-ranking/` contains the PID lock, checkpoint and wat
 This worker is separate from the stock-ranking and futures workers. Restart it after a PC reboot using the command above; Vercel deployment does not start a PC worker. Date dropdown shows up to 120 saved dates. Provider revisions and missing observations can differ from other report vendors.
 
 Validation: `node --import tsx --test tests/etf-ranking.test.ts`, production build, authenticated browser checks and real downloaded PNG inspection.
+
+Recovery update (2026-10-28): Windows task `Baltatool ETF Auto Collector` starts at user login and restarts failures every 5 minutes. Dead-PID locks are recovered; live PID locks are preserved. Initial fetch failures stay in watch mode and retry after 30 minutes. `.runtime/etf-ranking/collector.log` records future runs. The page polls saved snapshots every minute while visible. The collector PC must remain awake and connected; after login, the latest available completed day is collected again.
