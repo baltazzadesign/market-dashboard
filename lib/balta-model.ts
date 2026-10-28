@@ -8,6 +8,7 @@ export type MarketSession = "REGULAR" | "AFTER_HOURS_CLOSE" | "OLD_AFTER_HOURS_S
 export type RawRecord = Record<string, unknown>;
 export type SignalLevel = "강" | "중" | "약";
 export type MarketRow = {
+  marketBreadth?: Record<"kospi"|"kosdaq",{up:number|null;down:number|null;flat:number|null}>;
   marketFlows?: Record<"kospi"|"kosdaq",import("./market-flow-selection").MarketFlowValues>;
   id: number; date: string; time: string; minute: number; session: MarketSession;
   up: number; down: number; flat: number; diff: number; accel: number;
@@ -80,6 +81,7 @@ export function normalizeRow(value: unknown, date: string): MarketRow {
   const minute = timeToMinute(time);
   const marketData = record(r.market_data ?? r.marketData);
   const marketFlows=Object.fromEntries((["kospi","kosdaq"] as const).map(key=>{const snapshot=record(marketData[key]),cached=record(record(r.marketFlows)[key]),source=String(snapshot.flowSource??cached.source??'EMPTY'),flows=record(snapshot.flows??cached),live=source==='LIVE';return [key,{source,foreign:live?numeric(flows.foreign):null,institution:live?numeric(flows.institution):null,individual:live?numeric(flows.individual):null}];})) as NonNullable<MarketRow['marketFlows']>;
+  const marketBreadth=Object.fromEntries((["kospi","kosdaq"] as const).map(key=>{const snapshot=record(marketData[key]??record(r.marketBreadth)[key]);return [key,{up:numeric(snapshot.up),down:numeric(snapshot.down),flat:numeric(snapshot.flat)}];})) as NonNullable<MarketRow['marketBreadth']>;
   const investorFlows = normalizeInvestorFlows(r.investorFlows ?? marketData.investorFlows);
   const state = String(r.marketState ?? r.marketstate ?? "");
   const stateSession = state.match(/SESSION_(REGULAR|AFTER_HOURS_CLOSE|OLD_AFTER_HOURS_SINGLE_PRICE|KRX_AFTER_MARKET|CLOSED)/i)?.[1]?.toUpperCase();
@@ -107,7 +109,7 @@ export function normalizeRow(value: unknown, date: string): MarketRow {
     id: n("id") ?? 0, date, time, minute, session, up, down, flat, diff, accel: n("accel") ?? 0,
     upRatio, downRatio, kospi: (n("kospi") ?? 0) > 0 ? n("kospi") : null, kosdaq: (n("kosdaq") ?? 0) > 0 ? n("kosdaq") : null,
     priceSources: { kospi: String(record(marketData.kospi).priceSource ?? record(r.priceSources).kospi ?? 'UNKNOWN'), kosdaq: String(record(marketData.kosdaq).priceSource ?? record(r.priceSources).kosdaq ?? 'UNKNOWN') },
-    marketFlows, foreignFlow, instFlow, indivFlow, flowPower, flowTrend: flow(r.flowTrend ?? r.flowtrend), flowMomentum: flow(r.flowMomentum ?? r.flowmomentum),
+    marketBreadth, marketFlows, foreignFlow, instFlow, indivFlow, flowPower, flowTrend: flow(r.flowTrend ?? r.flowtrend), flowMomentum: flow(r.flowMomentum ?? r.flowmomentum),
     flowSource, breadthSource, marketState: state, marketTone: String(r.marketTone ?? r.markettone ?? ""),
     marketScore: Math.max(-100, Math.min(100, numeric(r.marketScore ?? r.marketscore) ?? calcScore(diff, upRatio, downRatio))),
     signals: Array.isArray(r.signals) ? r.signals.map(record) : [], alert: String(r.alert ?? ""),
@@ -223,7 +225,7 @@ export function eventLevel(value: unknown): SignalLevel {
   return "중";
 }
 export function csvCell(value: unknown) {
-  if (value == null) return "";
+  if (value == null || typeof value === "number" && !Number.isFinite(value)) return "";
   let text = String(value);
   if (typeof value === "string" && /^[\s]*[=+\-@]/.test(text)) text = "'" + text;
   return '"' + text.replace(/"/g, '""') + '"';

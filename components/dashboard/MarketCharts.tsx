@@ -8,7 +8,7 @@ import { chartColors as colors, chartNames, MIN_WINDOW, seriesMap, chartSeriesVa
 export type { ChartKind, Domain } from "./chart-model";
 export { chartNames, fitDomain } from "./chart-model";
 import {FlowMarketPicker,useFlowMarket} from './FlowMarketContext';
-import {selectMarketFlow,flowMarketNames} from '@/lib/market-flow-selection';
+import {selectMarketRows,flowMarketNames} from '@/lib/market-flow-selection';
 import type {InvestorMarket} from '@/lib/investor-flow';
 import styles from "./MarketCharts.module.css";
 
@@ -45,7 +45,7 @@ type ChartProps = {
 };
 function MarketChart({ rows:sourceRows, flowMarketOverride, flowOverlay, kind, domain, onDomainChange, selectedMinute, events = [], showMarkers = true, compact = false, autoScale = true, syncGroup = "balta-main", hoverMinute = null, onHoverMinute, onExpand, onReset, onLatest, dataCaption = "", refreshing = false, hideMeta = false, plotHeight }: ChartProps) {
   const sharedMarket=useFlowMarket().market,market=flowMarketOverride??sharedMarket;
-  const rows=useMemo(()=>kind==='flow'?sourceRows.map(row=>selectMarketFlow(row,market)):sourceRows,[sourceRows,kind,market]);
+  const rows=useMemo(()=>['flow','breadth','ratio','score','accel'].includes(kind)?selectMarketRows(sourceRows,market):sourceRows,[sourceRows,kind,market]);
   const [overlay,setOverlay]=useState(true),[combinedIndex,setCombinedIndex]=useState<'kospi'|'kosdaq'>('kospi');
   const withIndex=kind==='flow'&&(flowOverlay??overlay),flowIndex=market==='combined'?combinedIndex:market;
   const id = useId().replace(/:/g, "");
@@ -115,7 +115,7 @@ function MarketChart({ rows:sourceRows, flowMarketOverride, flowOverlay, kind, d
   }, [kind, autoScale, rows, domain, visible]);
   const ticks = chartTicks(domain, Math.max(120, plotWidth - leftInset - rightInset));
   const markerPoints = useMemo(() => {
-    if (!showMarkers || !visible.length || kind === "ratio" || kind === "flow" && market!=="combined") return [];
+    if (!showMarkers || !visible.length || kind === "ratio" || market!=="combined") return [];
     const turningType = /^(PIVOT_|BREADTH_REVERSAL_|FLOW_REVERSAL_|INDEX_FLOW_DIVERGENCE_|INTRADAY_(HIGH|LOW)_TURN)/;
     const gap = Math.max(3, Math.ceil(width / (compact ? 9 : 16)));
     const selected: { event: MarketEvent; y: number; series: Series }[] = [];
@@ -140,6 +140,7 @@ function MarketChart({ rows:sourceRows, flowMarketOverride, flowOverlay, kind, d
   const currentVisible = latest && latest.minute >= domain[0] && latest.minute <= domain[1];
   return <div className={styles.chart + " terminal-chart" + (compact ? " is-compact" : "")} data-chart-kind={kind} data-inspecting={isInspecting || undefined}>
     <div className="chart-readout">
+      {["breadth","ratio","score","accel"].includes(kind)&&<div className={styles.flowTools}><FlowMarketPicker label="차트 시장 선택"/><span>{flowMarketNames[market]} 상승·하락 종목 기준 · 미수집 구간은 표시하지 않습니다.</span></div>}
       {kind==='flow'&&<div className={styles.flowTools}>{flowMarketOverride===undefined&&<FlowMarketPicker label="차트 수급 시장"/>}<button className="button small" aria-pressed={withIndex} onClick={()=>setOverlay(v=>!v)}>지수 겹쳐보기 {withIndex?'켜짐':'꺼짐'}</button>{withIndex&&market==='combined'&&<select className="filter-select" aria-label="겹쳐 볼 지수" value={combinedIndex} onChange={e=>setCombinedIndex(e.target.value as 'kospi'|'kosdaq')}><option value="kospi">코스피</option><option value="kosdaq">코스닥</option></select>}<span>{flowMarketNames[market]} · 왼쪽 수급(억원){withIndex?' / 오른쪽 '+flowMarketNames[flowIndex]+' 지수(pt)':''}</span></div>}
     <div className={"chart-readout-meta" + (hideMeta ? " " + styles.hiddenMeta : "")}><span className="num">{isInspecting ? "커서 " + minuteLabel(inspectedMinute) : "최신 " + (latest?.time ?? "—")}{isInspecting && !inspectedRow ? " · 기록 없음" : " 기준"}</span><span>{refreshing ? "갱신 중…" : dataCaption}</span></div>
       <div className="chart-values" aria-label={isInspecting ? "커서 시각 수치 및 차트 항목 표시" : "최신 수치 및 차트 항목 표시"}>
