@@ -1,5 +1,5 @@
 // BALTA paper research only. No orders or browser-accessible credentials.
-// Usage: --phase=morning before 09:00 KST; --phase=close after 16:30 KST.
+// Usage: --phase=close --date=YYYY-MM-DD [--dry-run]. Dates are explicit.
 // This worker needs an external scheduler; ChatGPT reminders do not run it.
 import { kstParts } from '../lib/balta-model';
 import { marketClosedReason, parseAdditionalHolidays } from '../lib/market-calendar';
@@ -18,15 +18,21 @@ import { FLOW_LIQUID_V1, evaluateLiquidity, parseMarketCap, parseTurnoverBars, t
 import { simulateExits,type SimulationViewRow } from '../lib/balta-ai-exits';
 import { stopEvents,assessStopFollowup,stopKey,followupHorizons,
   type StopFollowup,type StopEvent } from '../lib/balta-ai-stop-policy';
+import {closePriceStatus,researchBoundary,ResearchBoundaryError,validResearchDate,resolveScheduledResearch,type ResearchPhase} from '../lib/balta-ai-run-context';
+import {ImmutablePaperStore} from '../lib/balta-ai-immutable-store';
+import {reconcilePaperPrices,type ArchivedPaperBar} from '../lib/balta-ai-price-consistency';
 
 type Signal={trade_date:string;strategy:string;source_date:string;generated_at:string;picks:ResearchPick[]};
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
 const secret=process.env.SUPABASE_SERVICE_ROLE_KEY;
-if(!base||!secret)throw Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required');
 const holidays=parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
 const scoredStrategies=[...researchStrategies,FLOW_PERSIST_V1,FLOW_LIQUID_V1] as const;
+let paperStore:ImmutablePaperStore;
+let runContext:Record<string,unknown>={};
+let stage='initialization';
 
 async function db<T>(resource:string,options:RequestInit={}):Promise<T>{
+  if(paperStore?.dryRun && (options.method??'GET')!=='GET')throw new ResearchBoundaryError('DRY_RUN_WRITE_BLOCKED');
   return retryResearch(async()=>{
     let response:Response;
     try{
@@ -49,12 +55,21 @@ async function db<T>(resource:string,options:RequestInit={}):Promise<T>{
   },{attempts:3,delayMs:1500});
 }
 async function insertImmutable(table:string,row:unknown,conflict:string){
-  await db(table+'?on_conflict='+conflict,{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},body:JSON.stringify(row)});
+  stage='persist:'+table;
+  await paperStore.insert(table,row,conflict);
 }
 async function runLog(date:string,phase:string,result:string,details:unknown){
+  const safeDetails={...(details as Record<string,unknown>),context:runContext,stage,
+    storage:{planned:paperStore.planned,verified:paperStore.verified,
+      plannedKeys:paperStore.dryRun?paperStore.plannedKeys:undefined}};
+  if(paperStore.dryRun){console.log('[balta-ai] Dry run; no DB writes',JSON.stringify({date,phase,result:'dry_run',evaluation:result,details:safeDetails}));return;}
+  // This legacy table has one row per date/phase. Preserve an earlier success
+  // when a later attempt fails; attempt diagnostics still go to Actions logs.
+  const previous=await db<{result:string}[]>('balta_ai_run_log?select=result&trade_date=eq.'+date+'&phase=eq.'+phase);
+  if(previous.some(r=>r.result==='complete')&&result!=='complete')return;
   await db('balta_ai_run_log?on_conflict=trade_date,phase',{method:'POST',
     headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
-    body:JSON.stringify({trade_date:date,phase,result,details,executed_at:new Date().toISOString()})});
+    body:JSON.stringify({trade_date:date,phase,result,details:safeDetails,executed_at:new Date().toISOString()})});
 }
 async function loadOutcomeRows(from:string,onlyHorizon?:number):Promise<OutcomeForScorecard[]>{
   const all:OutcomeForScorecard[]=[];
@@ -456,14 +471,15 @@ async function saveMarketBenchmarks(signals:Signal[],calendar:string[],date:stri
 // The portfolio study archives only OHLC obtained from the existing paper KIS
 // after-close path. Sessions are confirmed from the daily KOSPI index, not inferred
 // from stock-price availability (which can include halts or missing observations).
-async function savedPortfolioBarKeys(from:string):Promise<Set<string>>{
- const saved=new Set<string>();
+type ArchivedBar=ArchivedPaperBar;
+async function savedPortfolioBars(from:string):Promise<Map<string,ArchivedBar>>{
+ const saved=new Map<string,ArchivedBar>();
  for(let offset=0;offset<=19500;offset+=500){
-  const q=new URLSearchParams({select:'trade_date,stock_code',trade_date:'gte.'+from,
+  const q=new URLSearchParams({select:'trade_date,stock_code,open,high,low,close',trade_date:'gte.'+from,
     order:'trade_date.asc,stock_code.asc',limit:'500',offset:String(offset)});
-  const page=await db<{trade_date:string;stock_code:string}[]>('balta_ai_portfolio_bars?'+q.toString());
+  const page=await db<ArchivedBar[]>('balta_ai_portfolio_bars?'+q.toString());
   if(!Array.isArray(page))throw Error('Invalid portfolio price-ledger response');
-  for(const p of page)saved.add(p.trade_date+':'+p.stock_code);
+  for(const p of page)saved.set(p.trade_date+':'+p.stock_code,p);
   if(page.length<500)return saved;
  }
  throw Error('Portfolio daily marks exceed bounded query window');
@@ -484,7 +500,8 @@ async function archivePortfolioBars(
  return rows.length;
 }
 
-async function close(date:string){
+async function close(date:string,now:Date){
+  stage='load_signals';
   const prior=earliestDate(25,date);
   const signals=await db<Signal[]>('balta_ai_signals?select=trade_date,strategy,source_date,generated_at,picks&trade_date=gte.'+prior+'&trade_date=lte.'+date+'&order=trade_date.desc&limit=160');
   // First activation may occur after the morning selection window has passed.
@@ -494,21 +511,25 @@ async function close(date:string){
     console.log('[balta-ai] No earlier paper-trade signals; closing evaluation skipped');
     return;
   }
+  stage='confirm_exchange_sessions';
   const calendar=await tradingCalendar(date);
   await archivePortfolioSessions(calendar);
-  const archivedBars=await savedPortfolioBarKeys(prior);
+  const storedBars=await savedPortfolioBars(prior);
+  const archivedBars=new Set(storedBars.keys());
   const newPortfolioBars=new Map<string,{trade_date:string;stock_code:string;open:number;high:number;low:number;close:number}>();
-  let missingPortfolioMarks=0;
+  let missingPortfolioMarks=0,priceBarsArchived=0,priceRevisionConflicts=0;
+  const priceConflictDetails:{code:string;signalDate:string;dates:string[]}[]=[];
   const completed=await savedOutcomeKeys(prior);
   const completedSims=await savedSimulationKeys(prior);
   const completedFollowups=await savedStopFollowupKeys(prior);
   const pastSimulationRows=await existingSimulationRows(prior);
   let attempted=0,pending=0,unavailable=0,sourceErrors=0,alreadyRecorded=0;
+  const sourceFailures:{code:string;signalDate:string;reason:string}[]=[];
   const newlyWrittenOutcomeKeys=new Set<string>();
   let simulationsRecorded=0,simulationUnavailable=0,stopFollowupsRecorded=0,followupUnavailable=0;
   const cache=new Map<string,Promise<StockBar[]>>();
   for(const signal of signals){
-    if(Date.parse(signal.generated_at)>=Date.parse(signal.trade_date+'T09:00:00+09:00')){
+    if(!Number.isFinite(Date.parse(signal.generated_at))||Date.parse(signal.generated_at)>=Date.parse(signal.trade_date+'T09:00:00+09:00')){
       console.warn('[balta-ai] Late signal excluded from simulated entry',signal.trade_date,signal.strategy);unavailable+=signal.picks.length*4;continue;
     }
     for(const pick of signal.picks){
@@ -529,9 +550,22 @@ async function close(date:string){
         continue;
       }
       const cacheKey=pick.code+':'+signal.trade_date;
+      stage='fetch_stock_prices';
       if(!cache.has(cacheKey))cache.set(cacheKey,getBars(pick.code,signal.trade_date,date));
       let bars:StockBar[];
-      try{bars=await cache.get(cacheKey)!;}catch{sourceErrors++;cache.delete(cacheKey);continue;}
+      try{bars=await cache.get(cacheKey)!;}catch(error){
+        sourceErrors++;sourceFailures.push({code:pick.code,signalDate:signal.trade_date,reason:failureReason(error)});
+        cache.delete(cacheKey);continue;
+      }
+      // Frozen prices are canonical. Never calculate new outcomes from a later
+      // vendor revision of an already archived date, or overwrite that snapshot.
+      const reconciled=reconcilePaperPrices(pick.code,signal.trade_date,date,bars,storedBars.values());
+      if(reconciled.conflicts.length){
+        priceRevisionConflicts++;
+        priceConflictDetails.push({code:pick.code,signalDate:signal.trade_date,dates:reconciled.conflicts});
+        continue; // Manual review/versioned price data is required; never mix bases.
+      }
+      bars=reconciled.bars;
       for(const b of bars){
        if(b.date<signal.trade_date||b.date>date||!calendar.includes(b.date))continue;
        const k=b.date+':'+pick.code;
@@ -539,6 +573,8 @@ async function close(date:string){
         newPortfolioBars.set(k,{trade_date:b.date,stock_code:pick.code,
           open:b.open,high:b.high,low:b.low,close:b.close});
       }
+      priceBarsArchived+=await archivePortfolioBars(newPortfolioBars,archivedBars);
+      for(const [key,row] of newPortfolioBars)storedBars.set(key,row);
       if(needsPortfolioMark&&!bars.some(b=>b.date===date))missingPortfolioMarks++;
       const marks=due.length?markResearchOutcomes(signal.trade_date,calendar,bars,date):[];
       const simMarks=due.length?simulateExits(signal.trade_date,calendar,bars,date):[];
@@ -585,13 +621,12 @@ async function close(date:string){
       }
     }
   }
-  const priceBarsArchived=await archivePortfolioBars(newPortfolioBars,archivedBars);
   // Benchmarks are independently archived and compared only on exact stock entry/exit dates.
   // One failed KOSPI/KOSDAQ source never becomes a fabricated 0% index return.
   const benchmark=await saveMarketBenchmarks(signals,calendar,date);
   // Confirm outcomes with a DB read, not merely an insert-if-absent HTTP response.
   const confirmedOutcomes=await savedOutcomeKeys(prior);
-  const missingOutcomeKeys=[...newlyWrittenOutcomeKeys].filter(k=>!confirmedOutcomes.has(k));
+  const missingOutcomeKeys=paperStore.dryRun?[]:[...newlyWrittenOutcomeKeys].filter(k=>!confirmedOutcomes.has(k));
   const summary=await loadOutcomeRows(prior);
   const priorResults=await loadOutcomeRows(earliestDate(120,date),1);
   const preference=comparePairedDailyReturns(priorResults);
@@ -604,46 +639,75 @@ async function close(date:string){
     return {horizon,count:r.length,mean_pct:avg,win_rate_pct:r.length?100*r.filter(x=>Number(x.return_pct)>0).length/r.length:null,
       interpretation:r.length<30?'LOW_SAMPLE_DO_NOT_OPTIMIZE':'DESCRIPTIVE_ONLY'};
   })]));
-  await runLog(date,'close',sourceErrors||unavailable||simulationUnavailable||followupUnavailable||missingPortfolioMarks||benchmark.missing||missingOutcomeKeys.length?'incomplete':'complete',{signals:signals.length,attempted,confirmedOutcomeWrites:attempted-missingOutcomeKeys.length,unconfirmedOutcomeWrites:missingOutcomeKeys.length,priceStatus:kstParts().time<'18:30'?'provisional':'vendor_daily_unofficial',simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
-    preference,persistentPreference,liquidityPreference,cashPreference,caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
-  console.log(JSON.stringify({date,phase:'close',attempted,confirmedOutcomeWrites:attempted-missingOutcomeKeys.length,unconfirmedOutcomeWrites:missingOutcomeKeys.length,priceStatus:kstParts().time<'18:30'?'provisional':'vendor_daily_unofficial',simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference,cashPreference},null,2));
-  if(missingOutcomeKeys.length){
-    console.error('[balta-ai] Some paper outcomes could not be verified in persistent storage');
+  const incomplete=Boolean(sourceErrors||unavailable||simulationUnavailable||followupUnavailable||missingPortfolioMarks||benchmark.missing||missingOutcomeKeys.length||priceRevisionConflicts);
+  stage='completion';
+  await runLog(date,'close',incomplete?'incomplete':'complete',{signals:signals.length,attempted,confirmedOutcomeWrites:paperStore.dryRun?0:attempted-missingOutcomeKeys.length,unconfirmedOutcomeWrites:missingOutcomeKeys.length,priceStatus:closePriceStatus(date,now),simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
+    preference,persistentPreference,liquidityPreference,cashPreference,sourceFailures,priceRevisionConflicts,priceConflictDetails,caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
+  console.log(JSON.stringify({date,phase:'close',dryRun:paperStore.dryRun,attempted,confirmedOutcomeWrites:paperStore.dryRun?0:attempted-missingOutcomeKeys.length,unconfirmedOutcomeWrites:missingOutcomeKeys.length,priceStatus:closePriceStatus(date,now),simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference,cashPreference},null,2));
+  if(incomplete){
+    console.error('[balta-ai] Evaluation incomplete',JSON.stringify({sourceFailures,priceRevisionConflicts,priceConflictDetails,unavailable,simulationUnavailable,followupUnavailable,missingPortfolioMarks,missingOutcomeKeys,benchmark}));
     process.exitCode=1;
   }
 }
-async function main(){
-  const now=kstParts(),phase=process.argv.find(a=>a.startsWith('--phase='))?.slice(8);
-  if(phase!=='morning'&&phase!=='close')throw Error('Use --phase=morning or --phase=close');
-  const closed=marketClosedReason(now.date,holidays);
-  if(closed){console.log('[balta-ai] KRX closed; skipped');return;}
-  if(phase==='morning'&&now.time>='09:00'){
+export async function main(args=process.argv.slice(2),now=new Date()){
+  const phase=args.find(a=>a.startsWith('--phase='))?.slice(8);
+  const date=args.find(a=>a.startsWith('--date='))?.slice(7)??'';
+  const dryRun=args.includes('--dry-run');
+  paperStore=new ImmutablePaperStore(db,dryRun);
+  stage='validate_context';
+  runContext={tradeDate:date,phase,startedAt:now.toISOString(),dryRun,
+    scheduledAt:process.env.BALTA_AI_SCHEDULED_AT??null,runCreatedAt:process.env.BALTA_AI_RUN_CREATED_AT??null,
+    runId:process.env.GITHUB_RUN_ID??null,runAttempt:process.env.GITHUB_RUN_ATTEMPT??null,
+    sha:process.env.GITHUB_SHA??null};
+  // KIS can refresh its shared token as a side effect. A planning run must also
+  // block that hidden DB write, not only the research inserts.
+  if(dryRun)process.env.KIS_TOKEN_READ_ONLY='true';
+  try{
+  if(phase!=='morning'&&phase!=='close')throw new ResearchBoundaryError('INVALID_PHASE');
+  if(!validResearchDate(date))throw new ResearchBoundaryError('EXPLICIT_TRADE_DATE_REQUIRED');
+  if(args.some(a=>!/^--(?:phase|date)=/.test(a)&&a!=='--dry-run')||args.filter(a=>a.startsWith('--date=')).length!==1||args.filter(a=>a.startsWith('--phase=')).length!==1)
+    throw new ResearchBoundaryError('INVALID_WORKER_ARGUMENTS');
+  if(!base||!secret)throw new ResearchBoundaryError('STORAGE_CREDENTIALS_MISSING');
+  if(process.env.GITHUB_EVENT_NAME==='schedule'){
+    const resolved=resolveScheduledResearch(process.env.SCHEDULE_EXPR??'',process.env.BALTA_AI_RUN_CREATED_AT??'');
+    if(resolved.tradeDate!==date||resolved.phase!==phase||resolved.scheduledAt!==process.env.BALTA_AI_SCHEDULED_AT)
+      throw new ResearchBoundaryError('SCHEDULE_TARGET_MISMATCH');
+  }
+  const boundary=researchBoundary(phase,date,now,holidays,(process.env.MARKET_CALENDAR_VERIFIED_YEARS??'2026').split(','));
+  console.log('[balta-ai] Execution context',JSON.stringify(runContext));
+  if(boundary.closed){await runLog(date,phase,'skipped',{reason:'KRX_CLOSED',closed:boundary.closed});return;}
+  if(boundary.verifyMorningOnly){
     // A delayed GitHub Actions backup is not permitted to create a retrospective
     // pre-open pick. The independent Supabase pg_cron may have already saved
     // both frozen baseline rows: verify those committed records before failing.
     const records=await db<FrozenSignalRow[]>(
-      'balta_ai_signals?select=trade_date,strategy,source_date,source_observed_at,generated_at,picks&trade_date=eq.'+now.date);
-    const verification=auditFrozenSignals(records,now.date,researchStrategies);
+      'balta_ai_signals?select=trade_date,strategy,source_date,source_observed_at,generated_at,picks&trade_date=eq.'+date);
+    const verification=auditFrozenSignals(records,date,researchStrategies);
     if(verification.ok){
       console.log('[balta-ai] Scheduled GitHub morning backup was late; Supabase primary already persisted both FLOW baselines',
-        now.date,verification.stored_per_strategy);
+        date,verification.stored_per_strategy);
       return;
     }
-    throw Error('Morning signal cutoff is 09:00 KST; no verified ex-ante record to recover');
+    throw new ResearchBoundaryError('MORNING_CUTOFF_WITHOUT_FROZEN_SIGNALS');
   }
-  if(phase==='close'&&now.time<'16:30')throw Error('Closing evaluation begins at 16:30 KST');
-  try{
-    if(phase==='morning')await morning(now.date);else await close(now.date);
+    // No success marker is written until the complete phase and readbacks finish.
+    await runLog(date,phase,'incomplete',{reason:'EXECUTION_STARTED'});
+    if(phase==='morning')await morning(date);else await close(date,now);
   }catch(error){
-    const reason=failureReason(error);
+    const reason=error instanceof ResearchBoundaryError?error.code:failureReason(error);
+    // Keep code locations, never the arbitrary exception message/response body.
+    const locations=error instanceof Error?(error.stack??'').split('\n').slice(1)
+      .flatMap(line=>{const match=line.match(/(?:scripts|lib)[\\/]([A-Za-z0-9_.-]+\.(?:ts|js):\d+:\d+)/);return match?[match[1]]:[];}).slice(0,5):[];
     // Record only method + table + HTTP status. Never log Supabase body, URL or credentials.
     const operation=error instanceof Error &&
       /^BALTA storage (GET|POST|PUT|PATCH|DELETE) [a-z_]+ HTTP [0-9]{3}$/.test(error.message)
       ?error.message:null;
-    try{await runLog(now.date,phase,'incomplete',{reason,recoverable:reason!=='unknown',operation});}
+    console.error('[balta-ai] Phase failed',JSON.stringify({phase,date,reason,operation,stage,locations,context:runContext}));
+    try{if(validResearchDate(date)&&(phase==='morning'||phase==='close')&&base&&secret)
+      await runLog(date,phase as ResearchPhase,'incomplete',{reason,recoverable:error instanceof RetryableResearchError,operation,locations});}
     catch{console.error('[balta-ai] Run failure could not be saved to database');}
-    console.error('[balta-ai] Phase failed',phase,reason,operation??'');
     process.exitCode=1;
   }
 }
-main().catch(()=>{console.error('[balta-ai] Unexpected worker failure');process.exitCode=1;});
+if(process.argv[1]?.replaceAll('\\','/').endsWith('/balta-ai-research.ts'))
+  main().catch(()=>{console.error('[balta-ai] Unhandled initialization failure',JSON.stringify({stage,context:runContext}));process.exitCode=1;});

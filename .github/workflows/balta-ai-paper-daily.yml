@@ -16,14 +16,24 @@ on:
         required: true
         type: choice
         options: [morning, close]
+      trade_date:
+        description: "Explicit KST target date (YYYY-MM-DD); never inferred for manual runs"
+        required: true
+        type: string
+      dry_run:
+        description: "Read-only recovery plan; uncheck only after approving DB writes"
+        required: true
+        type: boolean
+        default: true
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: balta-ai-paper-research
   cancel-in-progress: false
 jobs:
   paper:
-    if: github.repository == 'baltazzadesign/market-dashboard'
+    if: github.repository == 'baltazzadesign/market-dashboard' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 18
     env:
@@ -35,6 +45,7 @@ jobs:
       # Only the independent FLOW_CASH_V1 needs this; missing key leaves four original strategies live.
       DART_API_KEY: ${{ secrets.DART_API_KEY }}
       MARKET_HOLIDAYS: ${{ vars.MARKET_HOLIDAYS }}
+      MARKET_CALENDAR_VERIFIED_YEARS: ${{ vars.MARKET_CALENDAR_VERIFIED_YEARS || '2026' }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify configured secrets
@@ -55,20 +66,27 @@ jobs:
           cache: npm
       - run: npm ci
         if: steps.guard.outputs.ready == 'true'
-      - name: Run read-only KIS / write-only paper research worker
+      - name: Resolve immutable research target from original run metadata
+        id: target
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_PHASE: ${{ inputs.phase }}
+          MANUAL_DATE: ${{ inputs.trade_date }}
+          MANUAL_DRY_RUN: ${{ inputs.dry_run }}
+          SCHEDULE_EXPR: ${{ github.event.schedule }}
+        run: node --import tsx scripts/balta-ai-resolve-run.ts
+      - name: Run dated paper research worker
         if: steps.guard.outputs.ready == 'true'
         shell: bash
         env:
-          MANUAL_PHASE: ${{ inputs.phase }}
+          TARGET_PHASE: ${{ steps.target.outputs.phase }}
+          TARGET_DATE: ${{ steps.target.outputs.trade_date }}
+          DRY_RUN: ${{ steps.target.outputs.dry_run }}
+          BALTA_AI_SCHEDULED_AT: ${{ steps.target.outputs.scheduled_at }}
+          BALTA_AI_RUN_CREATED_AT: ${{ steps.target.outputs.run_created_at }}
           SCHEDULE_EXPR: ${{ github.event.schedule }}
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            phase="${MANUAL_PHASE}"
-          elif [ "${SCHEDULE_EXPR}" = "37 22 * * 0-4" ] || [ "${SCHEDULE_EXPR}" = "27 23 * * 0-4" ]; then
-            phase=morning
-          elif [ "${SCHEDULE_EXPR}" = "17 8 * * 1-5" ] || [ "${SCHEDULE_EXPR}" = "47 9 * * 1-5" ]; then
-            phase=close
-          else
-            echo "::error::Unknown schedule"; exit 1
-          fi
-          node --import tsx scripts/balta-ai-research.ts "--phase=${phase}"
+          args=("--phase=${TARGET_PHASE}" "--date=${TARGET_DATE}")
+          if [ "${DRY_RUN}" = "true" ]; then args+=(--dry-run); fi
+          node --import tsx scripts/balta-ai-research.ts "${args[@]}"

@@ -24,6 +24,7 @@ async function storedToken(): Promise<string> {
     const row = record(Array.isArray(rows) ? rows[0] : null);
     const expires = Date.parse(String(row.expires_at ?? ''));
     if (typeof row.access_token !== 'string' || !row.access_token || !Number.isFinite(expires) || expires <= Date.now() + 60_000) {
+      if (process.env.KIS_TOKEN_READ_ONLY === 'true') throw new Error('KIS read-only token expired; refresh outside the planning run');
       if (Date.now() < tokenRetryAfter) throw new Error('시장 조회 인증 갱신 중입니다. 1분 후 다시 조회해 주세요.');
       tokenRetryAfter = Date.now() + 70_000;
       const issued = await fetch((process.env.KIS_BASE || 'https://openapi.koreainvestment.com:9443') + '/oauth2/tokenP', {
