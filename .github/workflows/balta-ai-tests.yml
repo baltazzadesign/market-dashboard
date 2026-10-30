@@ -73,6 +73,11 @@ on:
       - "supabase/migrations/20261015_balta_ai_supabase_cron_jobs.sql"
       - ".github/workflows/balta-ai-tests.yml"
   workflow_dispatch:
+    inputs:
+      audit_only:
+        description: "Only read source comparisons; uncheck to also plan dated recovery"
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
@@ -115,6 +120,7 @@ jobs:
       - name: Read-only incident price comparison
         run: node --import tsx scripts/balta-ai-price-audit.ts
       - name: Read-only dated recovery plans
+        if: inputs.audit_only != true
         shell: bash
         run: |
           result=0

@@ -16,7 +16,7 @@ async function main(){
   const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
   const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
   if(!base||!key||!process.env.KIS_APPKEY||!process.env.KIS_APPSECRET)throw Error('REQUIRED_ENV_MISSING');
-  for(const code of ['005930','078930','290650']){
+  for(const code of ['005930','078930','290650','035420','015760','011200']){
     const res=await fetch(base+'/rest/v1/balta_ai_portfolio_bars?select=trade_date,open,high,low,close,observed_at&stock_code=eq.'+code+'&trade_date=gte.2026-10-19&trade_date=lte.2026-10-29&order=trade_date.asc',{
       headers:{apikey:key,authorization:'Bearer '+key},signal:AbortSignal.timeout(15000)});
     if(!res.ok)throw Error('ARCHIVE_HTTP_'+res.status);
