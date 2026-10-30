@@ -17,6 +17,7 @@ tables.balta_ai_signals=['FLOW_V1','FLOW_ACCEL_V1'].map(strategy=>({
 }));
 if(['canonical','revised'].includes(scenario))tables.balta_ai_portfolio_bars=[{trade_date:'2026-10-27',stock_code:'005930',open:100,high:100,low:100,close:100}];
 if(scenario==='close-revised')tables.balta_ai_portfolio_bars=[{trade_date:'2026-10-27',stock_code:'005930',open:100,high:130,low:80,close:100}];
+if(scenario==='future-summary')tables.balta_ai_outcomes=[{trade_date:'2026-10-28',strategy:'FLOW_V1',stock_code:'005930',horizon:1,entry_date:'2026-10-28',exit_date:'2026-10-29',entry_open:120,exit_close:240,return_pct:100,source:'KIS_DAILY_ADJUSTED'}];
 const frozenSignals=JSON.stringify(tables.balta_ai_signals),posts:string[]=[];
 const response=(v:unknown)=>new Response(JSON.stringify(v),{status:200});
 globalThis.fetch=async(input,options={})=>{
@@ -97,6 +98,10 @@ async function run(){
     assert.equal(tables.balta_ai_run_log[0].result,'complete');
     assert.equal(tables.balta_ai_run_log[0].details.priceStatus,'vendor_daily_unofficial');
     assert.ok(outcomes.length>0);
+    if(scenario==='future-summary'){
+      assert.equal(tables.balta_ai_run_log[0].details.comparison.FLOW_V1.find((r:Row)=>r.horizon===1).count,0);
+      assert.equal(outcomes.find(r=>r.horizon===1)!.exit_close,240);
+    }
     if(['canonical','close-revised'].includes(scenario)){
       assert.ok(outcomes.every(r=>r.entry_open===100));
       assert.equal(outcomes.find(r=>r.horizon===1)!.return_pct,20);

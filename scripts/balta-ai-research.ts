@@ -71,7 +71,7 @@ async function runLog(date:string,phase:string,result:string,details:unknown){
     headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
     body:JSON.stringify({trade_date:date,phase,result,details:safeDetails,executed_at:new Date().toISOString()})});
 }
-async function loadOutcomeRows(from:string,onlyHorizon?:number):Promise<OutcomeForScorecard[]>{
+async function loadOutcomeRows(from:string,onlyHorizon?:number,through?:string):Promise<OutcomeForScorecard[]>{
   const all:OutcomeForScorecard[]=[];
   for(let offset=0;offset<=9500;offset+=500){
     const params=new URLSearchParams({
@@ -80,6 +80,7 @@ async function loadOutcomeRows(from:string,onlyHorizon?:number):Promise<OutcomeF
     });
     params.set('trade_date','gte.'+from);
     if(onlyHorizon!==undefined)params.set('horizon','eq.'+onlyHorizon);
+    if(through!==undefined)params.set('exit_date','lte.'+through);
     const page=await db<OutcomeForScorecard[]>('balta_ai_outcomes?'+params.toString());
     if(!Array.isArray(page))throw Error('Research outcome query returned an unexpected response');
     all.push(...page);
@@ -629,8 +630,8 @@ async function close(date:string,now:Date){
   // Confirm outcomes with a DB read, not merely an insert-if-absent HTTP response.
   const confirmedOutcomes=await savedOutcomeKeys(prior);
   const missingOutcomeKeys=paperStore.dryRun?[]:[...newlyWrittenOutcomeKeys].filter(k=>!confirmedOutcomes.has(k));
-  const summary=await loadOutcomeRows(prior);
-  const priorResults=await loadOutcomeRows(earliestDate(120,date),1);
+  const summary=await loadOutcomeRows(prior,undefined,date);
+  const priorResults=await loadOutcomeRows(earliestDate(120,date),1,date);
   const preference=comparePairedDailyReturns(priorResults);
   const persistentPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_PERSIST_V1);
   const liquidityPreference=comparePairedDailyReturns(priorResults,30,10,FLOW_LIQUID_V1);
