@@ -20,7 +20,7 @@ import { stopEvents,assessStopFollowup,stopKey,followupHorizons,
   type StopFollowup,type StopEvent } from '../lib/balta-ai-stop-policy';
 import {closePriceStatus,researchBoundary,ResearchBoundaryError,validResearchDate,resolveScheduledResearch,type ResearchPhase} from '../lib/balta-ai-run-context';
 import {ImmutablePaperStore} from '../lib/balta-ai-immutable-store';
-import {reconcilePaperPrices,type ArchivedPaperBar} from '../lib/balta-ai-price-consistency';
+import {reconcilePaperPrices,type ArchivedPaperBar,type PaperPriceRevision} from '../lib/balta-ai-price-consistency';
 
 type Signal={trade_date:string;strategy:string;source_date:string;generated_at:string;picks:ResearchPick[]};
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'').replace(/\/rest\/v1$/,'');
@@ -519,7 +519,7 @@ async function close(date:string,now:Date){
   const newPortfolioBars=new Map<string,{trade_date:string;stock_code:string;open:number;high:number;low:number;close:number}>();
   let missingPortfolioMarks=0,priceBarsArchived=0,priceRevisionConflicts=0;
   const priceConflictDetails:{code:string;signalDate:string;dates:string[]}[]=[];
-  const closeRevisionDetails=new Map<string,{code:string;date:string;storedClose:number;vendorClose:number}>();
+  const priceRevisionDetails=new Map<string,PaperPriceRevision&{code:string}>();
   const completed=await savedOutcomeKeys(prior);
   const completedSims=await savedSimulationKeys(prior);
   const completedFollowups=await savedStopFollowupKeys(prior);
@@ -561,7 +561,7 @@ async function close(date:string,now:Date){
       // Frozen prices are canonical. Never calculate new outcomes from a later
       // vendor revision of an already archived date, or overwrite that snapshot.
       const reconciled=reconcilePaperPrices(pick.code,signal.trade_date,date,bars,storedBars.values());
-      for(const revision of reconciled.closeRevisions)closeRevisionDetails.set(pick.code+':'+revision.date,{code:pick.code,...revision});
+      for(const revision of reconciled.priceRevisions)priceRevisionDetails.set(pick.code+':'+revision.date,{code:pick.code,...revision});
       if(reconciled.conflicts.length){
         priceRevisionConflicts++;
         priceConflictDetails.push({code:pick.code,signalDate:signal.trade_date,dates:reconciled.conflicts});
@@ -645,7 +645,7 @@ async function close(date:string,now:Date){
   stage='completion';
   await runLog(date,'close',incomplete?'incomplete':'complete',{signals:signals.length,attempted,confirmedOutcomeWrites:paperStore.dryRun?0:attempted-missingOutcomeKeys.length,unconfirmedOutcomeWrites:missingOutcomeKeys.length,priceStatus:closePriceStatus(date,now),simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,
     preference,persistentPreference,liquidityPreference,cashPreference,sourceFailures,priceRevisionConflicts,priceConflictDetails,
-    sourceCloseRevisions:closeRevisionDetails.size,closeRevisionDetails:[...closeRevisionDetails.values()],
+    sourcePriceRevisions:priceRevisionDetails.size,priceRevisionDetails:[...priceRevisionDetails.values()],
     caution:'OHLC simulated stops/takes are not executable fills. No official commissions, tax or slippage charged in stored gross results; only hypothetical net estimates on dashboard.'});
   console.log(JSON.stringify({date,phase:'close',dryRun:paperStore.dryRun,attempted,confirmedOutcomeWrites:paperStore.dryRun?0:attempted-missingOutcomeKeys.length,unconfirmedOutcomeWrites:missingOutcomeKeys.length,priceStatus:closePriceStatus(date,now),simulationsRecorded,simulationUnavailable,stopFollowupsRecorded,followupUnavailable,priceBarsArchived,missingPortfolioMarks,alreadyRecorded,pending,unavailable,sourceErrors,benchmark,comparison,preference,persistentPreference,liquidityPreference,cashPreference},null,2));
   if(incomplete){

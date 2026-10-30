@@ -63,7 +63,7 @@ globalThis.fetch=async(input,options={})=>{
   assert.ok(url.pathname.endsWith('/inquire-daily-itemchartprice'),'unexpected market endpoint');
   return response({rt_cd:'0',output2:scenario==='missing-price'?[]:['20261027','20261028'].map(date=>({
     stck_bsop_date:date,...Object.fromEntries(['stck_oprc','stck_clpr','stck_hgpr','stck_lwpr'].map(k=>[k,scenario==='canonical'&&date==='20261027'?'100':'120'])),acml_vol:'10',
-    ...(scenario==='close-revised'&&date==='20261027'?{stck_oprc:'100',stck_hgpr:'130',stck_lwpr:'80',stck_clpr:'110'}:{}),
+    ...(scenario==='close-revised'&&date==='20261027'?{stck_oprc:'100',stck_hgpr:'140',stck_lwpr:'70',stck_clpr:'110'}:{}),
   }))});
 };
 async function run(){
@@ -103,10 +103,12 @@ async function run(){
       assert.equal(tables.balta_ai_portfolio_bars.find(r=>r.trade_date==='2026-10-27')!.open,100);
     }
     if(scenario==='close-revised'){
-      assert.equal(tables.balta_ai_run_log[0].details.sourceCloseRevisions,1);
+      assert.equal(tables.balta_ai_run_log[0].details.sourcePriceRevisions,1);
       assert.equal(tables.balta_ai_run_log[0].details.priceRevisionConflicts,0);
       assert.equal(outcomes.find(r=>r.horizon===0)!.exit_close,100);
       assert.equal(tables.balta_ai_portfolio_bars.find(r=>r.trade_date==='2026-10-27')!.close,100);
+      assert.equal(tables.balta_ai_portfolio_bars.find(r=>r.trade_date==='2026-10-27')!.high,130);
+      assert.equal(tables.balta_ai_portfolio_bars.find(r=>r.trade_date==='2026-10-27')!.low,80);
     }
     const before=JSON.stringify(outcomes),priceBefore=JSON.stringify(tables.balta_ai_portfolio_bars);
     await main(args,new Date('2026-10-29T02:00:00Z'));
