@@ -110,3 +110,5 @@ jobs:
         run: node --import tsx scripts/balta-ai-preflight.ts
       - name: Read-only KIS liquidity field contract
         run: node --import tsx scripts/balta-ai-liquidity-preflight.ts
+      - name: Read-only incident price comparison
+        run: node --import tsx scripts/balta-ai-price-audit.ts
