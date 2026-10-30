@@ -10,12 +10,13 @@ delete process.env.GITHUB_EVENT_NAME;delete process.env.KIS_TOKEN_READ_ONLY;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row=Record<string,any>;
 const tables:Record<string,Row[]>={};
-const signalDate=['canonical','revised'].includes(scenario)?'2026-10-27':'2026-10-28';
+const signalDate=['canonical','close-revised','revised'].includes(scenario)?'2026-10-27':'2026-10-28';
 tables.balta_ai_signals=['FLOW_V1','FLOW_ACCEL_V1'].map(strategy=>({
   trade_date:signalDate,strategy,source_date:'2026-10-26',source_observed_at:'2026-10-26T10:00:00Z',
   generated_at:signalDate+'T08:02:00+09:00',picks:[{code:'005930',name:'fixture',market:'kospi',score:10}],
 }));
 if(['canonical','revised'].includes(scenario))tables.balta_ai_portfolio_bars=[{trade_date:'2026-10-27',stock_code:'005930',open:100,high:100,low:100,close:100}];
+if(scenario==='close-revised')tables.balta_ai_portfolio_bars=[{trade_date:'2026-10-27',stock_code:'005930',open:100,high:130,low:80,close:100}];
 const frozenSignals=JSON.stringify(tables.balta_ai_signals),posts:string[]=[];
 const response=(v:unknown)=>new Response(JSON.stringify(v),{status:200});
 globalThis.fetch=async(input,options={})=>{
@@ -62,6 +63,7 @@ globalThis.fetch=async(input,options={})=>{
   assert.ok(url.pathname.endsWith('/inquire-daily-itemchartprice'),'unexpected market endpoint');
   return response({rt_cd:'0',output2:scenario==='missing-price'?[]:['20261027','20261028'].map(date=>({
     stck_bsop_date:date,...Object.fromEntries(['stck_oprc','stck_clpr','stck_hgpr','stck_lwpr'].map(k=>[k,scenario==='canonical'&&date==='20261027'?'100':'120'])),acml_vol:'10',
+    ...(scenario==='close-revised'&&date==='20261027'?{stck_oprc:'100',stck_hgpr:'130',stck_lwpr:'80',stck_clpr:'110'}:{}),
   }))});
 };
 async function run(){
@@ -95,10 +97,16 @@ async function run(){
     assert.equal(tables.balta_ai_run_log[0].result,'complete');
     assert.equal(tables.balta_ai_run_log[0].details.priceStatus,'vendor_daily_unofficial');
     assert.ok(outcomes.length>0);
-    if(scenario==='canonical'){
+    if(['canonical','close-revised'].includes(scenario)){
       assert.ok(outcomes.every(r=>r.entry_open===100));
       assert.equal(outcomes.find(r=>r.horizon===1)!.return_pct,20);
       assert.equal(tables.balta_ai_portfolio_bars.find(r=>r.trade_date==='2026-10-27')!.open,100);
+    }
+    if(scenario==='close-revised'){
+      assert.equal(tables.balta_ai_run_log[0].details.sourceCloseRevisions,1);
+      assert.equal(tables.balta_ai_run_log[0].details.priceRevisionConflicts,0);
+      assert.equal(outcomes.find(r=>r.horizon===0)!.exit_close,100);
+      assert.equal(tables.balta_ai_portfolio_bars.find(r=>r.trade_date==='2026-10-27')!.close,100);
     }
     const before=JSON.stringify(outcomes),priceBefore=JSON.stringify(tables.balta_ai_portfolio_bars);
     await main(args,new Date('2026-10-29T02:00:00Z'));
