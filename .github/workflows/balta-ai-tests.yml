@@ -7,9 +7,11 @@ on:
       - "lib/balta-ai-price-consistency.ts"
       - "lib/kis-terminal.ts"
       - "scripts/balta-ai-resolve-run.ts"
+      - "scripts/balta-ai-price-audit.ts"
       - "tests/balta-ai-run-context.test.ts"
       - "tests/balta-ai-immutable-store.test.ts"
       - "tests/balta-ai-worker.test.ts"
+      - "tests/balta-ai-price-consistency.test.ts"
       - "tests/fixtures/balta-ai-worker-runner.ts"
       - "lib/balta-ai-model.ts"
       - "lib/balta-ai-persistence-audit.ts"
@@ -71,6 +73,11 @@ on:
       - "supabase/migrations/20261015_balta_ai_supabase_cron_jobs.sql"
       - ".github/workflows/balta-ai-tests.yml"
   workflow_dispatch:
+    inputs:
+      audit_only:
+        description: "Only read source comparisons; uncheck to also plan dated recovery"
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
@@ -84,7 +91,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: node --import tsx --test tests/balta-ai-run-context.test.ts tests/balta-ai-immutable-store.test.ts tests/balta-ai-worker.test.ts
+      - run: node --import tsx --test tests/balta-ai-run-context.test.ts tests/balta-ai-immutable-store.test.ts tests/balta-ai-worker.test.ts tests/balta-ai-price-consistency.test.ts
       - run: node --import tsx --test tests/balta-ai-supabase-cron.test.ts tests/balta-ai-persistence-audit.test.ts tests/balta-ai-model.test.ts tests/balta-ai-evaluation.test.ts tests/balta-ai-reliability.test.ts tests/balta-ai-dashboard.test.ts tests/balta-ai-benchmark.test.ts tests/balta-ai-flow-strategy.test.ts tests/balta-ai-liquidity.test.ts tests/balta-ai-regime.test.ts tests/balta-ai-health.test.ts tests/balta-ai-exits.test.ts tests/balta-ai-stop-policy.test.ts tests/balta-ai-portfolio.test.ts tests/balta-ai-cash-strategy.test.ts tests/balta-ai-dashboard-api.test.ts
       - run: npm run typecheck
       - run: npm run build
@@ -110,3 +117,14 @@ jobs:
         run: node --import tsx scripts/balta-ai-preflight.ts
       - name: Read-only KIS liquidity field contract
         run: node --import tsx scripts/balta-ai-liquidity-preflight.ts
+      - name: Read-only incident price comparison
+        run: node --import tsx scripts/balta-ai-price-audit.ts
+      - name: Read-only dated recovery plans
+        if: inputs.audit_only != true
+        shell: bash
+        run: |
+          result=0
+          for date in 2026-10-26 2026-10-28 2026-10-29; do
+            if ! node --import tsx scripts/balta-ai-research.ts --phase=close --date="$date" --dry-run; then result=1; fi
+          done
+          exit "$result"
