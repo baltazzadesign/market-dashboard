@@ -18,7 +18,7 @@ import { Modal } from "./Modal";
 import { Metrics, FlowPanel, SignalPanel, SessionSummary } from "./Insights";
 import RecordsPanel, { downloadCsv, type RecordView } from "./RecordsPanel";
 import { chartNames as chartLabels, observedDomain, type ChartKind, type Domain } from "./chart-model";
-import SectorHeatmap from "./SectorHeatmap";
+import DailyCommandCenter from "./DailyCommandCenter";
 import MarketPulsePanel, { useMarketPulse } from "./MarketPulse";
 import InvestmentDisclaimer from "./InvestmentDisclaimer";
 import MarketMovers from "./MarketMovers";
@@ -310,20 +310,14 @@ export default function Workspace({ mode }: { mode:"overview" | "daily" }) {
       ["CSV 다운로드","상단 내보내기는 선택 날짜의 전체 지표를 저장합니다. 기록 탐색의 CSV는 현재 검색·강도 필터와 정렬을 반영합니다."]
     ].map(([title,text])=><div className="guide-item" key={title}><strong>{title}</strong><p>{text}</p></div>)}</div></Modal>
     <Modal open={modal==="command"} onClose={()=>setModal(null)} title={"Command Center · "+date} full>
-      <div className="command-center-shell">
-        <div className="command-center-toolbar">
-          <div className="command-center-title"><strong>KR Market Command Center</strong><span className="panel-subtitle">{last ? ((last.session==="KRX_AFTER_MARKET"?"애프터마켓":last.session==="REGULAR"?"정규장":"현재 세션")+" · "+last.time+" 기준") : "데이터 대기"}</span></div>
-          <div className="toolbar">{ranges()}<button className="button small" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing||!date}><Icon name="refresh" className={feed.refreshing?"spin":""} size={14}/>새로고침</button><button className="button small" onClick={()=>setModal("board")}><Icon name="expand" size={14}/>차트 보드</button></div>
-        </div>
-        <Metrics rows={rows} loading={feed.loading}/>
-        <div className="command-center-grid">
+      <DailyCommandCenter date={date} rows={rows} events={events} pulse={pulse} sectorStatus={sectorStatus}
+        loading={feed.loading} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}
+        onSignal={minute=>{setModal(null);focusMinute(minute);}} onRecords={()=>{setModal(null);showRecords();}}
+        controls={<div className="toolbar">{ranges()}<button className="button small" onClick={()=>void feed.refresh(true)} disabled={feed.refreshing||!date}><Icon name="refresh" className={feed.refreshing?"spin":""} size={14}/>새로고침</button><button className="button small" onClick={()=>setModal("board")}><Icon name="expand" size={14}/>차트 보드</button></div>}>
           <div className="command-center-charts">
             {(["flow","breadth","kospi","kosdaq"] as ChartKind[]).map(key=><section className="panel command-chart" key={key}><div className="panel-header"><h3 className="panel-title">{chartLabels[key]}</h3><button className="button icon small" aria-label={chartLabels[key]+" 크게 보기"} onClick={()=>openChart(key)}><Icon name="expand" size={14}/></button></div>{feed.loading?<div className="chart-loading">시장 기록을 불러오는 중</div>:!rows.length?<div className="empty-state compact">기록 없음</div>:<MarketChart {...chartProps} kind={key} compact syncGroup="balta-command" onExpand={()=>openChart(key)}/>}</section>)}
           </div>
-          <div className="command-center-heatmap"><SectorHeatmap dateOverride={date} compact/></div>
-          <aside className="command-center-insights" aria-label="Command Center 시장 요약"><MarketPulsePanel pulse={pulse} sectorStatus={sectorStatus} warning={feed.error || feed.warning || (status.tone === "warn" ? status.label : "")}/><FlowPanel row={last}/><SignalPanel events={events} onSelect={minute=>{setModal(null);focusMinute(minute);}} onAll={()=>{setModal(null);showRecords();}}/></aside>
-        </div>
-      </div>
+      </DailyCommandCenter>
     </Modal>
     <Modal open={modal==="board"} onClose={()=>setModal(null)} title={"차트 전체보기 · "+date} full>
       <div className="toolbar" style={{padding:"10px 16px"}}><MarketChartImageButton rows={rows} date={date} domain={domain} events={events} markers={boardMarkers} loading={feed.loading} warning={feed.error||feed.warning}/></div><div className="segmented" aria-label="차트 보드 종류"><button aria-pressed={!boardInvestors} className={!boardInvestors?"active":""} onClick={()=>{setBoardInvestors(false);setHoverMinute(null);}}>기본 차트</button><button aria-pressed={boardInvestors} className={boardInvestors?"active":""} onClick={()=>{setBoardInvestors(true);setHoverMinute(null);}}>세부 수급</button></div>
