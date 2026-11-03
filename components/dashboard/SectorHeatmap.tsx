@@ -1,6 +1,6 @@
 "use client";
 
-import {useCallback,useEffect,useMemo,useState} from 'react';
+import {Fragment,useCallback,useEffect,useMemo,useState} from 'react';
 import {isValidDate,kstParts} from '@/lib/balta-model';
 import {rankSectorStrength,type Sector,type SectorStrength} from '@/lib/market-research';
 
@@ -24,7 +24,7 @@ function scoreText(value:number){return `${value>0?'+':''}${value}`;}
 function marketName(value:'kospi'|'kosdaq'){return value==='kospi'?'KOSPI':'KOSDAQ';}
 function strengthLabel(value:number){if(value>=60)return '강한 주도';if(value>=25)return '강세';if(value<=-60)return '강한 약세';if(value<=-25)return '약세';return '중립';}
 
-export default function SectorHeatmap({dateOverride,compact=false}:{dateOverride?:string;compact?:boolean}={}){
+export default function SectorHeatmap({dateOverride,compact=false,distribution=false}:{dateOverride?:string;compact?:boolean;distribution?:boolean}={}){
  const [date,setDate]=useState('');
  const [filter,setFilter]=useState<MarketFilter>('all');
  const [sectors,setSectors]=useState<Sector[]>([]);
@@ -70,6 +70,8 @@ export default function SectorHeatmap({dateOverride,compact=false}:{dateOverride
  const negative=visible.filter(s=>s.strength<-10).length;
  const neutral=Math.max(0,visible.length-positive-negative);
 
+ const MapContainer=distribution?"details":Fragment;
+
  function changeDate(next:string){
   if(!isValidDate(next))return;
   const params=new URLSearchParams(window.location.search);params.set('date',next);
@@ -78,7 +80,7 @@ export default function SectorHeatmap({dateOverride,compact=false}:{dateOverride
 
  return <section className={'panel sector-heatmap-panel'+(compact?' compact':'')} style={compact?undefined:{maxWidth:1400,margin:'18px auto 30px',padding:18}} aria-labelledby="sector-heatmap-title">
   <div className="panel-header sector-heatmap-header" style={{display:'flex',gap:16,alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap'}}>
-   <div><h2 id="sector-heatmap-title" className="panel-title" style={{marginBottom:5}}>섹터 강도 · Heatmap</h2><p className="panel-subtitle" style={{margin:0}}>색 강도 = 상대 섹터 강도 · 타일 크기 = 거래대금 순위</p></div>
+   <div><h2 id="sector-heatmap-title" className="panel-title" style={{marginBottom:5}}>{distribution?"섹터 강도 분포":"섹터 강도 · Heatmap"}</h2><p className="panel-subtitle" style={{margin:0}}>{distribution?"한 칸 = 1개 섹터":"색 강도 = 상대 섹터 강도 · 타일 크기 = 거래대금 순위"}</p></div>
    <div className="toolbar" style={{gap:8,flexWrap:'wrap'}}>
     {!dateOverride&&<input aria-label="섹터 날짜" type="date" value={date} max={kstParts().date} onChange={e=>changeDate(e.target.value)}/>}
     {(['all','kospi','kosdaq'] as const).map(value=><button key={value} type="button" className={'button small'+(filter===value?' active':'')} aria-pressed={filter===value} onClick={()=>setFilter(value)}>{value==='all'?'전체':value.toUpperCase()}</button>)}
@@ -87,12 +89,17 @@ export default function SectorHeatmap({dateOverride,compact=false}:{dateOverride
   </div>
 
   {error?<div role="alert" style={{padding:'20px 0'}}>{error}</div>:loading?<div style={{padding:'28px 0'}}>섹터 데이터 조회 중…</div>:!visible.length?<div style={{padding:'28px 0'}}>해당 날짜의 섹터 저장 데이터가 없습니다.</div>:<>
+   {distribution && <div aria-hidden="true" style={{display:"grid",gridTemplateColumns:"repeat(23,minmax(0,1fr))",gap:3,marginTop:10}}>
+     {visible.map(sector=><i key={sector.market+sector.code} style={{height:9,borderRadius:1,background:sector.strength>10?"#cf686b":sector.strength< -10?"#5089bf":"#706e60"}}/>)}
+   </div>}
    <div className="sector-heatmap-stats" style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:10,margin:'16px 0'}}>
     <div style={{padding:12,border:'1px solid #2a313b',borderRadius:8,background:'#11161c'}}><small>강세 섹터</small><div style={{fontSize:22,fontWeight:800,marginTop:4,color:'#ff7474'}}>{positive}</div></div>
     <div style={{padding:12,border:'1px solid #2a313b',borderRadius:8,background:'#11161c'}}><small>중립 섹터</small><div style={{fontSize:22,fontWeight:800,marginTop:4}}>{neutral}</div></div>
     <div style={{padding:12,border:'1px solid #2a313b',borderRadius:8,background:'#11161c'}}><small>약세 섹터</small><div style={{fontSize:22,fontWeight:800,marginTop:4,color:'#6ea8ff'}}>{negative}</div></div>
    </div>
 
+   <MapContainer>
+   {distribution && <summary>섹터별 등락 보기</summary>}
    <div className="sector-heatmap-layout" style={{display:'grid',gridTemplateColumns:compact?'1fr':'minmax(0,2fr) minmax(260px,.8fr)',gap:14,alignItems:'start'}}>
     <div>
      <div className="sector-heatmap-map" style={{display:'grid',gridTemplateColumns:compact?'repeat(3,minmax(0,1fr))':'repeat(6,minmax(0,1fr))',gridAutoFlow:'dense',gap:8}}>
@@ -123,6 +130,7 @@ export default function SectorHeatmap({dateOverride,compact=false}:{dateOverride
      <div style={{padding:14,border:'1px solid #303844',borderRadius:9,background:'#11161c'}}><strong>약세 섹터 BOTTOM 5</strong>{laggards.map((s,i)=><div key={`${s.market}:${s.code}`} style={{display:'grid',gridTemplateColumns:'24px 1fr auto',gap:8,paddingTop:9,fontSize:13}}><span>{i+1}</span><span>{s.name}</span><b style={{color:'#6ea8ff'}}>{scoreText(s.strength)}</b></div>)}</div>
     </aside>
    </div>
+   </MapContainer>
    <div className="sector-heatmap-foot" style={{marginTop:12,fontSize:12,opacity:.65}}>저장 시각: {snapshotTime||'확인 불가'} · 섹터 {visible.length}개</div>
   </>}
  </section>;
