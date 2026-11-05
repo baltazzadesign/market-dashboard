@@ -14,7 +14,7 @@ type Feed = { time: string; items: Sector[] };
 export default function ResearchSectorMap({ date }: { date: string }) {
   const root = useRef<HTMLElement | null>(null);
   const [feed, setFeed] = useState<Feed | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState('');
-  const [refresh, setRefresh] = useState(0), [market, setMarket] = useState('all'), [scope, setScope] = useState('industry');
+  const [refresh, setRefresh] = useState(0), [market, setMarket] = useState('all'), [scope, setScope] = useState('all');
   const [search, setSearch] = useState(''), [direction, setDirection] = useState('all'), [view, setView] = useState('map'), [selectedId, setSelectedId] = useState('');
   useEffect(() => {
     const c = new AbortController();
@@ -44,12 +44,12 @@ export default function ResearchSectorMap({ date }: { date: string }) {
   const selected = items.find(s => `${s.code}:${s.name}` === selectedId) ?? items[0];
   const select = (s: MapSector) => setSelectedId(`${s.code}:${s.name}`);
   const maxAbs = Math.max(1, ...filtered.map(s => Math.abs(s.change ?? 0)));
-  const visible = view === 'map' ? items.slice(0, 36) : items;
+
   const exportCaption = `${scope === 'industry' ? '업종 중심' : '전체 지수'} · ${market === 'all' ? '양 시장' : market.toUpperCase() + ' 수집 그룹'} · ${{all:'전체',up:'상승',down:'하락',flat:'보합'}[direction]} · ${view === 'map' ? '지도' : '목록'}${search.trim() ? ' · 검색: ' + search.trim() : ''}`;
   return <section ref={root} className={styles.atlas} aria-label="섹터 강도 지도">
     <header className={styles.header}><div><span className={styles.eyebrow}>SECTOR ATLAS</span><h2>시장의 온도를 한눈에</h2><p>어디가 강하고, 어디가 약한지. 업종의 흐름을 비교하세요.</p></div><div className={styles.stamp}><span>{date} · 저장 기록</span><strong>{feed?.time || '기준 시각 확인 중'}</strong><div className={styles.actions} data-sector-export-ignore><button className={styles.refresh} onClick={() => setRefresh(n => n + 1)} disabled={loading}>{loading ? '조회 중…' : '↻ 새로고침'}</button><SectorMapImageButton root={root} date={date} caption={exportCaption} view={view} disabled={loading || !items.length}/></div></div></header>
     <div className={styles.controls} data-sector-export-ignore>
-      <div className={styles.segment} role="group" aria-label="지도 범위">{[['industry','업종 중심'],['all','전체 지수']].map(([key,label]) => <button key={key} aria-pressed={scope === key} onClick={() => setScope(key)}>{label}</button>)}</div>
+      <div className={styles.segment} role="group" aria-label="지도 범위">{[['all','전체 지수'],['industry','업종 중심']].map(([key,label]) => <button key={key} aria-pressed={scope === key} onClick={() => setScope(key)}>{label}</button>)}</div>
       <select aria-label="업종 시장" value={market} onChange={e => setMarket(e.target.value)}><option value="all">양 시장</option><option value="kospi">KOSPI 수집 그룹</option><option value="kosdaq">KOSDAQ 수집 그룹</option></select>
       <label className={styles.search}><span aria-hidden="true">⌕</span><input aria-label="업종 검색" placeholder="업종명으로 찾기" value={search} onChange={e => setSearch(e.target.value)}/>{search && <button aria-label="검색 지우기" onClick={() => setSearch('')}>×</button>}</label>
     </div>
@@ -62,9 +62,9 @@ export default function ResearchSectorMap({ date }: { date: string }) {
       </div>
       <div className={styles.layout}>
         <div className={styles.mapPanel}><div className={styles.mapToolbar}><div className={styles.segment} role="group" aria-label="등락 필터">{[['all','전체'],['up','상승'],['down','하락'],['flat','보합']].map(([key,label]) => <button key={key} aria-pressed={direction === key} onClick={() => setDirection(key)}>{label}</button>)}</div><div className={styles.viewSwitch} role="group" aria-label="지도 보기 방식"><button aria-pressed={view === 'map'} onClick={() => setView('map')}>지도</button><button aria-pressed={view === 'list'} onClick={() => setView('list')}>목록</button></div></div>
-          <div className={styles.legend}><span>전일 대비 등락률</span><div><span>−5%</span>{[-5,-3,-1,0,1,3,5].map(n => <i key={n} style={{background:sectorColor(n)}}/>)}<span>+5%</span></div></div>
-          {items.length === 0 ? <div className={styles.empty}>해당 조건의 지수가 없습니다.<button onClick={() => {setSearch('');setDirection('all');setMarket('all');setScope('all');}}>전체 지수 보기</button></div> : view === 'map' ? <div className={styles.mosaic}>{visible.map((s, i) => <button key={s.id} className={`${styles.tile} ${i < 4 && items.length > 6 ? styles.featured : ''}`} style={{'--tile':sectorColor(s.change)} as CSSProperties} aria-pressed={selected?.id === s.id} onClick={() => select(s)} title={`${s.name} · ${sourceName(s)} · ${pct(s.change)}`}><small>{sourceName(s)}</small><strong>{s.name}</strong><b>{pct(s.change)}</b><span className={styles.tileMark} aria-hidden="true">{s.change === null || s.change === 0 ? '—' : s.change > 0 ? '↗' : '↘'}</span></button>)}</div> : <div className={styles.list}>{visible.map(s => <button key={s.id} aria-pressed={selected?.id === s.id} onClick={() => select(s)}><span><strong>{s.name}</strong><small>{sourceName(s)}</small></span><span className={styles.barTrack}><i style={{width:`${Math.abs(s.change ?? 0)/maxAbs*50}%`,left:s.change !== null && s.change < 0 ? `${50-Math.abs(s.change)/maxAbs*50}%`:'50%',background:s.change !== null && s.change < 0?'#639eea':'#ed697b'}}/></span><b className={tone(s.change)}>{pct(s.change)}</b></button>)}</div>}
-          <div className={styles.mapFoot}><span>{view === 'map' ? '큰 셀: 등락폭 상위 4개 · 시가총액 비중 아님' : '막대: 0을 중심으로 전일 대비 등락률 비교'}</span>{items.length > 36 && view === 'map' && <button onClick={() => setView('list')}>전체 {items.length}개 목록 →</button>}</div>
+          <div className={styles.legend}><span>전일 대비 등락률 · {items.length}개 표시 / 수집 {all.length}개</span><div><span>−5%</span>{[-5,-3,-1,0,1,3,5].map(n => <i key={n} style={{background:sectorColor(n)}}/>)}<span>+5%</span></div></div>
+          {items.length === 0 ? <div className={styles.empty}>해당 조건의 지수가 없습니다.<button onClick={() => {setSearch('');setDirection('all');setMarket('all');setScope('all');}}>전체 지수 보기</button></div> : view === 'map' ? <div className={styles.mosaic}>{items.map((s, i) => <button key={s.id} className={`${styles.tile} ${i < 4 && items.length > 6 ? styles.featured : ''}`} style={{'--tile':sectorColor(s.change)} as CSSProperties} aria-pressed={selected?.id === s.id} onClick={() => select(s)} title={`${s.name} · ${sourceName(s)} · ${pct(s.change)}`}><small>{sourceName(s)}</small><strong>{s.name}</strong><b>{pct(s.change)}</b><span className={styles.tileMark} aria-hidden="true">{s.change === null || s.change === 0 ? '—' : s.change > 0 ? '↗' : '↘'}</span></button>)}</div> : <div className={styles.list}>{items.map(s => <button key={s.id} aria-pressed={selected?.id === s.id} onClick={() => select(s)}><span><strong>{s.name}</strong><small>{sourceName(s)}</small></span><span className={styles.barTrack}><i style={{width:`${Math.abs(s.change ?? 0)/maxAbs*50}%`,left:s.change !== null && s.change < 0 ? `${50-Math.abs(s.change)/maxAbs*50}%`:'50%',background:s.change !== null && s.change < 0?'#639eea':'#ed697b'}}/></span><b className={tone(s.change)}>{pct(s.change)}</b></button>)}</div>}
+          <div className={styles.mapFoot}><span>{view === 'map' ? '큰 셀: 등락폭 상위 4개 · 시가총액 비중 아님' : '막대: 0을 중심으로 전일 대비 등락률 비교'}</span></div>
         </div>
         <aside className={styles.sidebar}>
           <section className={styles.detail} aria-label="선택한 업종 상세" aria-live="polite"><span className={styles.eyebrow}>SECTOR FOCUS</span>{selected ? <><small>{sourceName(selected)} · {selected.code}</small><h3>{selected.name}</h3><strong className={`${styles.detailValue} ${tone(selected.change)}`}>{pct(selected.change)}</strong><p>전일 대비 등락률</p><dl><div><dt>지수</dt><dd>{formatNumber(selected.price,2)}</dd></div><div><dt>표시 범위 내 등락률 순위</dt><dd>{selected.change === null ? '—' : `${ranked.findIndex(s => s.id === selected.id)+1} / ${ranked.length}`}</dd></div></dl></> : <p>지도에서 업종을 선택하세요.</p>}</section>
@@ -72,6 +72,6 @@ export default function ResearchSectorMap({ date }: { date: string }) {
         </aside>
       </div>
     </>}
-    <footer className={styles.footnote}>색상은 전일 대비 등락률이며 ±5% 이상은 가장 진하게 표시합니다. 지도는 등락폭 순 최대 36개, 목록은 전체를 표시합니다. 업종 중심은 일반 업종명 기준이며 테마·파생·규모별 지수는 전체 보기에서 확인할 수 있습니다.<br/>시장 선택은 제공 데이터의 수집 그룹 기준입니다. 같은 코드·이름·수치의 중복은 하나로 묶고 ‘공통 지수’로 표시합니다. 미확인 값은 —로 표시합니다.</footer>
+    <footer className={styles.footnote}>색상은 전일 대비 등락률이며 ±5% 이상은 가장 진하게 표시합니다. 지도와 목록 모두 현재 조건에 맞는 수집 지수를 개수 제한 없이 표시합니다. 업종 중심은 일반 업종명 기준이며 테마·파생·규모별 지수는 전체 보기에서 확인할 수 있습니다.<br/>시장 선택은 제공 데이터의 수집 그룹 기준입니다. 같은 코드·이름·수치의 중복은 하나로 묶고 ‘공통 지수’로 표시합니다. 미확인 값은 —로 표시합니다.</footer>
   </section>;
 }
