@@ -1,5 +1,6 @@
 "use client";
-import {calendarPulse,calendarTone,calendarBackground} from "@/lib/calendar-presentation";
+import {calendarPulse,calendarTone,calendarBackground,type CalendarCloses,type CalendarSelection} from "@/lib/calendar-presentation";
+import CalendarCloseComparison, { type DateSlot } from "./CalendarCloseComparison";
 import Link from "next/link";
 import { marketClosedReason, monthWeekdaySlots } from "@/lib/market-calendar";
 import dynamic from "next/dynamic";
@@ -29,23 +30,54 @@ function DayDetail({date,onClose}:{date:string;onClose:()=>void}){
     <p className="history-footnote">장중 수급은 KOSPI·KOSDAQ 합계입니다. 월간 화면의 시장별 수급과 범위가 다릅니다.</p>
   </div></Modal>;
 }
-export default function HistoryWorkspace(){
+export default function HistoryWorkspace({ initialDate, initialTab }: { initialDate: string; initialTab: Tab }){
   const [closedDates,setClosedDates]=useState<Record<string,string>>({});
-  const [today,setToday]=useState(""),[month,setMonth]=useState(""),[market,setMarket]=useState<Market>("kospi"),[tab,setTab]=useState<Tab>("calendar");
-  const [lookback,setLookback]=useState(3),[days,setDays]=useState<DailyMarket[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(""),[reload,setReload]=useState(0),[asOf,setAsOf]=useState("");
-  const [detail,setDetail]=useState<string|null>(null),[start,setStart]=useState(""),[end,setEnd]=useState("");
-  useEffect(()=>{const d=kstParts().date;setToday(d);setMonth(d.slice(0,7));const key=new URLSearchParams(window.location.search).get("tab");if(key&&key in tabNames)setTab(key as Tab);},[]);
-  useEffect(()=>{if(!month)return;setStart(shiftMonth(month,-lookback+1)+"-01");setEnd(monthEnd(month)<today?monthEnd(month):today);},[month,lookback,today]);
+  const [today,setToday]=useState(initialDate),[month,setMonth]=useState(initialDate.slice(0,7)),[market,setMarket]=useState<Market>("kospi"),[tab,setTab]=useState<Tab>(initialTab);
+  const [lookback,setLookback]=useState(3),[days,setDays]=useState<DailyMarket[]>([]),[reload,setReload]=useState(0),[asOf,setAsOf]=useState("");
+  const [detail,setDetail]=useState<string|null>(null);
+  const [settled, setSettled] = useState({ key: '', error: '' });
+  const rangeKey = [month, lookback, today].join('/');
+  const [range, setRange] = useState({ key: '', start: '', end: '' });
+  const start = range.key === rangeKey ? range.start : shiftMonth(month,1-lookback)+'-01';
+  const end = range.key === rangeKey ? range.end : (monthEnd(month)<today ? monthEnd(month) : today);
+  const setStart = (date: string) => setRange({ key: rangeKey, start: date, end });
+  const setEnd = (date: string) => setRange({ key: rangeKey, start, end: date });
+  const [closes, setCloses] = useState<CalendarCloses>({});
+  const [loadedCalendarMonth, setLoadedCalendarMonth] = useState('');
+  const [missingMarkets, setMissingMarkets] = useState<Market[]>([]);
+  const [selection, setSelection] = useState<CalendarSelection>({ A: '', B: '' });
+  const [picking, setPicking] = useState<DateSlot | null>(null);
+  const includeCloses = tab === "calendar";
+  const query = "/api/market/history?month="+month+"&months="+Math.max(3,lookback)+(includeCloses?"&closes=1":"");
+  const requestKey = query + '/' + reload;
+  const loading = settled.key !== requestKey;
+  const error = loading ? '' : settled.error;
+  function selectDay(date: string) {
+    if (!picking) { setDetail(date); return; }
+    setSelection(current => ({ ...current, [picking]: date }));
+    setPicking(picking === 'A' && !selection.B ? 'B' : picking === 'B' && !selection.A ? 'A' : null);
+  }
   useEffect(()=>{
-    if(!month)return;const controller=new AbortController();let active=true;
-    setLoading(true);setError("");setDays([]);setClosedDates({});
-    fetch("/api/market/history?month="+month+"&months="+Math.max(3,lookback),{cache:"no-store",signal:controller.signal}).then(async res=>{
+    const controller=new AbortController();let active=true;
+    fetch(query,{cache:"no-store",signal:controller.signal}).then(async res=>{
       if(res.status===401){window.location.assign("/login");return;}
       const body=record(await res.json());if(!res.ok||body.ok!==true||!Array.isArray(body.days))throw new Error(String(body.error??"시장 기록을 조회하지 못했습니다."));
       if(active){setDays(body.days as DailyMarket[]);setClosedDates(record(body.closedDates) as Record<string,string>);setAsOf(String(body.asOf??""));}
-    }).catch(e=>{if(active)setError(e instanceof Error?e.message:"조회 오류");}).finally(()=>{if(active)setLoading(false);});
+      if (active && includeCloses) {
+        setLoadedCalendarMonth(month);
+        const calendar = record(body.calendar);
+        const incoming = record(calendar.closes) as CalendarCloses;
+        setCloses(previous => {
+          const next = { ...previous };
+          for (const [date, quotes] of Object.entries(incoming)) next[date] = { ...previous[date], ...quotes };
+          return next;
+        });
+        setMissingMarkets(Array.isArray(calendar.missing) ? calendar.missing as Market[] : []);
+      }
+      if (active) setSettled({ key: requestKey, error: '' });
+    }).catch(e=>{if(active)setSettled({ key: requestKey, error: e instanceof Error ? e.message : "조회 오류" });});
     return()=>{active=false;controller.abort();};
-  },[month,lookback,reload]);
+  },[month,query,requestKey,includeCloses]);
   useEffect(()=>{if(!month||month!==today.slice(0,7))return;const id=setInterval(()=>{if(!document.hidden){const d=kstParts().date;setToday(d);setReload(v=>v+1);}},60000);return()=>clearInterval(id);},[month,today]);
   const report=useMemo(()=>monthlyReport(days,month,market),[days,month,market]);
   const positions=useMemo(()=>estimatePositions(days,market,start,end),[days,market,start,end]);
@@ -61,16 +93,57 @@ export default function HistoryWorkspace(){
       <div className="page-heading"><div><h1>{tabNames[tab]}</h1><p>{tab==="calendar"?"하루의 흐름을 쌓아, 한 달의 방향을 읽습니다.":tab==="review"?"수익률·시장폭·수급으로 살펴보는 시장의 체력.":"투자주체의 순매수 흐름을 지수 가격에 연결합니다."}</p></div><div className="toolbar"><button className="button icon" disabled={!month} aria-label="이전 달" onClick={()=>changeMonth(shiftMonth(month,-1))}><Icon name="left"/></button><label className="date-control"><Icon name="calendar"/><span className="sr-only">조회 월</span><input type="month" value={month} min="2000-01" max={today.slice(0,7)} onChange={e=>changeMonth(e.target.value)}/></label><button className="button icon" aria-label="다음 달" disabled={!month||month>=today.slice(0,7)} onClick={()=>changeMonth(shiftMonth(month,1))}><Icon name="right"/></button><button className="button icon" disabled={loading} aria-label="시장 기록 새로고침" onClick={()=>setReload(v=>v+1)}><Icon name="refresh" className={loading?"spin":""}/></button></div></div>
       <div className="history-toolbar"><div className="segmented">{(Object.keys(tabNames) as Tab[]).map(key=><button key={key} className={tab===key?"active":""} aria-pressed={tab===key} onClick={()=>setTab(key)}>{tabNames[key]}</button>)}</div>{tab!=="calendar"&&<div className="segmented" aria-label="분석 시장">{(["kospi","kosdaq"] as Market[]).map(key=><button key={key} onClick={()=>setMarket(key)} aria-pressed={market===key} className={market===key?"active":""}>{key.toUpperCase()}</button>)}</div>}</div>
       {month&&(month.slice(0,4)!=="2026"||(tab==="positions"&&start&&start.slice(0,4)!=="2026"))&&<div className="notice" role="status"><Icon name="calendar"/><span>2026년 외의 기간은 주말·고정 휴일만 기본 반영됩니다. 대체·음력·임시 휴장일은 해당 연도 목록을 추가로 설정해야 합니다.</span></div>}
-      {error?<div className="notice" role="alert"><Icon name="warning"/><span>{error}</span><button className="button small" onClick={()=>setReload(v=>v+1)}>다시 시도</button></div>:loading?<div className="chart-loading" role="status"><Icon name="refresh" className="spin"/>시장 기록을 불러오는 중</div>:<>
-      {!days.length&&<div className="notice" role="status"><Icon name="calendar"/><span>조회 기간의 저장 기록이 없습니다. 데이터 수집 후 캘린더와 분석이 채워집니다.</span></div>}
-      {tab==="calendar"&&<section className="panel"><div className="panel-header"><div><h2 className="panel-title">{month.replace("-","년 ")}월</h2><p className="panel-subtitle">{report.days.length}일 기록 · 날짜를 눌러 장중 그래프 확인</p></div><div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><span className="tag">수급·시장폭: 양 시장 합계</span><MarketCalendarImageButton month={month} today={today} days={report.days} closedDates={closedDates} asOf={asOf}/></div></div><div className="calendar-scroll"><div className="market-calendar"><div className="calendar-week">{['월','화','수','목','금'].map(d=><div key={d}>{d}</div>)}</div><div className="calendar-days">{dates.map((date,i)=>{
-        if(!date)return <div className="calendar-blank" key={'blank'+i}/>;
-        const closure=closedDates[date]??marketClosedReason(date),day=closure?undefined:byDate.get(date),future=date>today,pulse=calendarPulse(day?.pulse??null);
-        return <button key={date} style={day?{background:calendarBackground[calendarTone(day.kospi.changePct,day.kosdaq.changePct)]}:undefined} className={"calendar-day"+(day?" has-data":"")+(date===today?" is-today":"")+(closure?" is-closed":"")} disabled={future||Boolean(closure)} onClick={()=>setDetail(date)} aria-label={date+(closure?" "+closure+" 휴장":day?" 시장 기록 상세":" 기록 조회")}>
-          <span className="calendar-date"><strong>{Number(date.slice(8))}</strong><small>{closure?"휴장":day?(day.finalized?"마감 기록":day.time+" 미완료"):future?"예정":"기록 없음"}</small></span>
-          {day?<><span className="calendar-index"><span>KOSPI</span><b className={valueClass(day.kospi.changePct)}>{pct(day.kospi.changePct)}</b></span><span className="calendar-index"><span>KOSDAQ</span><b className={valueClass(day.kosdaq.changePct)}>{pct(day.kosdaq.changePct)}</b></span><span className="calendar-breadth"><span>상승 {n(day.up)} / 하락 {n(day.down)}</span><span>시장폭 <b className={valueClass(day.breadth)}>{n(day.breadth,0,true)}</b></span></span><span className="calendar-flows">{investors.map(key=><span key={key}><i style={{color:colors[key]}}>{investorNames[key]}</i><b>{money(day.flows[key])}</b></span>)}</span><span className="calendar-turnover">거래대금 <b>{money(day.turnover)}</b></span><span className="calendar-pulse"><span>Pulse <b>{n(pulse,0,true)}</b></span><span className="calendar-pulse-scale"><span className="pulse-track" aria-hidden="true"><i style={{position:"absolute",left:(50+Math.min(0,pulse??0)/2)+"%",width:Math.abs(pulse??0)/2+"%",background:(pulse??0)>=0?"#ff545f":"#5294ff"}}/></span><span className="calendar-pulse-ticks"><span>−100</span><span>0</span><span>+100</span></span></span></span></>:<span className="calendar-no-data">{closure??(future?"—":"미수집")}</span>}
-        </button>;
-      })}</div></div></div><p className="history-footnote">등락률은 전일 대비입니다. —는 결측값입니다. Pulse는 −100~+100이며 0을 중심으로 왼쪽은 하락, 오른쪽은 상승 우위입니다. 배경: 두 지수 상승은 빨강, 등락 혼조는 주황, 두 지수 하락은 파랑입니다. 보합·결측은 기본 배경입니다. 주말은 숨기고 공휴일·증시 휴장일은 거래 데이터와 모든 집계에서 제외합니다. 평일 휴장일은 요일 정렬을 위해 날짜와 휴장명만 표시합니다.</p></section>}
+      {error?<div className="notice" role="alert"><Icon name="warning"/><span>{error}</span><button className="button small" onClick={()=>setReload(v=>v+1)}>다시 시도</button></div>:(includeCloses ? !month || loadedCalendarMonth !== month : loading)?<div className="chart-loading" role="status"><Icon name="refresh" className="spin"/>시장 기록을 불러오는 중</div>:<>
+      {!days.length&&<div className="notice" role="status"><Icon name="calendar"/><span>조회 기간에 저장된 장중 기록이 없습니다.</span></div>}
+      {tab === "calendar" && <section className="panel">
+        <div className="panel-header">
+          <div><h2 className="panel-title">{month.replace("-","년 ")}월</h2>
+            <p className="panel-subtitle">{report.days.length}일 기록 · 날짜를 눌러 장중 그래프 확인</p></div>
+          <div className="toolbar"><span className="tag">수급·시장폭: 양 시장 합계</span>
+            <MarketCalendarImageButton month={month} today={today} days={report.days} closedDates={closedDates} asOf={asOf} closes={closes} selection={selection}/>
+          </div>
+        </div>
+        <CalendarCloseComparison selection={selection} closes={closes} picking={picking} onPick={setPicking}
+          onClear={() => { setSelection({ A: '', B: '' }); setPicking(null); }}/>
+        {missingMarkets.length > 0 && <p className="history-footnote" role="status">{missingMarkets.join(' · ').toUpperCase()} 종가 조회가 지연되고 있습니다. 잠시 후 새로고침해 주세요.</p>}
+        <div className="calendar-scroll"><div className="market-calendar">
+          <div className="calendar-week">{['월','화','수','목','금'].map(d => <div key={d}>{d}</div>)}</div>
+          <div className="calendar-days">{dates.map((date,i) => {
+            if (!date) return <div className="calendar-blank" key={'blank'+i}/>;
+            const closure = closedDates[date] ?? marketClosedReason(date);
+            const future = date > today;
+            const day = closure || future ? undefined : byDate.get(date);
+            const quotes = closure || future ? undefined : closes[date];
+            const hasQuote = Boolean(quotes?.kospi || quotes?.kosdaq);
+            const pulse = calendarPulse(day?.pulse ?? null);
+            const change = (market: Market) => quotes?.[market] ? quotes[market].changePct : day?.[market].changePct ?? null;
+            const marked = (['A','B'] as const).filter(slot => selection[slot] === date).join('·');
+            let status = closure ? '휴장' : future ? '예정' : '기록 없음';
+            if (day) status = day.finalized ? '마감 기록' : day.time + ' 기록';
+            if (hasQuote && !day) status = '종가';
+            return <button key={date} type="button"
+              style={day || hasQuote ? {background:calendarBackground[calendarTone(change('kospi'), change('kosdaq'))]} : undefined}
+              className={['calendar-day', (day || hasQuote) && 'has-data', date === today && 'is-today', closure && 'is-closed', marked && 'compare-marked'].filter(Boolean).join(' ')}
+              disabled={future || Boolean(closure) || (picking !== null && !hasQuote)} onClick={() => selectDay(date)}
+              aria-label={date + (closure ? ' '+closure+' 휴장' : picking ? ' 선택 '+picking : day ? ' 시장 기록 상세' : ' 기록 조회') + (marked ? ' · '+marked : '')}>
+              <span className="calendar-date"><strong>{Number(date.slice(8))}{marked && <span className="calendar-mark">{marked}</span>}</strong><small>{status}</small></span>
+              {(day || hasQuote) && (['kospi','kosdaq'] as const).map(market =>
+                <span className="calendar-index calendar-close-row" key={market}>
+                  <span>{market.toUpperCase()}</span><strong aria-label="종가">{n(quotes?.[market]?.price,2)}</strong>
+                  <b className={valueClass(change(market))}>{pct(change(market))}</b>
+                </span>
+              )}
+              {day ? <>
+                <span className="calendar-breadth"><span>상승 {n(day.up)} / 하락 {n(day.down)}</span><span>시장폭 <b className={valueClass(day.breadth)}>{n(day.breadth,0,true)}</b></span></span>
+                <span className="calendar-flows">{investors.map(key => <span key={key}><i style={{color:colors[key]}}>{investorNames[key]}</i><b>{money(day.flows[key])}</b></span>)}</span>
+                <span className="calendar-turnover">거래대금 <b>{money(day.turnover)}</b></span>
+                <span className="calendar-pulse"><span>Pulse <b>{n(pulse,0,true)}</b></span><span className="calendar-pulse-scale"><span className="pulse-track" aria-hidden="true"><i style={{position:"absolute",left:(50+Math.min(0,pulse??0)/2)+"%",width:Math.abs(pulse??0)/2+"%",background:(pulse??0)>=0?"#ff545f":"#5294ff"}}/></span><span className="calendar-pulse-ticks"><span>−100</span><span>0</span><span>+100</span></span></span></span>
+              </> : <span className="calendar-no-data">{closure ?? (future ? '—' : hasQuote ? '장중 기록 없음' : '미수집')}</span>}
+            </button>;
+          })}</div>
+        </div></div>
+        <p className="history-footnote">지수명 옆 숫자는 한국투자증권 일봉 종가입니다. 당일 종가는 16:00 KST부터 확인하며, 확인 전에는 종가를 —로 표시합니다. 등락률은 전일 대비이며 종가 확인 전에는 저장 시각 기준입니다. Pulse는 −100~+100이며, 배경은 두 지수 상승 시 빨강, 혼조 시 주황, 두 지수 하락 시 파랑입니다. 보합·결측은 기본 배경입니다.</p>
+      </section>}
       {tab==="review"&&<>
         <div className="history-review-top"><section className="panel score-panel"><span className="history-eyebrow">MONTHLY MARKET SCORE</span><div className="score-number num">{n(summary.score)}<small>/ 100</small></div><strong>{summary.score===null?"평가 대기":summary.score>=70?"강한 시장 흐름":summary.score>=55?"상승 우위":summary.score>=45?"중립 구간":summary.score>=30?"약한 시장 흐름":"하락 압력 우위"}</strong><p>{summary.asOf??"마감 기록 없음"} 기준 · {month===today.slice(0,7)?"월중 잠정 평가":"저장 기록 기준 평가"}</p><div className="score-components">{summary.components.map(c=><div key={c.label}><span>{c.label}<small>{c.weight}%</small></span><span className="score-track"><i style={{width:(c.value??0)+"%"}}/></span><b className="num">{n(c.value)}</b></div>)}</div><p>평가 항목 확보 {summary.coverage}% · 결측 항목 제외 후 가중치 재조정</p></section>
         <div className="history-stat-grid"><Stat label={market.toUpperCase()+" 월 수익률"} value={pct(summary.monthReturn)} tone={valueClass(summary.monthReturn)} detail={summary.baselineDate?summary.baselineDate+" 마감 기록 대비":"전월 마감 기록 필요"}/><Stat label="상승일 / 하락일" value={summary.upDays+" / "+summary.downDays} detail={"보합 "+summary.flatDays+"일 · 등락 확인 "+summary.returnDays+"일"}/><Stat label="평균 시장폭" value={n(summary.averageBreadth,0,true)+"개"} detail={"양 시장 합계 · 평균 정규화 폭 "+pct(summary.breadth)}/><Stat label="일간 변동성" value={summary.volatility===null?"—":n(summary.volatility,2)+"%"} detail="일간 등락률의 표본 표준편차"/><Stat label="전월 대비 시장 체력" value={report.strengthDelta===null?"—":n(report.strengthDelta,1,true)+"점"} tone={valueClass(report.strengthDelta)} detail={"공통 항목 "+report.comparisonCoverage+"% 기준"}/><Stat label="평균 Market Pulse" value={n(summary.pulse,1)} detail={"마감 기록 "+summary.days+"일 · 미완료 제외 "+summary.provisional+"일"}/></div></div>

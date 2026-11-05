@@ -1,3 +1,15 @@
+import type { Market } from './market-history-model';
+
+export type CalendarClose = { price: number; changePct: number | null };
+export type CalendarCloses = Record<string, Partial<Record<Market, CalendarClose>>>;
+export type CalendarSelection = { A: string; B: string };
+
+export function compareCloses(a?: CalendarClose, b?: CalendarClose) {
+  if (!a || !b || a.price <= 0 || b.price <= 0) return null;
+  const points = b.price - a.price;
+  return { points, percent: points / a.price * 100 };
+}
+
 // Keep the historical API/monthly scoring scale unchanged; convert at presentation.
 export function calendarPulse(value:number|null):number|null {
   return value===null||!Number.isFinite(value)?null:Math.round(Math.max(-100,Math.min(100,value*2-100)));

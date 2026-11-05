@@ -4,6 +4,7 @@ import { validMonth, shiftMonth, monthEnd } from "@/lib/market-history-model";
 import { marketError, MarketDataError } from "@/lib/balta-data";
 import { kstParts } from "@/lib/balta-model";
 import { hasDashboardAccess } from "@/lib/balta-access";
+import { readCalendarCloses } from "@/lib/calendar-closes";
 export const dynamic="force-dynamic";
 export async function GET(request:Request){
   if(!(await hasDashboardAccess(request)))return Response.json({ok:false,error:"로그인이 필요합니다."},{status:401});
@@ -13,7 +14,11 @@ export async function GET(request:Request){
     const months=Number(query.get("months")??3);
     if(!Number.isInteger(months)||months<3||months>24)throw new MarketDataError("조회 기간은 3~24개월입니다.",400);
     const start=shiftMonth(month,-months)+"-01",end=monthEnd(month);
-    const days=await readHistory(start,end,request.signal);
-    return Response.json({ok:true,month,start,end,days,closedDates:monthClosedDates(month,parseAdditionalHolidays(process.env.MARKET_HOLIDAYS)),holidayCalendarYear:2026,asOf:kstParts().clock},{headers:{"Cache-Control":"private, no-store"}});
+    const holidays = parseAdditionalHolidays(process.env.MARKET_HOLIDAYS);
+    const [days, calendar] = await Promise.all([
+      readHistory(start, end, request.signal),
+      query.get("closes") === "1" ? readCalendarCloses(month, holidays) : undefined,
+    ]);
+    return Response.json({ok:true,month,start,end,days,calendar,closedDates:monthClosedDates(month,holidays),holidayCalendarYear:2026,asOf:kstParts().clock},{headers:{"Cache-Control":"private, no-store"}});
   }catch(error){return marketError(error);}
 }

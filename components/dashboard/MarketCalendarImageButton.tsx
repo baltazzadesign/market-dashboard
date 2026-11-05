@@ -1,29 +1,36 @@
 'use client';
-import {calendarPulse,calendarTone,calendarBackground} from '@/lib/calendar-presentation';
+import {calendarPulse,calendarTone,calendarBackground,compareCloses,type CalendarCloses,type CalendarSelection} from '@/lib/calendar-presentation';
 import { marketClosedReason, monthWeekdaySlots } from '@/lib/market-calendar';
 import { formatNumber as n } from '@/lib/balta-model';
 import { investors, investorNames, type DailyMarket } from '@/lib/market-history-model';
 import ChartImageButton from './ChartImageButton';
 import { snapshotPlot } from './chart-image';
 
-type Props = { month: string; today: string; days: DailyMarket[]; closedDates: Record<string,string>; asOf: string };
+type Props = { month: string; today: string; days: DailyMarket[]; closedDates: Record<string,string>; asOf: string; closes: CalendarCloses; selection: CalendarSelection };
 const WIDTH=1336, STEP=270, CELL=256, ROW=318;
 const colors={foreign:'#5294ff',institution:'#ff545f',individual:'#f2ce53'};
 const tone=(v:number|null)=>v===null||v===0?'#d5deca':v>0?'#ff545f':'#5294ff';
 const pct=(v:number|null)=>v===null?'—':n(v,2,true)+'%';
 const money=(v:number|null)=>v===null?'—':Math.abs(v)>=10000?n(v/10000,2,true)+'조':n(v,0,true)+'억';
-function CalendarPlot({month,today,days,closedDates}:Props){
+function CalendarPlot({month,today,days,closedDates,closes,selection}:Props){
   const slots=monthWeekdaySlots(month),height=42+Math.ceil(slots.length/5)*ROW,byDate=new Map(days.map(d=>[d.date,d]));
   return <svg data-market-calendar-image-chart xmlns="http://www.w3.org/2000/svg" width={WIDTH} height={height} viewBox={`0 0 ${WIDTH} ${height}`}>
     {['월','화','수','목','금'].map((d,i)=><text key={d} x={i*STEP+CELL/2} y={25} textAnchor="middle" fontSize={17} fill="#a9b899">{d}</text>)}
     {slots.map((date,i)=>{
       const closure=date?(closedDates[date]??marketClosedReason(date)):null,day=!date||closure?undefined:byDate.get(date),future=Boolean(date&&date>today),pulse=calendarPulse(day?.pulse??null);
+      const quotes = date && !closure && !future ? closes[date] : undefined;
+      const change = (market: 'kospi'|'kosdaq') => quotes?.[market] ? quotes[market].changePct : day?.[market].changePct ?? null;
+      const marked = (['A','B'] as const).filter(slot => date && selection[slot] === date).join('·');
       return <g key={date||i} transform={`translate(${i%5*STEP},${42+Math.floor(i/5)*ROW})`}>
-        <rect x={1} y={1} width={CELL-2} height={ROW-14} rx={7} fill={day?calendarBackground[calendarTone(day.kospi.changePct,day.kosdaq.changePct)]:'#10170d'} stroke={date&&date===today?'#d8ba79':'#34432c'}/>
-        {date&&<><text x={15} y={30} fontSize={22} fontWeight={600} fill="#e1e6d5">{Number(date.slice(-2))}</text>
-          <text x={CELL-15} y={28} textAnchor="end" fontSize={12} fill={day&&!day.finalized?'#d8ba79':'#8e9f7c'}>{closure?'휴장':day?(day.finalized?'마감 기록':day.time+' 미완료'):future?'예정':'기록 없음'}</text>
+        <rect x={1} y={1} width={CELL-2} height={ROW-14} rx={7} fill={day||quotes?calendarBackground[calendarTone(change('kospi'),change('kosdaq'))]:'#10170d'} stroke={marked||date&&date===today?'#d8ba79':'#34432c'}/>
+        {date&&<><text x={15} y={30} fontSize={22} fontWeight={600} fill="#e1e6d5">{Number(date.slice(-2))} <tspan fontSize={13} fill="#d8ba79">{marked}</tspan></text>
+          <text x={CELL-15} y={28} textAnchor="end" fontSize={12} fill={day&&!day.finalized?'#d8ba79':'#8e9f7c'}>{closure?'휴장':day?(day.finalized?'마감 기록':day.time+' 기록'):future?'예정':quotes?'종가':'기록 없음'}</text>
+          {(day || quotes) && (['kospi','kosdaq'] as const).map((key,j) => <g key={key} transform={`translate(0,${65+j*27})`}>
+            <text x={15} fontSize={14} fill="#a7b797">{key.toUpperCase()}</text>
+            <text x={154} textAnchor="end" fontSize={17} fontWeight={600} fill="#e1e6d5">{n(quotes?.[key]?.price,2)}</text>
+            <text x={CELL-15} textAnchor="end" fontSize={15} fill={tone(change(key))}>{pct(change(key))}</text>
+          </g>)}
           {day?<>
-            {(['kospi','kosdaq'] as const).map((key,j)=><g key={key}><text x={15} y={65+j*27} fontSize={14} fill="#a7b797">{key.toUpperCase()}</text><text x={CELL-15} y={65+j*27} textAnchor="end" fontSize={19} fontWeight={600} fill={tone(day[key].changePct)}>{pct(day[key].changePct)}</text></g>)}
             <path d={`M15 106H${CELL-15}`} stroke="#34432c"/>
             <text x={15} y={128} fontSize={13} fill="#a7b797">상승 {n(day.up)} / 하락 {n(day.down)}</text>
             <text x={15} y={151} fontSize={13} fill="#a7b797">시장폭</text><text x={CELL-15} y={151} textAnchor="end" fontSize={15} fill={tone(day.breadth)}>{n(day.breadth,0,true)}</text>
@@ -34,7 +41,7 @@ function CalendarPlot({month,today,days,closedDates}:Props){
             {pulse!==null&&<rect x={110+(CELL-125)*(0.5+Math.min(0,pulse)/200)} y={273} width={(CELL-125)*Math.abs(pulse)/200} height={6} rx={3} fill={pulse>=0?'#ff545f':'#5294ff'}/>}
             <path d={`M${110+(CELL-125)/2} 270v12`} stroke="#c2b9a3"/>
             <text x={110} y={296} fontSize={10} fill="#a7b797">−100</text><text x={110+(CELL-125)/2} y={296} textAnchor="middle" fontSize={10} fill="#a7b797">0</text><text x={CELL-15} y={296} textAnchor="end" fontSize={10} fill="#a7b797">+100</text>
-          </>:<text x={15} y={85} fontSize={14} fill="#819271" textLength={closure&&closure.length>17?CELL-30:undefined} lengthAdjust="spacingAndGlyphs">{closure??(future?'—':'미수집')}</text>}
+          </>:<text x={15} y={quotes?128:85} fontSize={14} fill="#819271" textLength={closure&&closure.length>17?CELL-30:undefined} lengthAdjust="spacingAndGlyphs">{closure??(future?'—':quotes?'장중 기록 없음':'미수집')}</text>}
         </>}
       </g>;
     })}
@@ -45,8 +52,17 @@ export default function MarketCalendarImageButton(props:Props){
     const snapshot=structuredClone(props),label=snapshot.month.replace('-','년 ')+'월';
     return {plots:1,filename:`baltatool-market-calendar-${snapshot.month}.png`,content:<CalendarPlot {...snapshot}/>,report:root=>{
       const plot=snapshotPlot(root.querySelector('svg[data-market-calendar-image-chart]'));if(!plot)throw Error('시장 캘린더 이미지가 준비되지 않았습니다.');
+      const { A, B } = snapshot.selection;
       return {title:'시장 캘린더',subtitle:[`${label} · KOSPI / KOSDAQ · 수급·시장폭·거래대금: 양 시장 합계`,`${snapshot.days.length}일 기록 · 조회 기준 ${snapshot.asOf||'미기록'} KST`],
-        panels:[{title:label,subtitle:'월~금 · 금색 테두리는 오늘 · 미완료 기록은 해당 시각 기준',metrics:[],wide:true,plot}],
+        panels:[{title:label,subtitle:'KOSPI · KOSDAQ 일봉 종가와 전일 대비 등락률 · 당일 종가는 16시부터 확인',metrics:[],wide:true,plot}],
+        tables:A && B ? [{
+          title:'마감 지수 비교', subtitle:`기준일 A ${A} → 비교일 B ${B} · 한국투자증권 일봉 종가`,
+          columns:['지수','A 종가','B 종가','차이 (pt)','등락률'].map(label => ({label})),
+          rows:(['kospi','kosdaq'] as const).map(market => {
+            const a = snapshot.closes[A]?.[market], b = snapshot.closes[B]?.[market], delta = compareCloses(a,b);
+            return [market.toUpperCase(),n(a?.price,2),n(b?.price,2),n(delta?.points,2,true),pct(delta?.percent ?? null)];
+          }),
+        }] : undefined,
         notes:['등락률은 전일 대비입니다. 금액은 억원 / 조원 단위이며, —는 결측값입니다.','Pulse: −100~+100 · 0 중심, 왼쪽 하락 / 오른쪽 상승 우위.','배경: 두 지수 상승 빨강 · 혼조 주황 · 두 지수 하락 파랑 · 보합/결측 기본색.','주말은 숨기고 평일 휴장일은 날짜와 휴장명만 표시합니다. 미수집·예정은 거래량이나 수급 0을 뜻하지 않습니다.',...(snapshot.month.slice(0,4)!=='2026'?['2026년 외의 기간은 주말·고정 휴일만 기본 반영됩니다. 추가 휴장일 설정 여부를 확인하세요.']:[])]};
     }};
   }}/>;
