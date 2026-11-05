@@ -1,9 +1,10 @@
 'use client';
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { kstParts, formatNumber } from '@/lib/balta-model';
 import type { Sector } from '@/lib/market-research';
 import { mapSectors, sectorColor, sectorDistribution, type MapSector } from '@/lib/sector-map-model';
 import styles from './ResearchSectorMap.module.css';
+import SectorMapImageButton from './SectorMapImageButton';
 
 const pct = (n: number | null) => n === null ? '—' : `${formatNumber(n, 2, true)}%`;
 const sourceName = (s: MapSector) => s.sources.length > 1 ? '공통 지수' : s.market.toUpperCase();
@@ -11,6 +12,7 @@ const tone = (n: number | null) => n === null || n === 0 ? styles.flat : n > 0 ?
 type Feed = { time: string; items: Sector[] };
 
 export default function ResearchSectorMap({ date }: { date: string }) {
+  const root = useRef<HTMLElement | null>(null);
   const [feed, setFeed] = useState<Feed | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0), [market, setMarket] = useState('all'), [scope, setScope] = useState('industry');
   const [search, setSearch] = useState(''), [direction, setDirection] = useState('all'), [view, setView] = useState('map'), [selectedId, setSelectedId] = useState('');
@@ -43,9 +45,10 @@ export default function ResearchSectorMap({ date }: { date: string }) {
   const select = (s: MapSector) => setSelectedId(`${s.code}:${s.name}`);
   const maxAbs = Math.max(1, ...filtered.map(s => Math.abs(s.change ?? 0)));
   const visible = view === 'map' ? items.slice(0, 36) : items;
-  return <section className={styles.atlas} aria-label="섹터 강도 지도">
-    <header className={styles.header}><div><span className={styles.eyebrow}>SECTOR ATLAS</span><h2>시장의 온도를 한눈에</h2><p>어디가 강하고, 어디가 약한지. 업종의 흐름을 비교하세요.</p></div><div className={styles.stamp}><span>{date} · 저장 기록</span><strong>{feed?.time || '기준 시각 확인 중'}</strong><button onClick={() => setRefresh(n => n + 1)} disabled={loading}>{loading ? '조회 중…' : '↻ 새로고침'}</button></div></header>
-    <div className={styles.controls}>
+  const exportCaption = `${scope === 'industry' ? '업종 중심' : '전체 지수'} · ${market === 'all' ? '양 시장' : market.toUpperCase() + ' 수집 그룹'} · ${{all:'전체',up:'상승',down:'하락',flat:'보합'}[direction]} · ${view === 'map' ? '지도' : '목록'}${search.trim() ? ' · 검색: ' + search.trim() : ''}`;
+  return <section ref={root} className={styles.atlas} aria-label="섹터 강도 지도">
+    <header className={styles.header}><div><span className={styles.eyebrow}>SECTOR ATLAS</span><h2>시장의 온도를 한눈에</h2><p>어디가 강하고, 어디가 약한지. 업종의 흐름을 비교하세요.</p></div><div className={styles.stamp}><span>{date} · 저장 기록</span><strong>{feed?.time || '기준 시각 확인 중'}</strong><div className={styles.actions} data-sector-export-ignore><button className={styles.refresh} onClick={() => setRefresh(n => n + 1)} disabled={loading}>{loading ? '조회 중…' : '↻ 새로고침'}</button><SectorMapImageButton root={root} date={date} caption={exportCaption} view={view} disabled={loading || !items.length}/></div></div></header>
+    <div className={styles.controls} data-sector-export-ignore>
       <div className={styles.segment} role="group" aria-label="지도 범위">{[['industry','업종 중심'],['all','전체 지수']].map(([key,label]) => <button key={key} aria-pressed={scope === key} onClick={() => setScope(key)}>{label}</button>)}</div>
       <select aria-label="업종 시장" value={market} onChange={e => setMarket(e.target.value)}><option value="all">양 시장</option><option value="kospi">KOSPI 수집 그룹</option><option value="kosdaq">KOSDAQ 수집 그룹</option></select>
       <label className={styles.search}><span aria-hidden="true">⌕</span><input aria-label="업종 검색" placeholder="업종명으로 찾기" value={search} onChange={e => setSearch(e.target.value)}/>{search && <button aria-label="검색 지우기" onClick={() => setSearch('')}>×</button>}</label>
